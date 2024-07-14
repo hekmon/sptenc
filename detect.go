@@ -16,7 +16,7 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
-func getScenes(path string, totalDuration time.Duration, threshold int, cuvid bool, gpusList []int) (scenes []Scene, err error) {
+func getScenes(path string, totalDuration time.Duration, threshold int, cuvid bool, gpusList []int) (scenes []*Scene, err error) {
 	var args []string
 	// Input
 	if cuvid {
@@ -70,7 +70,7 @@ func getScenes(path string, totalDuration time.Duration, threshold int, cuvid bo
 	return
 }
 
-func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duration) (scenes []Scene) {
+func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duration) (scenes []*Scene) {
 	output := bufio.NewReader(ffmpegOutput)
 	var (
 		err         error
@@ -78,7 +78,6 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 		currentLine string
 		stats       ffmpegProgressStats
 		bar         *liveprogress.Bar
-		scene       Scene
 	)
 	bypass := liveprogress.Bypass()
 	// Prepare progress bar
@@ -117,10 +116,11 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 		case '\n':
 			currentLine = lineBuffer.String()
 			if strings.Contains(currentLine, "[scdet") {
+				var scene Scene
 				if scene, err = parseScdet(currentLine); err != nil {
 					fmt.Fprintf(bypass, "error while parsing scdet informations: %s\n", err)
 				} else {
-					scenes = append(scenes, scene)
+					scenes = append(scenes, &scene)
 					if *debug {
 						fmt.Fprintf(bypass, "Scene detected at %v with score %s\n",
 							scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64))
@@ -171,6 +171,13 @@ func parseScdet(line string) (scene Scene, err error) {
 }
 
 type Scene struct {
-	Start time.Duration
-	Score float64
+	Start        time.Duration
+	Score        float64
+	OriginalPath string
+	Quantization map[string]SceneQuantized
+}
+
+type SceneQuantized struct {
+	VMAF string
+	Path string
 }

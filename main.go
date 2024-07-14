@@ -104,15 +104,22 @@ func main() {
 			return
 		}
 	}()
+	bypass := liveprogress.Bypass()
 	// Probe file
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to probe input file: %s\n", err)
+		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
 		exitCode = 2
 		return
 	}
 	// Detect scenes
-	getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpusList)
+	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpusList)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to detect scenes: %s\n", err)
+		exitCode = 2
+		return
+	}
+	// ChopChop file
 }
 
 func cleanStop(ctx context.Context) {
