@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hekmon/cunits/v2"
 )
@@ -21,7 +22,8 @@ type ffmpegProgressStats struct {
 	dup          int         // images extract only
 	drop         int         // images extract only
 	size         cunits.Bits // encode only
-	bitrate      string      // encode only
+	time         time.Duration
+	bitrate      string // encode only
 	speed        float64
 }
 
@@ -53,6 +55,29 @@ func ffmpegProgressStatsParse(line string) (stats ffmpegProgressStats, err error
 					err = fmt.Errorf("error parsing value for current key %q value %q: %w", currentKey, value, err)
 				}
 			}
+		case "time":
+			timeFields := strings.Split(value, ":")
+			if len(timeFields) != 3 {
+				err = fmt.Errorf("invalid number of fields for %s key: expecting 3 got %d", currentKey, len(timeFields))
+				return
+			}
+			var (
+				hours, minutes int
+				seconds        float64
+			)
+			if hours, err = strconv.Atoi(timeFields[0]); err != nil {
+				err = fmt.Errorf("failed to parse hours in current %s key: %w", currentKey, err)
+				return
+			}
+			if minutes, err = strconv.Atoi(timeFields[1]); err != nil {
+				err = fmt.Errorf("failed to parse minutes in current %s key: %w", currentKey, err)
+				return
+			}
+			if seconds, err = strconv.ParseFloat(timeFields[2], 64); err != nil {
+				err = fmt.Errorf("failed to parse seconds in current %s key: %w", currentKey, err)
+				return
+			}
+			stats.time = time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
 		case "bitrate":
 			stats.bitrate = value
 		case "speed":
