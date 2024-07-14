@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	FFMPEG = "ffmpeg.exe"
+	FFProbe = "ffprobe.exe"
+	FFMPEG  = "ffmpeg.exe"
 )
 
 func StopAndWait(process *os.Process) (err error) {

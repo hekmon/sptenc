@@ -104,7 +104,15 @@ func main() {
 			return
 		}
 	}()
-	getScenes(*input, 40000, *sceneThreshold, *nvc, gpusList)
+	// Probe file
+	stats, err := getStreamsInfos(*input)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to probe input file: %s\n", err)
+		exitCode = 2
+		return
+	}
+	// Detect scenes
+	getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpusList)
 }
 
 func cleanStop(ctx context.Context) {

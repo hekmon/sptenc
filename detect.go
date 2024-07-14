@@ -15,7 +15,7 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
-func getScenes(path string, totalFrames, threshold int, cuvid bool, gpusList []int) (scenes []Scene, err error) {
+func getScenes(path string, totalDuration time.Duration, threshold int, cuvid bool, gpusList []int) (scenes []Scene, err error) {
 	var args []string
 	// Input
 	if cuvid {
@@ -43,7 +43,7 @@ func getScenes(path string, totalFrames, threshold int, cuvid bool, gpusList []i
 	}
 	progressDone := make(chan struct{})
 	go func() {
-		scenes = extractSceneProgress(outputPipe, totalFrames)
+		scenes = extractSceneProgress(outputPipe, totalDuration)
 		close(progressDone)
 	}()
 	// Start program
@@ -69,7 +69,7 @@ func getScenes(path string, totalFrames, threshold int, cuvid bool, gpusList []i
 	return
 }
 
-func extractSceneProgress(ffmpegOutput io.ReadCloser, totalFrames int) (scenes []Scene) {
+func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duration) (scenes []Scene) {
 	output := bufio.NewReader(ffmpegOutput)
 	var (
 		err         error
@@ -82,7 +82,7 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalFrames int) (scenes [
 	bypass := liveprogress.Bypass()
 	// Prepare progress bar
 	bar = liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithTotal(uint64(totalDuration)),
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -93,8 +93,8 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalFrames int) (scenes [
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" remaining | %d/%d frames processed (%0.0f fps, speed: %0.2fx)",
-				bar.Current(), bar.Total(), stats.fps, stats.speed,
+			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+				stats.currentFrame, stats.fps, stats.speed,
 			))
 			return build.String()
 		}),
@@ -137,13 +137,14 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalFrames int) (scenes [
 				fmt.Fprintf(bypass, "Error parsing ffmpeg progress line: %s\n", err)
 				continue
 			}
-			bar.CurrentSet(uint64(stats.currentFrame))
+			bar.CurrentSet(uint64(stats.time))
 			lineBuffer.Reset()
 		}
 	}
 }
 
 func parseScdet(line string) (scene Scene, err error) {
+	fmt.Fprintln(liveprogress.Bypass(), strings.TrimSuffix(line, "\n"))
 	var found bool
 	if _, line, found = strings.Cut(line, "[scdet"); !found {
 		err = errors.New("line does not contains scdet separator")
