@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -120,6 +121,11 @@ func main() {
 		return
 	}
 	// ChopChop file
+	flags := make([]string, len(scenes))
+	for i, scene := range scenes {
+		flags[i] = strconv.FormatFloat(float64(scene.Start)/float64(time.Second), 'f', -1, 64)
+	}
+	fmt.Println(strings.Join(flags, ","))
 }
 
 func cleanStop(ctx context.Context) {

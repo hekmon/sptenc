@@ -122,8 +122,8 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 				} else {
 					scenes = append(scenes, &scene)
 					if *debug {
-						fmt.Fprintf(bypass, "Scene detected at %v with score %s\n",
-							scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64))
+						fmt.Fprintf(bypass, "Scene %d detected at %v with score %s\n",
+							len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64))
 					}
 				}
 			}
@@ -145,7 +145,7 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 }
 
 func parseScdet(line string) (scene Scene, err error) {
-	fmt.Fprintln(liveprogress.Bypass(), strings.TrimSuffix(line, "\n"))
+	// fmt.Fprintln(liveprogress.Bypass(), strings.TrimSuffix(line, "\n"))
 	var found bool
 	if _, line, found = strings.Cut(line, "[scdet"); !found {
 		err = errors.New("line does not contains scdet separator")
