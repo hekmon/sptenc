@@ -6,6 +6,7 @@ require (
 	github.com/hekmon/cunits/v2 v2.1.0
 	github.com/hekmon/liveprogress/v2 v2.0.3
 	github.com/hekmon/processpriority v1.0.0
+	github.com/olekukonko/tablewriter v0.0.5
 )
 
 require (

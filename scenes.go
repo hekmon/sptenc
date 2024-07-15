@@ -174,10 +174,10 @@ type Scene struct {
 	Start        time.Duration
 	Score        float64
 	OriginalPath string
-	Quantization map[string]SceneQuantized
+	Quantization map[int]SceneQuantized
 }
 
 type SceneQuantized struct {
 	VMAF string
-	Path string
+	File string
 }
