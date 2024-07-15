@@ -21,7 +21,7 @@ var (
 	workingDir     *string
 	output         *string
 	sceneThreshold *int
-	gpus           *string
+	gpu            *int
 	nvc            *bool
 	debug          *bool
 	// Reencoder flags
@@ -42,7 +42,7 @@ func main() {
 	workingDir = flag.String("tmp", getWorkingDirPath(), "Where to create the working directory to store extracted and upscaled frames. You should put it on a fast SSD with plenty of space.")
 	output = flag.String("output", "", "Output directory for upscailing and master modes, distorted file when using -vmaf alone.")
 	sceneThreshold = flag.Int("scenethreshold", 14, "Scene detection threshold. Between 0 and 100.")
-	gpus = flag.String("gpu", "", "GPU(s) to use for inference, CUVID or VMAF CUDA acceleration. Can be a comma separated list of device ids for multiples GPUs: 0,2")
+	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing (see -vmaf). libvmaf must have been compiled with CUDA support.")
@@ -72,21 +72,6 @@ func main() {
 	if !filepath.IsAbs(*output) {
 		*output = filepath.Join(currentWorkingDirectory, *output)
 	}
-	// Build up gpus list
-	var gpusList []int
-	if *gpus != "" {
-		gpusListStr := strings.Split(*gpus, ",")
-		gpusList = make([]int, len(gpusListStr))
-		for i, gpuStr := range gpusListStr {
-			gpuInt, err := strconv.Atoi(gpuStr)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Invalid GPU device ID %q provided.\n", gpuStr)
-				exitCode = 1
-				return
-			}
-			gpusList[i] = gpuInt
-		}
-	}
 	// Properly handle stop
 	runCtx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	go cleanStop(runCtx)
@@ -114,7 +99,7 @@ func main() {
 		return
 	}
 	// Detect scenes
-	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpusList)
+	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpu)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to detect scenes: %s\n", err)
 		exitCode = 2
