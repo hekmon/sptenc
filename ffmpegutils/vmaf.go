@@ -174,7 +174,7 @@ func vmafProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats)
 			if !strings.Contains(currentLine, "speed=") {
 				continue
 			}
-			// We are near the end of a line (speed=XX.Xx) before line clear
+			// We are near the end of a line (speed=00.0x) before line clear
 			if stats, err = ParseProgressStats(currentLine); err != nil {
 				if runtimeError != nil {
 					runtimeError(fmt.Errorf("error parsing ffmpeg progress line: %e", err))
