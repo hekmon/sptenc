@@ -109,7 +109,7 @@ func VMAFCompute(config VMAFComputeConfig) (stats VMAFReport, err error) {
 	progressDone := make(chan struct{})
 	go func() {
 		defer close(progressDone)
-		vmafProgress(outputPipe, config.FFMPEGStatsReport, config.Debug, config.RuntimeError)
+		vmafProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
 	}()
 	// Start program
 	if err = cmd.Start(); err != nil {
@@ -146,7 +146,7 @@ func VMAFCompute(config VMAFComputeConfig) (stats VMAFReport, err error) {
 	return
 }
 
-func vmafProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats), debug func(string), runtimeError func(error)) {
+func vmafProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats), runtimeError func(error)) {
 	output := bufio.NewReader(ffmpegOutput)
 	var (
 		err         error
