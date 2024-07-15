@@ -38,11 +38,11 @@ type VMAFComputeConfig struct {
 	// Reporting
 	Debug               func(msg string)
 	RuntimeError        func(err error)                          // non fatal errors
-	ProcessRegistration func(process *os.Process, register bool) // true to register, false to unregister
+	ProcessRegistration func(process *os.Process, register bool) // true to register, false to unregister. Must be idempotent.
 	FFMPEGStatsReport   func(stats ProgressStats)
 }
 
-func ComputeVMAF(config VMAFComputeConfig) (stats VMAFReport, err error) {
+func VMAFCompute(config VMAFComputeConfig) (stats VMAFReport, err error) {
 	// Prepare
 	var version string
 	if config.UltraHD {
@@ -120,7 +120,7 @@ func ComputeVMAF(config VMAFComputeConfig) (stats VMAFReport, err error) {
 		config.ProcessRegistration(cmd.Process, true)
 		defer config.ProcessRegistration(cmd.Process, false)
 	}
-	if err = processpriority.Set(cmd.Process.Pid, processpriority.BelowNormal); err != nil && config.RuntimeError != nil {
+	if err = processpriority.Set(cmd.Process.Pid, config.ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower probbing process priority: %w", err))
 	}
 	if err = cmd.Wait(); err != nil {

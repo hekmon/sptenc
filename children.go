@@ -12,6 +12,14 @@ type Children struct {
 	access   sync.Mutex
 }
 
+func (c *Children) ProcessRegistration(process *os.Process, register bool) {
+	if register {
+		c.Add(process)
+	} else {
+		c.Remove(process)
+	}
+}
+
 func (c *Children) Add(process *os.Process) {
 	defer c.access.Unlock()
 	c.access.Lock()
