@@ -21,13 +21,12 @@ func (c *Children) ProcessRegistration(process *os.Process, register bool) {
 }
 
 func (c *Children) Add(process *os.Process) {
-	defer c.access.Unlock()
 	c.access.Lock()
 	c.children = append(c.children, process)
+	c.access.Unlock()
 }
 
 func (c *Children) Remove(process *os.Process) {
-	defer c.access.Unlock()
 	c.access.Lock()
 	for i, existingChild := range c.children {
 		if existingChild == process {
@@ -35,6 +34,7 @@ func (c *Children) Remove(process *os.Process) {
 			break
 		}
 	}
+	c.access.Unlock()
 }
 
 func (c *Children) StopAndWait() (err error) {
@@ -59,7 +59,7 @@ func (c *Children) StopAndWait() (err error) {
 	// Wait and return errors if any
 	doneChildren.Wait()
 	if len(errors) > 0 {
-		err = fmt.Errorf("encoutered %d errors: %s", len(errors), strings.Join(errors, ", "))
+		err = fmt.Errorf("encoutered %d errors: %s", len(errors), strings.Join(errors, " | "))
 	}
 	return err
 }
