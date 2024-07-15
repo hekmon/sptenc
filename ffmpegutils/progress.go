@@ -11,14 +11,14 @@ import (
 )
 
 type ProgressStats struct {
-	currentFrame int
-	fps          float64
-	dup          int         // images extract only
-	drop         int         // images extract only
-	size         cunits.Bits // encode only
-	time         time.Duration
-	bitrate      string // encode only
-	speed        float64
+	CurrentFrame int
+	FPS          float64
+	Dup          int         // images extract only
+	Drop         int         // images extract only
+	Size         cunits.Bits // encode only
+	Time         time.Duration
+	Bitrate      string // encode only
+	Speed        float64
 }
 
 func ParseProgressStats(line string) (stats ProgressStats, err error) {
@@ -27,25 +27,25 @@ func ParseProgressStats(line string) (stats ProgressStats, err error) {
 	parse := func(value string) (err error) {
 		switch currentKey {
 		case "frame":
-			if stats.currentFrame, err = strconv.Atoi(value); err != nil {
+			if stats.CurrentFrame, err = strconv.Atoi(value); err != nil {
 				err = fmt.Errorf("error parsing value for current key %q: %w", currentKey, err)
 			}
 		case "fps":
-			if stats.fps, err = strconv.ParseFloat(value, 64); err != nil {
+			if stats.FPS, err = strconv.ParseFloat(value, 64); err != nil {
 				err = fmt.Errorf("error parsing value for current key %q: %w", currentKey, err)
 			}
 		case "dup":
-			if stats.dup, err = strconv.Atoi(value); err != nil {
+			if stats.Dup, err = strconv.Atoi(value); err != nil {
 				err = fmt.Errorf("error parsing value for current key %q: %w", currentKey, err)
 			}
 		case "drop":
-			if stats.drop, err = strconv.Atoi(value); err != nil {
+			if stats.Drop, err = strconv.Atoi(value); err != nil {
 				err = fmt.Errorf("error parsing value for current key %q: %w", currentKey, err)
 			}
 		case "size":
 			if value != "N/A" {
 				value = strings.ReplaceAll(value, "kB", "KB") // unix fix
-				if stats.size, err = cunits.Parse(value); err != nil {
+				if stats.Size, err = cunits.Parse(value); err != nil {
 					err = fmt.Errorf("error parsing value for current key %q value %q: %w", currentKey, value, err)
 				}
 			}
@@ -71,11 +71,11 @@ func ParseProgressStats(line string) (stats ProgressStats, err error) {
 				err = fmt.Errorf("failed to parse seconds in current %s key: %w", currentKey, err)
 				return
 			}
-			stats.time = time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
+			stats.Time = time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second
 		case "bitrate":
-			stats.bitrate = value
+			stats.Bitrate = value
 		case "speed":
-			if stats.speed, err = strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(value), "x"), 64); err != nil {
+			if stats.Speed, err = strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(value), "x"), 64); err != nil {
 				err = fmt.Errorf("error parsing value for current key  %q: %w", currentKey, err)
 			}
 			// default:

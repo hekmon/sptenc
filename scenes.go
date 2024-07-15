@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hekmon/scenc/ffmpegutils"
+
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/processpriority"
 )
@@ -76,7 +78,7 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 		err         error
 		r           rune
 		currentLine string
-		stats       ffmpegProgressStats
+		stats       ffmpegutils.ProgressStats
 		bar         *liveprogress.Bar
 	)
 	bypass := liveprogress.Bypass()
@@ -94,7 +96,7 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
 			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
-				stats.currentFrame, stats.fps, stats.speed,
+				stats.CurrentFrame, stats.FPS, stats.Speed,
 			))
 			return build.String()
 		}),
@@ -134,11 +136,11 @@ func extractSceneProgress(ffmpegOutput io.ReadCloser, totalDuration time.Duratio
 				continue
 			}
 			// We are near the end of a line (speed=XX.Xx) before line clear
-			if stats, err = ffmpegProgressStatsParse(currentLine); err != nil {
+			if stats, err = ffmpegutils.ParseProgressStats(currentLine); err != nil {
 				fmt.Fprintf(bypass, "Error parsing ffmpeg progress line: %s\n", err)
 				continue
 			}
-			bar.CurrentSet(uint64(stats.time))
+			bar.CurrentSet(uint64(stats.Time))
 			lineBuffer.Reset()
 		}
 	}
