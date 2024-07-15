@@ -161,7 +161,8 @@ func parseScdet(line string) (scene Scene, err error) {
 		err = fmt.Errorf("error parsing start: %w", err)
 		return
 	}
-	// multiply by 1000 to avoid float rounding error: [scdet @ 0x55b4790b5dc0] lavfi.scd.score: 22.189, lavfi.scd.time: 514.723 --> Scene detected at 8m34.722999999s with score 22.189
+	// multiply by 1000 to get milliseconds and round to before switching back to seconds to avoid float rounding error:
+	// [scdet @ 0x55b4790b5dc0] lavfi.scd.score: 22.189, lavfi.scd.time: 514.723 --> Scene detected at 8m34.722999999s with score 22.189
 	scene.Start = time.Duration(math.Round(start*1000*float64(time.Second)) / 1000)
 	return
 }
