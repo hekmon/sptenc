@@ -5,8 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hekmon/scenc/ffmpegutils"
-
+	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
 

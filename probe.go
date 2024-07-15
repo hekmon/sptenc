@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
+	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
-	"github.com/hekmon/scenc/ffmpegutils"
 )
 
 func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
