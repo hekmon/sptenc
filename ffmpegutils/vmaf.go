@@ -29,12 +29,11 @@ type VMAFComputeConfig struct {
 	ReferencePath string
 	DistortedPath string
 	// VMAF generation
-	ProcessPriority processpriority.ProcessPriority // BelowNormal recommended
-	ReportPath      string
-	UltraHD         bool
-	VideoCuda       bool
-	VMAFCuda        bool
-	GPUs            []int
+	ReportPath string
+	UltraHD    bool
+	VideoCuda  bool
+	VMAFCuda   bool
+	GPUs       []int
 	// Reporting
 	Debug               func(msg string)
 	RuntimeError        func(err error)                          // non fatal errors
@@ -120,7 +119,7 @@ func VMAFCompute(config VMAFComputeConfig) (stats VMAFReport, err error) {
 		config.ProcessRegistration(cmd.Process, true)
 		defer config.ProcessRegistration(cmd.Process, false)
 	}
-	if err = processpriority.Set(cmd.Process.Pid, config.ProcessPriority); err != nil && config.RuntimeError != nil {
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower probbing process priority: %w", err))
 	}
 	if err = cmd.Wait(); err != nil {

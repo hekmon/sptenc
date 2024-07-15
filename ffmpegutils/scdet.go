@@ -20,10 +20,9 @@ type SceneDetectionConfig struct {
 	// Input
 	Path string
 	// scdet
-	Threshold       int                             // https://ffmpeg.org/ffmpeg-filters.html#scdet-1
-	ProcessPriority processpriority.ProcessPriority // BelowNormal recommended
-	VideoCuda       bool
-	GPUID           *int
+	Threshold int // https://ffmpeg.org/ffmpeg-filters.html#scdet-1
+	VideoCuda bool
+	GPUID     *int
 	// Reporting
 	Debug               func(msg string)
 	RuntimeError        func(err error)                          // non fatal errors
@@ -70,7 +69,7 @@ func SceneDetection(config SceneDetectionConfig) (scenes []*Scene, err error) {
 		config.ProcessRegistration(cmd.Process, true)
 		defer config.ProcessRegistration(cmd.Process, false)
 	}
-	if err = processpriority.Set(cmd.Process.Pid, config.ProcessPriority); err != nil && config.RuntimeError != nil {
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower probbing process priority: %w", err))
 	}
 	if err = cmd.Wait(); err != nil {

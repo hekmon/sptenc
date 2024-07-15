@@ -8,7 +8,6 @@ import (
 	"github.com/hekmon/scenc/ffmpegutils"
 
 	"github.com/hekmon/liveprogress/v2"
-	"github.com/hekmon/processpriority"
 )
 
 func getScenes(path string, totalDuration time.Duration, threshold int, cudaVideo bool, gpuID *int) (scenes []*ffmpegutils.Scene, err error) {
@@ -53,10 +52,9 @@ func getScenes(path string, totalDuration time.Duration, threshold int, cudaVide
 		// Input
 		Path: path,
 		// scdet
-		Threshold:       threshold,
-		ProcessPriority: processpriority.BelowNormal,
-		VideoCuda:       cudaVideo,
-		GPUID:           gpuID,
+		Threshold: threshold,
+		VideoCuda: cudaVideo,
+		GPUID:     gpuID,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,

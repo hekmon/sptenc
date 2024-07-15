@@ -1,7 +1,12 @@
 package ffmpegutils
 
-import "runtime"
+import (
+	"runtime"
+
+	"github.com/hekmon/processpriority"
+)
 
 var (
-	NbThreadsToUse = runtime.NumCPU()
+	NbThreadsToUse  = runtime.NumCPU()
+	ProcessPriority = processpriority.BelowNormal
 )

@@ -74,8 +74,7 @@ func GetStreamsInfos(config GetStreamConfig) (stats FFProbeStats, err error) {
 type GetStreamsInfosCFConfig struct {
 	// Same as light version
 	GetStreamConfig
-	// But with process priority and read report for long processing
-	ProcessPriority processpriority.ProcessPriority
+	// But with read report for long processing
 	ReadBytesReport func(n int)
 }
 
@@ -121,7 +120,7 @@ func GetStreamsInfosCF(config GetStreamsInfosCFConfig) (stats FFProbeStats, err 
 		config.ProcessRegistration(cmd.Process, true)
 		defer config.ProcessRegistration(cmd.Process, false)
 	}
-	if err = processpriority.Set(cmd.Process.Pid, config.ProcessPriority); err != nil && config.RuntimeError != nil {
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower probbing process priority: %w", err))
 	}
 	if err = cmd.Wait(); err != nil {
