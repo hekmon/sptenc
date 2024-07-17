@@ -20,7 +20,7 @@ func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
 		}
 	}
 	// execute
-	return ffmpegutils.GetStreamsInfos(ffmpegutils.GetStreamConfig{
+	return ffmpegutils.GetStreamsInfos(ffmpegutils.GetStreamsInfosConfig{
 		Path:                path,
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
