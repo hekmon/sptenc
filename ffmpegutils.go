@@ -9,6 +9,27 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
+func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
+	// output fx
+	bypass := liveprogress.Bypass()
+	runtimeError := func(err error) {
+		fmt.Fprintf(bypass, "%s\n", err)
+	}
+	var debugPrint func(string)
+	if *debug {
+		debugPrint = func(s string) {
+			fmt.Fprintf(bypass, "%s\n", s)
+		}
+	}
+	// execute
+	return ffmpegutils.GetStreamsInfos(ffmpegutils.GetStreamsInfosConfig{
+		Path:                path,
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+	})
+}
+
 func getScenes(path string, totalDuration time.Duration, threshold int, cudaVideo bool, gpuID *int) (scenes []*ffmpegutils.Scene, err error) {
 	// reporting
 	bypass := liveprogress.Bypass()
@@ -47,7 +68,7 @@ func getScenes(path string, totalDuration time.Duration, threshold int, cudaVide
 		bar.CurrentSet(uint64(stats.Time))
 	}
 	// execute
-	return ffmpegutils.SceneDetection(ffmpegutils.SceneDetectionConfig{
+	return ffmpegutils.ScenesDetection(ffmpegutils.ScenesDetectionConfig{
 		// Input
 		Path: path,
 		// scdet
