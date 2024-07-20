@@ -68,7 +68,7 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 	// Find the right QP
 	var (
 		valid                  bool
-		lastInvalid, lastValid int
+		lastInvalid, lastValid int = -1, -1
 	)
 	bypass := liveprogress.Bypass()
 	for {
@@ -80,13 +80,13 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 		}
 		// Handle result
 		if valid {
-			if lastInvalid != 0 {
+			if lastInvalid != -1 {
 				// previous QP was invalid, so we got our first validQP
 				qp = QPCandidate
 				return
 			}
 			// We have a new valid QP, remove the old one if it exists
-			if lastValid != 0 {
+			if lastValid != -1 {
 				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, lastValid))); err != nil {
 					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", output, err)
 					return
@@ -99,7 +99,7 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 				scene, lastValid, QPCandidate)
 		} else {
 			// We failed to score a good enough VMAF
-			if lastValid != 0 {
+			if lastValid != -1 {
 				// We already had a valid QP and decreasing quality is not working anymore. We are done
 				qp = lastValid
 				return

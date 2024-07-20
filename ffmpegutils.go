@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -84,7 +85,7 @@ func getScenes(path string, totalDuration time.Duration, threshold float64, cuda
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Analyze | "
+			return "  Analyze | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -281,5 +282,27 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	if *debug {
 		fmt.Fprintf(liveprogress.Bypass(), "Scene VMAF computed in %s\n", duration.Round(time.Second))
 	}
+	return
+}
+
+func scenesMerge(dir string, qps []int) (output string, err error) {
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.ScenesMerge(ffmpegutils.ScenesMergeConfig{
+		// Input / output
+		WorkingDir: dir,
+		ScenesQP:   qps,
+		// Reporting
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+		FFMPEGStatsReport:   nil,
+	}); err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	fmt.Fprintf(liveprogress.Bypass(), "Scenes merged in %s\n", duration.Round(time.Second))
+	output = filepath.Join(dir, ffmpegutils.SceneMergeOutputName)
 	return
 }
