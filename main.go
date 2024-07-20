@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -21,6 +22,7 @@ var (
 	gpu            *int
 	nvc            *bool
 	debug          *bool
+	startQP        *int
 	//// vmaf
 	vmafcuda       *bool
 	vmafLimitMin   *float64
@@ -47,6 +49,7 @@ func main() {
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
+	startQP = flag.Int("qp", 16, "Quantization Parameter value to start with. The higher the value, the more aggressive the encoding will be. Speed up initial process by setting a QP close to your VMAF limits.")
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing (see -vmaf). libvmaf must have been compiled with CUDA support.")
 	vmafLimitMin = flag.Float64("vmafmin", VMAFOffValue, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the scene will be considered as a bad scene and a new encode will be done. If -1, the minimum VMAF score is not used.")
@@ -81,7 +84,7 @@ func main() {
 		exitCode = 1
 		return
 	}
-	//// switch to full paths
+	// Switch to full paths
 	currentWorkingDirectory, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to get current working directory: %s\n", err)
@@ -112,11 +115,13 @@ func main() {
 		}
 	}()
 	// Ready, start processing
+	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
 	exitCode = scenc(vmafAuditor)
 }
 
 func scenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
+	start := time.Now()
 	// Prepare
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
@@ -131,6 +136,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	// Step 1 - Detect scenes
+	fmt.Fprintf(bypass, "Detecting scenes...\n")
 	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpu)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to detect scenes: %s\n", err)
@@ -138,15 +144,25 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	// Step 3 - Split file by scenes
+	fmt.Fprintf(bypass, "Splitting scenes...\n")
 	if err = splitScenes(*input, tmpDir, stats.Format.Duration, scenes); err != nil {
 		fmt.Fprintf(bypass, "Failed to split scenes: %s\n", err)
 		exitCode = 2
 		return
 	}
 	// Step 4 - Encode scenes
-	//// TODO
+	fmt.Fprintf(bypass, "Searching the right QP for each scenes...\n")
+	var scenesQP []int
+	if scenesQP, err = findScenesQP(tmpDir, len(scenes)+1, *startQP, auditor, *nvc, *vmafcuda, *gpu); err != nil {
+		fmt.Fprintf(bypass, "Failed to encode scenes: %s\n", err)
+		exitCode = 2
+		return
+	}
 	// Step 5 - Merge
-	//// TODO
+	fmt.Fprintf(bypass, "Merging scenes: %+v\n", scenesQP)
+	// Done
+	duration := time.Since(start)
+	fmt.Fprintf(bypass, "Done in %s\n", duration)
 	return
 }
 

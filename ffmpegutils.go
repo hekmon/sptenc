@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -30,6 +31,51 @@ func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
 	})
 }
 
+func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) {
+	// Prepare
+	fileInfos, err := os.Stat(path)
+	if err != nil {
+		err = fmt.Errorf("failed to stat the file: %w", err)
+		return
+	}
+	// Live Progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(fileInfos.Size())),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Analyze | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			var build strings.Builder
+			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
+			))
+			return build.String()
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(n int) {
+		bar.CurrentSet(uint64(n))
+	}
+	// Execute
+	return ffmpegutils.GetStreamsInfosCF(ffmpegutils.GetStreamsInfosCFConfig{
+		GetStreamsInfosConfig: ffmpegutils.GetStreamsInfosConfig{
+			// Input
+			Path: path,
+			// Reporting
+			Debug:               debugPrint,
+			RuntimeError:        runtimeError,
+			ProcessRegistration: children.ProcessRegistration,
+		},
+		ReadBytesReport: progress,
+	})
+}
+
 func getScenes(path string, totalDuration time.Duration, threshold float64, cudaVideo bool, gpuID *int) (scenes []*ffmpegutils.Scene, err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
@@ -38,7 +84,7 @@ func getScenes(path string, totalDuration time.Duration, threshold float64, cuda
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "  Scene detections | "
+			return " Analyze | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -73,8 +119,8 @@ func getScenes(path string, totalDuration time.Duration, threshold float64, cuda
 	}); err != nil {
 		return
 	}
-	// Done
 	duration := time.Since(start)
+	// Done
 	fmt.Fprintf(liveprogress.Bypass(), "Found %d scenes in %s\n", len(scenes)+1, duration.Round(time.Second))
 	return
 }
@@ -92,7 +138,7 @@ func splitScenes(path, outputDir string, totalDuration time.Duration, scenes []*
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "  Scene splitting | "
+			return " Splitting | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -124,8 +170,116 @@ func splitScenes(path, outputDir string, totalDuration time.Duration, scenes []*
 	}); err != nil {
 		return
 	}
-	// Done
 	duration := time.Since(start)
+	// Done
 	fmt.Fprintf(liveprogress.Bypass(), "Scenes slicing done in %s\n", duration.Round(time.Second))
+	return
+}
+
+func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (err error) {
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Encoding | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			var build strings.Builder
+			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
+			))
+			return build.String()
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.Encode(ffmpegutils.EncodeConfig{
+		// Input
+		Input: input,
+		// Output
+		OutputFilePath: output,
+		Quantization:   qp,
+		Tags:           nil,
+		// Hardware Acceleration
+		NVDECENC: cuda,
+		GPUID:    &gpu,
+		// Reporting
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+		FFMPEGStatsReport:   progress,
+	}); err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "Scene encoded in %s\n", duration.Round(time.Second))
+	}
+	return
+}
+
+func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHDmodel, videoCUDA, VMAFCUDA bool, gpu int) (vmaf ffmpegutils.VMAFStats, err error) {
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "     VMAF | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			var build strings.Builder
+			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
+			))
+			return build.String()
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+	// Execute
+	start := time.Now()
+	report, err := ffmpegutils.VMAFCompute(ffmpegutils.VMAFComputeConfig{
+		// Input
+		ReferencePath:  reference,
+		InputFrameRate: frameRate,
+		DistortedPath:  distorted,
+		// VMAF generation
+		ReportPath: reportPath,
+		UltraHD:    ultraHDmodel,
+		VideoCuda:  videoCUDA,
+		VMAFCuda:   VMAFCUDA,
+		GPUID:      &gpu,
+		// Reporting
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+		FFMPEGStatsReport:   progress,
+	})
+	duration := time.Since(start)
+	// Done
+	vmaf = report.GetStats()
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "Scene VMAF computed in %s\n", duration.Round(time.Second))
+	}
 	return
 }
