@@ -17,7 +17,7 @@ var (
 	input          *string
 	workingDir     *string
 	output         *string
-	sceneThreshold *int
+	sceneThreshold *float64
 	gpu            *int
 	nvc            *bool
 	debug          *bool
@@ -36,9 +36,9 @@ func main() {
 	}()
 	// Flags
 	input = flag.String("input", "", "Input file or directory. If input is a directory all video files of the directory and all the sub directories will be processed.")
-	workingDir = flag.String("tmp", getWorkingDirPath(), "Where to create the working directory to store extracted and upscaled frames. You should put it on a fast SSD with plenty of space.")
+	workingDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store extracted and upscaled frames. You should put it on a fast SSD with plenty of space.")
 	output = flag.String("output", "", "Output directory for upscailing and master modes, distorted file when using -vmaf alone.")
-	sceneThreshold = flag.Int("scenethreshold", 14, "Scene detection threshold. Between 0 and 100.")
+	sceneThreshold = flag.Float64("scenethreshold", 14, "Scene detection threshold. Between 0 and 100, good values are [8.0, 14.0].")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
@@ -110,8 +110,15 @@ func main() {
 		exitCode = 2
 		return
 	}
+	// Prepare working dir
+	tmpDir := getWorkingDirPath(*workingDir)
+	if err = os.MkdirAll(tmpDir, 0755); err != nil {
+		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
+		exitCode = 2
+		return
+	}
 	// ChopChop file
-	if err = splitScenes(*input, *workingDir, scenes); err != nil {
+	if err = splitScenes(*input, tmpDir, stats.Format.Duration, scenes); err != nil {
 		fmt.Fprintf(bypass, "Failed to split scenes: %s\n", err)
 		exitCode = 2
 		return

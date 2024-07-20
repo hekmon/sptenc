@@ -30,7 +30,7 @@ func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
 	})
 }
 
-func getScenes(path string, totalDuration time.Duration, threshold int, cudaVideo bool, gpuID *int) (scenes []*ffmpegutils.Scene, err error) {
+func getScenes(path string, totalDuration time.Duration, threshold float64, cudaVideo bool, gpuID *int) (scenes []*ffmpegutils.Scene, err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -75,15 +75,38 @@ func getScenes(path string, totalDuration time.Duration, threshold int, cudaVide
 	}
 	// Done
 	duration := time.Since(start)
-	fmt.Fprintf(liveprogress.Bypass(), "Found %d scenes in %s\n", len(scenes)+1, duration.Round(time.Minute))
+	fmt.Fprintf(liveprogress.Bypass(), "Found %d scenes in %s\n", len(scenes)+1, duration.Round(time.Second))
 	return
 }
 
-func splitScenes(path, outputDir string, scenes []*ffmpegutils.Scene) (err error) {
+func splitScenes(path, outputDir string, totalDuration time.Duration, scenes []*ffmpegutils.Scene) (err error) {
 	// Prepare
 	markers := make([]float64, len(scenes))
 	for i, scene := range scenes {
 		markers[i] = scene.Start.Seconds()
+	}
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalDuration)),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "  Scene splitting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" remaining | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
 	}
 	// Execute
 	start := time.Now()
@@ -97,12 +120,12 @@ func splitScenes(path, outputDir string, scenes []*ffmpegutils.Scene) (err error
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
 		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   nil,
+		FFMPEGStatsReport:   progress,
 	}); err != nil {
 		return
 	}
 	// Done
 	duration := time.Since(start)
-	fmt.Fprintf(liveprogress.Bypass(), "Scenes slicing done in %s\n", duration.Round(time.Minute))
+	fmt.Fprintf(liveprogress.Bypass(), "Scenes slicing done in %s\n", duration.Round(time.Second))
 	return
 }
