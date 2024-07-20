@@ -9,21 +9,21 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
-	// output fx
-	bypass := liveprogress.Bypass()
-	runtimeError := func(err error) {
-		fmt.Fprintf(bypass, "%s\n", err)
-	}
-	var debugPrint func(string)
+func debugPrint(s string) {
 	if *debug {
-		debugPrint = func(s string) {
-			fmt.Fprintf(bypass, "%s\n", s)
-		}
+		fmt.Fprintf(liveprogress.Bypass(), "%s\n", s)
 	}
-	// execute
+}
+
+func runtimeError(err error) {
+	fmt.Fprintf(liveprogress.Bypass(), "%s\n", err)
+}
+
+func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
 	return ffmpegutils.GetStreamsInfos(ffmpegutils.GetStreamsInfosConfig{
-		Path:                path,
+		// Input
+		Path: path,
+		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
 		ProcessRegistration: children.ProcessRegistration,
@@ -31,17 +31,6 @@ func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
 }
 
 func getScenes(path string, totalDuration time.Duration, threshold int, cudaVideo bool, gpuID *int) (scenes []*ffmpegutils.Scene, err error) {
-	// reporting
-	bypass := liveprogress.Bypass()
-	runtimeError := func(err error) {
-		fmt.Fprintf(bypass, "%s\n", err)
-	}
-	var debugPrint func(string)
-	if *debug {
-		debugPrint = func(s string) {
-			fmt.Fprintf(bypass, "%s\n", s)
-		}
-	}
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -67,8 +56,9 @@ func getScenes(path string, totalDuration time.Duration, threshold int, cudaVide
 		currentStats = stats
 		bar.CurrentSet(uint64(stats.Time))
 	}
-	// execute
-	return ffmpegutils.ScenesDetection(ffmpegutils.ScenesDetectionConfig{
+	// Execute
+	start := time.Now()
+	if scenes, err = ffmpegutils.ScenesDetection(ffmpegutils.ScenesDetectionConfig{
 		// Input
 		Path: path,
 		// scdet
@@ -80,5 +70,39 @@ func getScenes(path string, totalDuration time.Duration, threshold int, cudaVide
 		RuntimeError:        runtimeError,
 		ProcessRegistration: children.ProcessRegistration,
 		FFMPEGStatsReport:   progress,
-	})
+	}); err != nil {
+		return
+	}
+	// Done
+	duration := time.Since(start)
+	fmt.Fprintf(liveprogress.Bypass(), "Found %d scenes in %s\n", len(scenes)+1, duration.Round(time.Minute))
+	return
+}
+
+func splitScenes(path, outputDir string, scenes []*ffmpegutils.Scene) (err error) {
+	// Prepare
+	markers := make([]float64, len(scenes))
+	for i, scene := range scenes {
+		markers[i] = scene.Start.Seconds()
+	}
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.ScenesSegment(ffmpegutils.ScenesSegmentConfig{
+		// Input / output
+		Input: path,
+		// Output
+		ScenesMarkers: markers,
+		OutputDir:     outputDir,
+		// Reporting
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+		FFMPEGStatsReport:   nil,
+	}); err != nil {
+		return
+	}
+	// Done
+	duration := time.Since(start)
+	fmt.Fprintf(liveprogress.Bypass(), "Scenes slicing done in %s\n", duration.Round(time.Minute))
+	return
 }

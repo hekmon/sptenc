@@ -7,10 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
-	"time"
 
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -106,11 +103,11 @@ func main() {
 		return
 	}
 	// ChopChop file
-	flags := make([]string, len(scenes))
-	for i, scene := range scenes {
-		flags[i] = strconv.FormatFloat(float64(scene.Start)/float64(time.Second), 'f', -1, 64)
+	if err = splitScenes(*input, *workingDir, scenes); err != nil {
+		fmt.Fprintf(bypass, "Failed to split scenes: %s\n", err)
+		exitCode = 2
+		return
 	}
-	fmt.Println(strings.Join(flags, ","))
 }
 
 func cleanStop(ctx context.Context) {
