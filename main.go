@@ -55,7 +55,16 @@ func main() {
 		exitCode = 1
 		return
 	}
-	// TODO threshold validation
+	if *sceneThreshold < 0 || *sceneThreshold > 100 {
+		fmt.Fprintln(os.Stderr, "Scene threshold must be between 0 and 100")
+		exitCode = 1
+		return
+	}
+	if *gpu < 0 {
+		fmt.Fprintln(os.Stderr, "GPU must be >= 0")
+		exitCode = 1
+		return
+	}
 	//// switch to full paths
 	currentWorkingDirectory, err := os.Getwd()
 	if err != nil {
