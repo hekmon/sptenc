@@ -21,8 +21,13 @@ var (
 	gpu            *int
 	nvc            *bool
 	debug          *bool
+	//// vmaf
+	vmafcuda       *bool
+	vmafLimitMin   *float64
+	vmafLimitP1    *float64
+	vmafLimitHMean *float64
+	vmafLimitMean  *float64
 	// Reencoder flags
-	vmafcuda *bool
 	// Run
 	children Children
 )
@@ -42,7 +47,12 @@ func main() {
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
+	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing (see -vmaf). libvmaf must have been compiled with CUDA support.")
+	vmafLimitMin = flag.Float64("vmafmin", VMAFOffValue, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the scene will be considered as a bad scene and a new encode will be done. If -1, the minimum VMAF score is not used.")
+	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the scene will be considered as a bad scene and a new encode will be done. If -1, the VMAF score is not used.")
+	vmafLimitHMean = flag.Float64("vmafhmean", 99, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the scene will be considered as a bad scene and a new encode will be done. If -1, the VMAF score is not used.")
+	vmafLimitMean = flag.Float64("vmafmean", VMAFOffValue, "VMAF acceptable score for mean. If the VMAF score is below this value, the scene will be considered as a bad scene and a new encode will be done. If -1, the VMAF score is not used.")
 	flag.Parse()
 	// Validate common flags
 	if *input == "" {
@@ -62,6 +72,12 @@ func main() {
 	}
 	if *gpu < 0 {
 		fmt.Fprintln(os.Stderr, "GPU must be >= 0")
+		exitCode = 1
+		return
+	}
+	vmafAuditor, err := NewVMAFChecker(*vmafLimitMin, *vmafLimitP1, *vmafLimitHMean, *vmafLimitMean)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create VMAF auditor: %s\n", err)
 		exitCode = 1
 		return
 	}
@@ -95,34 +111,43 @@ func main() {
 			}
 		}
 	}()
+	// Ready, start processing
+	exitCode = scenc(vmafAuditor)
+}
+
+func scenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
-	// Probe file
+	// Prepare
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Detect scenes
-	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpu)
-	if err != nil {
-		fmt.Fprintf(bypass, "Failed to detect scenes: %s\n", err)
-		exitCode = 2
-		return
-	}
-	// Prepare working dir
 	tmpDir := getWorkingDirPath(*workingDir)
 	if err = os.MkdirAll(tmpDir, 0755); err != nil {
 		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// ChopChop file
+	// Step 1 - Detect scenes
+	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpu)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to detect scenes: %s\n", err)
+		exitCode = 2
+		return
+	}
+	// Step 3 - Split file by scenes
 	if err = splitScenes(*input, tmpDir, stats.Format.Duration, scenes); err != nil {
 		fmt.Fprintf(bypass, "Failed to split scenes: %s\n", err)
 		exitCode = 2
 		return
 	}
+	// Step 4 - Encode scenes
+	//// TODO
+	// Step 5 - Merge
+	//// TODO
+	return
 }
 
 func cleanStop(ctx context.Context) {
