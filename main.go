@@ -93,7 +93,6 @@ func main() {
 			if exitCode == 0 {
 				exitCode = 3
 			}
-			return
 		}
 	}()
 	bypass := liveprogress.Bypass()
