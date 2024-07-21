@@ -40,9 +40,9 @@ func generateTags(format ffmpegutils.FFProbeFormat) (flags []string) {
 		flags = append(flags, "-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)))
 		// Remove upscailer encoding tags if any
 		flags = append(flags,
-			"-metadata", fmt.Sprintf("%s=", upscailerEncoderTagKey),
-			"-metadata", fmt.Sprintf("%s=", upscailerEncoderPresetTagKey),
-			"-metadata", fmt.Sprintf("%s=", upscailerEncoderQPTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=", upscailerEncoderTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=", upscailerEncoderPresetTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=", upscailerEncoderQPTagKey),
 		)
 		// Encoding
 		if *nvc {
