@@ -158,7 +158,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "Splitting managed to separate %d scenes (on %d theorical)\n", splittedScenes, len(scenes))
+	fmt.Fprintf(bypass, "Splitting managed to separate %d scenes (on %d detected)\n", splittedScenes, len(scenes)+1)
 	// Step 4 - Encode scenes
 	fmt.Fprintf(bypass, "Searching the right QP for each scenes...\n")
 	var scenesQP []int

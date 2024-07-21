@@ -85,7 +85,7 @@ func getScenes(path string, totalDuration time.Duration, threshold float64, cuda
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "  Analyze | "
+			return " Detection | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -186,7 +186,7 @@ func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (er
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Encoding | "
+			return " Encode | "
 		}),
 		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -240,7 +240,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "     VMAF | "
+			return "   VMAF | "
 		}),
 		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),

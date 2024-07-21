@@ -22,7 +22,7 @@ func findScenesQP(dir string, nbScenes, qp int, totalDuration time.Duration, aud
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "   Scenes | "
+			return " Scenes | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
