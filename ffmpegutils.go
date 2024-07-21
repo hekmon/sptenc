@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -286,7 +285,17 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	return
 }
 
-func scenesMerge(dir string, qps []int, expectedDuration time.Duration) (output string, err error) {
+func scenesMerge(originalFile, scenesDir, outputPath string, qps []int, expectedDuration time.Duration) (err error) {
+	// Generate the concat script
+	filesnames := make([]string, len(qps))
+	for scene, qp := range qps {
+		filesnames[scene] = fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, qp)
+	}
+	concatScript, err := ffmpegutils.GenerateConcatScript(scenesDir, filesnames)
+	if err != nil {
+		err = fmt.Errorf("failed to create the concat script file: %w", err)
+		return
+	}
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -312,11 +321,13 @@ func scenesMerge(dir string, qps []int, expectedDuration time.Duration) (output 
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.ScenesMerge(ffmpegutils.ScenesMergeConfig{
-		// Input / output
-		WorkingDir: dir,
-		ScenesQP:   qps,
-		KeepScript: *keep,
+	if err = ffmpegutils.ScenesRemux(ffmpegutils.ScenesRemuxConfig{
+		// Input
+		OriginalFile:       originalFile,
+		ScenesConcatScript: concatScript,
+		// Output
+		OutputFilePath: outputPath,
+		Tags:           nil,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
@@ -327,7 +338,10 @@ func scenesMerge(dir string, qps []int, expectedDuration time.Duration) (output 
 	}
 	duration := time.Since(start)
 	// Done
-	fmt.Fprintf(liveprogress.Bypass(), "Scenes merged in %s\n", duration.Round(time.Second))
-	output = filepath.Join(dir, ffmpegutils.SceneMergeOutputName)
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "Scenes remuxed within %q in %s\n", outputPath, duration.Round(time.Second))
+	} else {
+		fmt.Fprintf(liveprogress.Bypass(), "Scenes remuxed in %s\n", duration.Round(time.Second))
+	}
 	return
 }

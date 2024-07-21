@@ -45,7 +45,7 @@ func main() {
 	// Flags
 	input = flag.String("input", "", "Input file to transcode.")
 	workingDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded scenes and VMAF reports.")
-	output = flag.String("output", "", "Output directory for the reencoded file.")
+	output = flag.String("output", "", "Output directory for the reencoded file. If empty directory of input file will be used.")
 	sceneThreshold = flag.Float64("scenethreshold", 14, "Scene detection threshold. Valid range is [0., 100], good values are [8.0, 14.0].")
 	startQP = flag.Int("qp", 16, "Quantization Parameter value to start with. The higher the value, the more aggressive the encoding will be. Speed up initial process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
@@ -62,11 +62,6 @@ func main() {
 	// Validate common flags
 	if *input == "" {
 		fmt.Fprintln(os.Stderr, "Please set the -input flag")
-		exitCode = 1
-		return
-	}
-	if *output == "" {
-		fmt.Fprintln(os.Stderr, "Please set the -output flag")
 		exitCode = 1
 		return
 	}
@@ -169,15 +164,12 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 5 - Merge scenes
 	fmt.Fprintln(bypass, "Merging scenes into one video stream...")
-	var merged string
-	if merged, err = scenesMerge(tmpDir, scenesQP, stats.Format.Duration); err != nil {
+	outputPath := computeOutputFilePath(*input, *output)
+	if err = scenesMerge(*input, tmpDir, outputPath, scenesQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 6 - Remux file
-	//// TODO
-	fmt.Fprintln(bypass, merged)
 	// Done
 	if !*keep {
 		if err = os.RemoveAll(tmpDir); err != nil {

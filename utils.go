@@ -20,3 +20,20 @@ func getDirFilesNumber(dir string) (num int, err error) {
 	num = len(files)
 	return
 }
+
+func computeOutputFilePath(file, outputDir string) (output string) {
+	// Work on a clean path
+	file = filepath.Clean(file)
+	// If no output dir set, use current dir
+	if outputDir == "" {
+		outputDir = filepath.Dir(file)
+	}
+	// Cut part of file name
+	inputFileName := filepath.Base(file)
+	extension := filepath.Ext(file)
+	baseName := inputFileName[:len(inputFileName)-len(extension)]
+	// Recompose
+	output = filepath.Join(outputDir,
+		fmt.Sprintf("%s [scencoded]%s", baseName, extension))
+	return
+}
