@@ -86,7 +86,7 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 				return
 			}
 			// We have a new valid QP, remove the old one if it exists
-			if lastValid != -1 {
+			if lastValid != -1 && !*keep {
 				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, lastValid))); err != nil {
 					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", output, err)
 					return
@@ -98,12 +98,20 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease quality with QP %d\n",
 				scene, lastValid, QPCandidate)
 		} else {
-			// Remove the current QP as it is invalid
-			if err = os.Remove(output); err != nil {
-				err = fmt.Errorf("failed to remove invalid QP at %s: %w", output, err)
+			// If last candidate, keep it (and do not delete it)
+			if QPCandidate == 0 {
+				fmt.Fprintf(liveprogress.Bypass(), "WARNING: Keeping QP 0 as it is not possible to do better\n")
+				qp = 0
 				return
 			}
-			// We failed to score a good enough VMAF
+			// Remove the current QP as it is invalid
+			if !*keep {
+				if err = os.Remove(output); err != nil {
+					err = fmt.Errorf("failed to remove invalid QP at %s: %w", output, err)
+					return
+				}
+			}
+			// In case we had a valid one but tried to decrease quality, we are done
 			if lastValid != -1 {
 				// We already had a valid QP and decreasing quality is not working anymore. We are done
 				qp = lastValid
@@ -112,11 +120,6 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 			// Current QP is not good enough, let's increase quality
 			lastInvalid = QPCandidate
 			QPCandidate--
-			if QPCandidate < 0 {
-				fmt.Fprintf(liveprogress.Bypass(), "WARNING: Keeping QP 0 as it is not possible to do better\n")
-				qp = 0
-				return
-			}
 			fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
 				scene, lastInvalid, QPCandidate)
 		}

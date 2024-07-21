@@ -293,6 +293,7 @@ func scenesMerge(dir string, qps []int) (output string, err error) {
 		// Input / output
 		WorkingDir: dir,
 		ScenesQP:   qps,
+		KeepScript: *keep,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
