@@ -158,11 +158,12 @@ func splitScenes(path, outputDir string, totalDuration time.Duration, scenes []*
 	// Execute
 	start := time.Now()
 	if err = ffmpegutils.ScenesSegment(ffmpegutils.ScenesSegmentConfig{
-		// Input / output
+		// Input
 		Input: path,
 		// Output
-		ScenesMarkers: markers,
-		OutputDir:     outputDir,
+		ScenesMarkers:   markers,
+		OutputDir:       outputDir,
+		ResetTimestamps: true,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,

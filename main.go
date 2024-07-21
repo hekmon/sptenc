@@ -158,7 +158,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	// Step 5 - Merge
+	// Step 5 - Merge scenes
 	fmt.Fprintf(bypass, "Merging scenes: %+v\n", scenesQP)
 	var merged string
 	if merged, err = scenesMerge(tmpDir, scenesQP); err != nil {
@@ -166,6 +166,8 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
+	// Step 6 - Remux file
+	//// TODO
 	fmt.Fprintln(bypass, merged)
 	// Done
 	duration := time.Since(start)

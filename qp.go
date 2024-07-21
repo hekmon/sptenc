@@ -98,6 +98,11 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease quality with QP %d\n",
 				scene, lastValid, QPCandidate)
 		} else {
+			// Remove the current QP as it is invalid
+			if err = os.Remove(output); err != nil {
+				err = fmt.Errorf("failed to remove invalid QP at %s: %w", output, err)
+				return
+			}
 			// We failed to score a good enough VMAF
 			if lastValid != -1 {
 				// We already had a valid QP and decreasing quality is not working anymore. We are done
@@ -114,11 +119,6 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 			}
 			fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
 				scene, lastInvalid, QPCandidate)
-			// Remove the current QP as it is invalid
-			if err = os.Remove(output); err != nil {
-				err = fmt.Errorf("failed to remove invalid QP at %s: %w", output, err)
-				return
-			}
 		}
 	}
 }
