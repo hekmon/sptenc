@@ -45,7 +45,7 @@ func findScenesQP(dir string, nbScenes, qp int, auditor VMAFChecker, videoCUDA, 
 		bar.CurrentIncrement()
 	}
 	duration := time.Since(start)
-	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s\n", duration.Round(time.Second))
+	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s: %+v\n", duration.Round(time.Second), results)
 	return
 }
 

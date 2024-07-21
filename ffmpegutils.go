@@ -46,7 +46,7 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Analyze | "
+			return "  Analyze | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
