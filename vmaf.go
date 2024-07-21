@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/hekmon/ffmpegutils"
@@ -13,6 +14,10 @@ const (
 )
 
 func NewVMAFChecker(min, p1, hmean, mean float64) (vc VMAFChecker, err error) {
+	if min == VMAFOffValue && p1 == VMAFOffValue && hmean == VMAFOffValue && mean == VMAFOffValue {
+		err = errors.New("all values are off")
+		return
+	}
 	if (min < VMAFMinValue || min > VMAFMaxValue) && min != VMAFOffValue {
 		err = fmt.Errorf("min value %f is out of range [%d, %d]", min, VMAFMinValue, VMAFMaxValue)
 		return

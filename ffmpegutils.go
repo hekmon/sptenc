@@ -285,7 +285,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	return
 }
 
-func scenesMerge(originalFile, scenesDir, outputPath string, qps []int, expectedDuration time.Duration) (err error) {
+func scenesMerge(originalFile, scenesDir, outputPath string, tagsFlags []string, qps []int, expectedDuration time.Duration) (err error) {
 	// Generate the concat script
 	filesnames := make([]string, len(qps))
 	for scene, qp := range qps {
@@ -327,7 +327,7 @@ func scenesMerge(originalFile, scenesDir, outputPath string, qps []int, expected
 		ScenesConcatScript: concatScript,
 		// Output
 		OutputFilePath: outputPath,
-		Tags:           nil,
+		Tags:           tagsFlags,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,

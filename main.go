@@ -165,7 +165,8 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	// Step 5 - Merge scenes
 	fmt.Fprintln(bypass, "Merging scenes into one video stream...")
 	outputPath := computeOutputFilePath(*input, *output)
-	if err = scenesMerge(*input, tmpDir, outputPath, scenesQP, stats.Format.Duration); err != nil {
+	tagsFlags := generateTags(*stats.Format)
+	if err = scenesMerge(*input, tmpDir, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)
 		exitCode = 2
 		return
