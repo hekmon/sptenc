@@ -48,12 +48,12 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  Analyze | "
 		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" | %d frames processed (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -188,12 +188,12 @@ func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (er
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " Encoding | "
 		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" | %d frames processed (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -242,12 +242,12 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "     VMAF | "
 		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" | %d frames processed (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -286,7 +286,30 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	return
 }
 
-func scenesMerge(dir string, qps []int) (output string, err error) {
+func scenesMerge(dir string, qps []int, expectedDuration time.Duration) (output string, err error) {
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(expectedDuration)),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Splitting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" remaining | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
 	// Execute
 	start := time.Now()
 	if err = ffmpegutils.ScenesMerge(ffmpegutils.ScenesMergeConfig{
@@ -298,7 +321,7 @@ func scenesMerge(dir string, qps []int) (output string, err error) {
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
 		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   nil,
+		FFMPEGStatsReport:   progress,
 	}); err != nil {
 		return
 	}

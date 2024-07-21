@@ -11,13 +11,14 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-func findScenesQP(dir string, nbScenes, qp int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, err error) {
+func findScenesQP(dir string, nbScenes, qp int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, err error) {
 	// Prepare
 	results = make([]int, nbScenes)
 	bypass := liveprogress.Bypass()
 	// Live progress
+	var scenesDone int
 	bar := liveprogress.SetMainLineAsBar(
-		liveprogress.WithTotal(uint64(nbScenes)),
+		liveprogress.WithTotal(uint64(totalDuration)),
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -28,28 +29,30 @@ func findScenesQP(dir string, nbScenes, qp int, auditor VMAFChecker, videoCUDA, 
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			return fmt.Sprintf(" remaining | %d/%d scenes completed",
-				bar.Current(), bar.Total(),
+				scenesDone, nbScenes,
 			)
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
 	// Go
+	var sceneDuration time.Duration
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
-		if qp, err = findSceneQP(dir, scene, qp, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
+		if qp, sceneDuration, err = findSceneQP(dir, scene, qp, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
 			err = fmt.Errorf("failed to find the right scene %d encoding QP: %w", scene, err)
 			return
 		}
 		results[scene] = qp
 		fmt.Fprintf(bypass, "Scene %d: QP %d will be used\n", scene, qp)
-		bar.CurrentIncrement()
+		bar.CurrentAdd(uint64(sceneDuration))
+		scenesDone++
 	}
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s: %+v\n", duration.Round(time.Second), results)
 	return
 }
 
-func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (qp int, err error) {
+func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (qp int, duration time.Duration, err error) {
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, scene))
 	sceneInfos, err := getStreamsInfosCF(input)
@@ -57,6 +60,7 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
 	}
+	duration = sceneInfos.Format.Duration
 	videoTrack := sceneInfos.VideoTrack()
 	totalFrames, err := strconv.Atoi(videoTrack.NbReadFrames)
 	if err != nil {
@@ -95,7 +99,7 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 			// Let's try to increase QP a bit more to see if we can decrease the size
 			lastValid = QPCandidate
 			QPCandidate++
-			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease quality with QP %d\n",
+			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease size with QP %d\n",
 				scene, lastValid, QPCandidate)
 		} else {
 			// If last candidate, keep it (and do not delete it)
