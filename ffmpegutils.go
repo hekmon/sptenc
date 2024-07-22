@@ -277,6 +277,9 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		ProcessRegistration: children.ProcessRegistration,
 		FFMPEGStatsReport:   progress,
 	})
+	if err != nil {
+		return
+	}
 	duration := time.Since(start)
 	// Done
 	vmaf = report.GetStats()
