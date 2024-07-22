@@ -52,7 +52,7 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" | %d frames (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -91,7 +91,7 @@ func getScenes(path string, totalDuration time.Duration, threshold float64, cuda
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" remaining | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" remaining | %d frames (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -192,7 +192,7 @@ func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (er
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" | %d frames (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -246,7 +246,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d frames processed (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" | %d frames (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
