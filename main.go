@@ -126,8 +126,6 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Prepare
-	outputPath := computeOutputFilePath(*input, *output)
-	fmt.Fprintf(bypass, "Output will be written to: %s\n", outputPath)
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
@@ -171,13 +169,15 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	// Step 5 - Merge scenes
-	fmt.Fprintln(bypass, "Merging scenes into one video stream...")
+	fmt.Fprintln(bypass, "Remuxing encoded scenes to final file...")
+	outputPath := computeOutputFilePath(*input, *output)
 	tagsFlags := generateTags(*stats.Format)
 	if err = scenesMerge(*input, tmpDir, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)
 		exitCode = 2
 		return
 	}
+	fmt.Fprintf(bypass, "Output has been written to: %s\n", outputPath)
 	// Done
 	if !*keep {
 		if err = os.RemoveAll(tmpDir); err != nil {

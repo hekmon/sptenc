@@ -173,7 +173,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 			}
 			// We found a valid QP after encountering an invalid QP, let's use it
 			if valid {
-				fmt.Fprintf(bypass, "Scene %d: QP %d is finaly good enough, keeping it\n",
+				fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, keeping it\n",
 					scene, QPCandidate)
 				finalQP = QPCandidate
 				return
