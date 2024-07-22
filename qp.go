@@ -52,7 +52,7 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 	for scene := 0; scene < nbScenes; scene++ {
 		fmt.Fprintf(bypass, "Scene %d: Search for the right QP, starting with %d\n", scene, startQP)
 		if sceneQP, sceneDuration, err = findSceneQP(dir, scene, startQP, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
-			err = fmt.Errorf("failed to find the right scene %d encoding QP: %w", scene, err)
+			err = fmt.Errorf("failed to find the right encoding QP scene %d: %w", scene, err)
 			return
 		}
 		results[scene] = sceneQP
@@ -211,13 +211,13 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 func sceneQP(input, output, vmafReportPath, frameRate string, totalFrames, sceneID, qp int, auditor VMAFChecker, ultraHD, NEG, videoCUDA, VMAFCUDA bool, gpu int) (valid bool, err error) {
 	// Encode
 	if err = encodeQP(input, output, totalFrames, qp, videoCUDA, gpu); err != nil {
-		err = fmt.Errorf("failed to encode scene at QP %d: %w", qp, err)
+		err = fmt.Errorf("failed to encode scene: %w", err)
 		return
 	}
 	// Compute VMAF
 	var vmaf ffmpegutils.VMAFStats
 	if vmaf, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD, NEG, videoCUDA, VMAFCUDA, gpu); err != nil {
-		err = fmt.Errorf("failed to compute VMAF for scene at QP %d: %w", qp, err)
+		err = fmt.Errorf("failed to compute VMAF for scene: %w", err)
 		return
 	}
 	// Check
