@@ -20,7 +20,7 @@ var (
 	Version = "dev"
 	// Flags
 	input          *string
-	workingDir     *string
+	tmpDir         *string
 	output         *string
 	sceneThreshold *float64
 	startQP        *int
@@ -36,8 +36,8 @@ var (
 	vmafLimitHMean *float64
 	vmafLimitMean  *float64
 	// Run
-	children Children
-	tmpDir   string
+	children         Children
+	workingDirectory string
 )
 
 func main() {
@@ -50,9 +50,9 @@ func main() {
 		case 3:
 			// exit error
 			if *keep {
-				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", tmpDir)
+				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", workingDirectory)
 			} else {
-				if err := os.RemoveAll(tmpDir); err != nil {
+				if err := os.RemoveAll(workingDirectory); err != nil {
 					fmt.Fprintf(os.Stderr, "Failed to clean working directory: %s\n", err)
 					exitCode = 3
 				}
@@ -62,13 +62,13 @@ func main() {
 			// no tmp files to delete
 		case 2:
 			// runtime error, keep tmp files even if no -keep flag
-			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", tmpDir)
+			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", workingDirectory)
 		}
 		os.Exit(exitCode)
 	}()
 	// Flags
 	input = flag.String("input", "", "Input file to transcode.")
-	workingDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded scenes and VMAF reports.")
+	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded scenes and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	sceneThreshold = flag.Float64("scenethreshold", 14, "Scene detection threshold. Valid range is [0., 100], good values are [8.0, 14.0].")
 	startQP = flag.Int("qp", 18, "Quantization Parameter value to start scene encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
@@ -129,6 +129,10 @@ func main() {
 	if *output != "" && !filepath.IsAbs(*output) {
 		*output = filepath.Join(currentWorkingDirectory, *output)
 	}
+	if !filepath.IsAbs(*tmpDir) {
+		*tmpDir = filepath.Join(currentWorkingDirectory, *tmpDir)
+	}
+	workingDirectory = getWorkingDirPath(*tmpDir)
 	// Properly handle stop
 	runCtx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	go cleanStop(runCtx)
@@ -152,18 +156,21 @@ func main() {
 }
 
 func scenc(auditor VMAFChecker) (exitCode int) {
+	var err error
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Prepare
-	stats, err := getStreamsInfos(*input)
-	if err != nil {
-		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
+	if err = os.MkdirAll(workingDirectory, 0755); err != nil {
+		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
 		exitCode = 2
 		return
 	}
-	tmpDir = getWorkingDirPath(*workingDir)
-	if err = os.MkdirAll(tmpDir, 0755); err != nil {
-		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
+	if *debug {
+		fmt.Fprintf(bypass, "Working directory: %s\n", workingDirectory)
+	}
+	stats, err := getStreamsInfos(*input)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
 		exitCode = 2
 		return
 	}
@@ -177,12 +184,12 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 3 - Split file by scenes
 	fmt.Fprintf(bypass, "Splitting scenes...\n")
-	if err = splitScenes(*input, tmpDir, stats.Format.Duration, scenes); err != nil {
+	if err = splitScenes(*input, workingDirectory, stats.Format.Duration, scenes); err != nil {
 		fmt.Fprintf(bypass, "Failed to split scenes: %s\n", err)
 		exitCode = 2
 		return
 	}
-	splittedScenes, err := getDirFilesNumber(tmpDir)
+	splittedScenes, err := getDirFilesNumber(workingDirectory)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to get number of splitted scenes: %s\n", err)
 		exitCode = 2
@@ -195,7 +202,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		scenesQP []int
 		statsQP  QPStats
 	)
-	if scenesQP, statsQP, err = findScenesQP(tmpDir, splittedScenes, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
+	if scenesQP, statsQP, err = findScenesQP(workingDirectory, splittedScenes, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode scenes: %s\n", err)
 		exitCode = 2
 		return
@@ -204,7 +211,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	fmt.Fprintln(bypass, "Remuxing encoded scenes to final file...")
 	outputPath := computeOutputFilePath(*input, *output)
 	tagsFlags := generateTags(*stats.Format, statsQP)
-	if err = scenesMerge(*input, tmpDir, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
+	if err = scenesMerge(*input, workingDirectory, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)
 		exitCode = 2
 		return
