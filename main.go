@@ -183,6 +183,8 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		if err = os.RemoveAll(tmpDir); err != nil {
 			fmt.Fprintf(bypass, "Failed to clean working directory: %s\n", err)
 		}
+	} else {
+		fmt.Fprintf(bypass, "You can find kept temporary files here: %s\n", tmpDir)
 	}
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Complete process took %s\n", duration.Round(time.Second))
