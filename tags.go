@@ -8,11 +8,6 @@ import (
 )
 
 const (
-	// Original upscailer tag to delete
-	upscailerEncoderTagKey       = "upscailer_encoder"
-	upscailerEncoderPresetTagKey = "upscailer_encoder_preset"
-	upscailerEncoderQPTagKey     = "upscailer_encoder_qp"
-	// scenc tags
 	titleTagKey              = "title"
 	titleTagValue            = "ScEnc"
 	scencURLTagKey           = "scenc_url"
@@ -37,12 +32,9 @@ func generateTags(format ffmpegutils.FFProbeFormat) (flags []string) {
 		// ffmpeg does not seem to fail when non injectable tags are provided, let's try to set them in case the format supports them
 		fallthrough
 	case ffmpegutils.FormatMatroska:
-		flags = append(flags, "-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)))
-		// Remove upscailer encoding tags if any
 		flags = append(flags,
-			"-metadata:s:v:0", fmt.Sprintf("%s=", upscailerEncoderTagKey),
-			"-metadata:s:v:0", fmt.Sprintf("%s=", upscailerEncoderPresetTagKey),
-			"-metadata:s:v:0", fmt.Sprintf("%s=", upscailerEncoderQPTagKey),
+			"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencURLTagKey, scencURLTagValue),
 		)
 		// Encoding
 		if *nvc {
