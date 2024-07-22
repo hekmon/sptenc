@@ -8,11 +8,6 @@ import (
 	"syscall"
 )
 
-const (
-	FFProbe = "ffprobe.exe"
-	FFMPEG  = "ffmpeg.exe"
-)
-
 func StopAndWait(process *os.Process) (err error) {
 	handle, err := syscall.OpenProcess(syscall.PROCESS_TERMINATE, false, uint32(process.Pid))
 	if err != nil {

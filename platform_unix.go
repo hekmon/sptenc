@@ -8,11 +8,6 @@ import (
 	"syscall"
 )
 
-const (
-	FFProbe = "ffprobe"
-	FFMPEG  = "ffmpeg"
-)
-
 func StopAndWait(process *os.Process) (err error) {
 	if err = process.Signal(syscall.SIGTERM); err != nil {
 		err = fmt.Errorf("failed to send %s signal to child process: %w", syscall.SIGTERM, err)
