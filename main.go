@@ -27,6 +27,7 @@ var (
 	keep           *bool
 	//// vmaf
 	vmafcuda       *bool
+	vmafNEG        *bool
 	vmafLimitMin   *float64
 	vmafLimitP1    *float64
 	vmafLimitHMean *float64
@@ -58,6 +59,7 @@ func main() {
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
+	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
 	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this minimum VMAF limit is not used.")
 	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
 	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
