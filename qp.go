@@ -42,7 +42,7 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
-		fmt.Fprintf(bypass, "Scene %d: Start searching for the right QP, starting with %d\n", scene, startQP)
+		fmt.Fprintf(bypass, "Scene %d: Search for the right QP, starting with %d\n", scene, startQP)
 		if sceneQP, sceneDuration, err = findSceneQP(dir, scene, startQP, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
 			err = fmt.Errorf("failed to find the right scene %d encoding QP: %w", scene, err)
 			return
