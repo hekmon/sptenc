@@ -46,7 +46,7 @@ func main() {
 	// Flags
 	input = flag.String("input", "", "Input file to transcode.")
 	workingDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded scenes and VMAF reports.")
-	output = flag.String("output", "", "Output directory for the reencoded file. If empty directory of input file will be used.")
+	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	sceneThreshold = flag.Float64("scenethreshold", 14, "Scene detection threshold. Valid range is [0., 100], good values are [8.0, 14.0].")
 	startQP = flag.Int("qp", 18, "Quantization Parameter value to start scene encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
@@ -97,7 +97,7 @@ func main() {
 	if !filepath.IsAbs(*input) {
 		*input = filepath.Join(currentWorkingDirectory, *input)
 	}
-	if !filepath.IsAbs(*output) {
+	if *output != "" && !filepath.IsAbs(*output) {
 		*output = filepath.Join(currentWorkingDirectory, *output)
 	}
 	// Properly handle stop
@@ -126,6 +126,8 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Prepare
+	outputPath := computeOutputFilePath(*input, *output)
+	fmt.Fprintf(bypass, "Output will be written to: %s\n", outputPath)
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
@@ -170,7 +172,6 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 5 - Merge scenes
 	fmt.Fprintln(bypass, "Merging scenes into one video stream...")
-	outputPath := computeOutputFilePath(*input, *output)
 	tagsFlags := generateTags(*stats.Format)
 	if err = scenesMerge(*input, tmpDir, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)

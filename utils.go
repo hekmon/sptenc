@@ -24,7 +24,7 @@ func getDirFilesNumber(dir string) (num int, err error) {
 func computeOutputFilePath(file, outputDir string) (output string) {
 	// Work on a clean path
 	file = filepath.Clean(file)
-	// If no output dir set, use current dir
+	// If no output dir set, use file dir
 	if outputDir == "" {
 		outputDir = filepath.Dir(file)
 	}
