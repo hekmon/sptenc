@@ -11,7 +11,7 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-func findScenesQP(dir string, nbScenes, qp int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, err error) {
+func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, err error) {
 	// Prepare
 	results = make([]int, nbScenes)
 	bypass := liveprogress.Bypass()
@@ -37,22 +37,21 @@ func findScenesQP(dir string, nbScenes, qp int, totalDuration time.Duration, aud
 	// Go
 	var (
 		sceneDuration, scenesDuration time.Duration
-		totalQP, QPWeights            int
+		sceneQP, totalQP, QPWeights   int
 	)
 
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
-		if qp, sceneDuration, err = findSceneQP(dir, scene, qp, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
+		fmt.Fprintf(bypass, "Scene %d: searching for the right QP\n", scene)
+		if sceneQP, sceneDuration, err = findSceneQP(dir, scene, startQP, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
 			err = fmt.Errorf("failed to find the right scene %d encoding QP: %w", scene, err)
 			return
 		}
-		// Handle main results
-		fmt.Fprintf(bypass, "Scene %d: QP %d will be used\n", scene, qp)
-		results[scene] = qp
+		results[scene] = sceneQP
 		// Compute stats
-		totalQP += qp
+		totalQP += sceneQP
 		scenesDuration += sceneDuration
-		QPWeights += qp * int(sceneDuration.Milliseconds())
+		QPWeights += sceneQP * int(sceneDuration.Milliseconds())
 		// Update live progress
 		bar.CurrentAdd(uint64(sceneDuration))
 		scenesDone++
@@ -94,6 +93,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		output, report string
 	)
 	// Execute first test and loop
+	fmt.Fprintf(bypass, "Scene %d: start search with QP %d\n", scene, startQP)
 	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, startQP))
 	report = output + "_vmaf.json"
 	if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, startQP, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
@@ -107,6 +107,8 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		QPCandidate := startQP + 1
 		// Search
 		for {
+			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease size with QP %d\n",
+				scene, lastValid, QPCandidate)
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
 				fmt.Fprintf(bypass, "Scene %d: QP %d is invalid, rolling back to QP %d\n",
@@ -140,8 +142,6 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 			// Let's try to increase QP to reduce size
 			lastValid = QPCandidate
 			QPCandidate++
-			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease size with QP %d\n",
-				scene, lastValid, QPCandidate)
 		}
 	} else {
 		// We got an invalid QP, try to decrease QP to increase quality until we have a valid QP
@@ -149,6 +149,8 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		QPCandidate := startQP - 1
 		// Search
 		for {
+			fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
+				scene, lastInvalid, QPCandidate)
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
 				fmt.Fprintf(bypass, "Scene %d: QP %d is invalid, rolling back to QP %d\n",
@@ -180,8 +182,6 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 			// If still invalid, continue to increase quality
 			lastInvalid = QPCandidate
 			QPCandidate--
-			fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
-				scene, lastInvalid, QPCandidate)
 		}
 	}
 }

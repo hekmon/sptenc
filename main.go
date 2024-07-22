@@ -48,17 +48,17 @@ func main() {
 	workingDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded scenes and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty directory of input file will be used.")
 	sceneThreshold = flag.Float64("scenethreshold", 14, "Scene detection threshold. Valid range is [0., 100], good values are [8.0, 14.0].")
-	startQP = flag.Int("qp", 16, "Quantization Parameter value to start with. The higher the value, the more aggressive the encoding will be. Speed up initial process by setting a QP close to your VMAF limits.")
+	startQP = flag.Int("qp", 18, "Quantization Parameter value to start scene encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
-	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, the minimum VMAF score is not used.")
-	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, the VMAF score is not used.")
-	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, the VMAF score is not used.")
-	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, the VMAF score is not used.")
+	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this minimum VMAF limit is not used.")
+	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
+	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
+	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
 	flag.Parse()
 	// Validate common flags
 	if *input == "" {
