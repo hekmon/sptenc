@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hekmon/ffmpegutils"
@@ -44,7 +45,6 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 		sceneDuration, scenesDuration time.Duration
 		sceneQP, totalQP, QPWeights   int
 	)
-
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
 		fmt.Fprintf(bypass, "Scene %d: Search for the right QP, starting with %d\n", scene, startQP)
@@ -94,6 +94,12 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
+	var NEG bool
+	if videoCUDA {
+		NEG = !strings.Contains(videoTrack.Tags["ENCODER"], "nvenc")
+	} else {
+		NEG = !strings.Contains(videoTrack.Tags["ENCODER"], "libx265")
+	}
 	bypass := liveprogress.Bypass()
 	var (
 		valid          bool
@@ -102,7 +108,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 	// Execute first test and loop
 	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, startQP))
 	report = output + "_vmaf.json"
-	if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, startQP, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+	if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, startQP, auditor, ultraHD, NEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 		err = fmt.Errorf("failed to test QP %d: %w", startQP, err)
 		return
 	}
@@ -125,7 +131,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 			// Test QP
 			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
 			report = output + "_vmaf.json"
-			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, NEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
 				return
 			}
@@ -181,7 +187,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 			// Test QP
 			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
 			report = output + "_vmaf.json"
-			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, NEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
 				return
 			}
@@ -199,7 +205,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 	}
 }
 
-func sceneQP(input, output, vmafReportPath, frameRate string, totalFrames, sceneID, qp int, auditor VMAFChecker, ultraHD, videoCUDA, VMAFCUDA bool, gpu int) (valid bool, err error) {
+func sceneQP(input, output, vmafReportPath, frameRate string, totalFrames, sceneID, qp int, auditor VMAFChecker, ultraHD, NEG, videoCUDA, VMAFCUDA bool, gpu int) (valid bool, err error) {
 	// Encode
 	if err = encodeQP(input, output, totalFrames, qp, videoCUDA, gpu); err != nil {
 		err = fmt.Errorf("failed to encode scene at QP %d: %w", qp, err)
@@ -207,7 +213,7 @@ func sceneQP(input, output, vmafReportPath, frameRate string, totalFrames, scene
 	}
 	// Compute VMAF
 	var vmaf ffmpegutils.VMAFStats
-	if vmaf, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+	if vmaf, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD, NEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 		err = fmt.Errorf("failed to compute VMAF for scene at QP %d: %w", qp, err)
 		return
 	}

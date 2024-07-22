@@ -231,7 +231,7 @@ func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (er
 	return
 }
 
-func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHDmodel, videoCUDA, VMAFCUDA bool, gpu int) (vmaf ffmpegutils.VMAFStats, err error) {
+func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, NEG, videoCUDA, VMAFCUDA bool, gpu int) (vmaf ffmpegutils.VMAFStats, err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -265,11 +265,12 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		InputFrameRate: frameRate,
 		DistortedPath:  distorted,
 		// VMAF generation
-		ReportPath: reportPath,
-		UltraHD:    ultraHDmodel,
-		VideoCuda:  videoCUDA,
-		VMAFCuda:   VMAFCUDA,
-		GPUID:      &gpu,
+		ReportPath:        reportPath,
+		UltraHD:           ultraHD,
+		VideoCuda:         videoCUDA,
+		NoEnhancementGain: NEG,
+		VMAFCuda:          VMAFCUDA,
+		GPUID:             &gpu,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
