@@ -35,20 +35,39 @@ func findScenesQP(dir string, nbScenes, qp int, totalDuration time.Duration, aud
 	)
 	defer liveprogress.RemoveBar(bar)
 	// Go
-	var sceneDuration time.Duration
+	var (
+		sceneDuration, scenesDuration time.Duration
+		totalQP, QPWeights            int
+	)
+
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
 		if qp, sceneDuration, err = findSceneQP(dir, scene, qp, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
 			err = fmt.Errorf("failed to find the right scene %d encoding QP: %w", scene, err)
 			return
 		}
-		results[scene] = qp
+		// Handle main results
 		fmt.Fprintf(bypass, "Scene %d: QP %d will be used\n", scene, qp)
+		results[scene] = qp
+		// Compute stats
+		totalQP += qp
+		scenesDuration += sceneDuration
+		QPWeights += qp * int(sceneDuration.Milliseconds())
+		// Update live progress
 		bar.CurrentAdd(uint64(sceneDuration))
 		scenesDone++
 	}
 	duration := time.Since(start)
-	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s: %+v\n", duration.Round(time.Second), results)
+	// Done
+	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s. Mean scene QP is %s and weighted global QP is %s.\n",
+		duration.Round(time.Second),
+		strconv.FormatFloat(float64(totalQP)/float64(len(results)), 'f', -1, 64),
+		strconv.FormatFloat(float64(QPWeights)/float64(scenesDuration), 'f', -1, 64),
+	)
+	if *debug {
+		fmt.Fprintf(bypass, "Scenes QPs: %+v\nScenes duration: %s (expected duration: %s)\n",
+			results, scenesDuration, totalDuration)
+	}
 	return
 }
 
