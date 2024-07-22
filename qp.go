@@ -35,7 +35,7 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" remaining | %d/%d scenes completed",
+			return fmt.Sprintf(" left | %d/%d scenes completed",
 				scenesDone, nbScenes,
 			)
 		}),

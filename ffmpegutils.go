@@ -91,7 +91,7 @@ func getScenes(path string, totalDuration time.Duration, threshold float64, cuda
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" remaining | %d frames (%0.0f fps, speed: %0.2fx)",
+			build.WriteString(fmt.Sprintf(" left | %d frames (%0.0f fps, speed: %0.2fx)",
 				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
@@ -144,7 +144,7 @@ func splitScenes(path, outputDir string, totalDuration time.Duration, scenes []*
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" remaining | speed: %0.2fx",
+			return fmt.Sprintf(" left | speed: %0.2fx",
 				currentStats.Speed,
 			)
 		}),
@@ -313,7 +313,7 @@ func scenesMerge(originalFile, scenesDir, outputPath string, tagsFlags []string,
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" remaining | speed: %0.2fx",
+			return fmt.Sprintf(" left | speed: %0.2fx",
 				currentStats.Speed,
 			)
 		}),
