@@ -52,7 +52,7 @@ func findScenesQP(dir string, nbScenes, qp int, totalDuration time.Duration, aud
 	return
 }
 
-func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (qp int, duration time.Duration, err error) {
+func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (finalQP int, duration time.Duration, err error) {
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, scene))
 	sceneInfos, err := getStreamsInfosCF(input)
@@ -69,59 +69,96 @@ func findSceneQP(dir string, scene, QPCandidate int, auditor VMAFChecker, videoC
 	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
-	// Find the right QP
-	var (
-		valid                  bool
-		lastInvalid, lastValid int = -1, -1
-	)
 	bypass := liveprogress.Bypass()
-	for {
-		// Encode
-		output := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
-		report := output + "_vmaf.json"
-		if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
-			return
-		}
-		// Handle result
-		if valid {
-			if lastInvalid != -1 {
-				// previous QP was invalid, so we got our first validQP
-				qp = QPCandidate
+	var (
+		valid          bool
+		output, report string
+	)
+	// Execute first test and loop
+	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, startQP))
+	report = output + "_vmaf.json"
+	if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, startQP, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+		err = fmt.Errorf("failed to test QP %d: %w", startQP, err)
+		return
+	}
+	// Inscrease search or decrease search
+	if valid {
+		// We got a valid QP, try to increase QP to reduce space while we can
+		lastValid := startQP
+		QPCandidate := startQP + 1
+		// Search
+		for {
+			// Check QP
+			if QPCandidate > ffmpegutils.QPMaximum {
+				fmt.Fprintf(bypass, "Scene %d: QP %d is invalid, rolling back to QP %d\n",
+					scene, QPCandidate, lastValid)
+				finalQP = lastValid
 				return
 			}
-			// We have a new valid QP, remove the old one if it exists
-			if lastValid != -1 && !*keep {
+			// Test QP
+			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
+			report = output + "_vmaf.json"
+			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
+				return
+			}
+			// If the new QP is invalid, we return the previous one
+			if !valid {
+				// We reach an invalid QP, let's use the previous valid QP
+				fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, rolling back to QP %d\n",
+					scene, QPCandidate, lastValid)
+				finalQP = lastValid
+				return
+			}
+			// We found a new valid QP
+			if !*keep {
+				// Remove previous valid QP
 				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, lastValid))); err != nil {
 					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", output, err)
 					return
 				}
 			}
-			// Let's try to increase QP a bit more to see if we can decrease the size
+			// Let's try to increase QP to reduce size
 			lastValid = QPCandidate
 			QPCandidate++
 			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease size with QP %d\n",
 				scene, lastValid, QPCandidate)
-		} else {
-			// If last candidate, keep it (and do not delete it)
-			if QPCandidate == 0 {
-				fmt.Fprintf(liveprogress.Bypass(), "WARNING: Keeping QP 0 as it is not possible to do better\n")
-				qp = 0
+		}
+	} else {
+		// We got an invalid QP, try to decrease QP to increase quality until we have a valid QP
+		lastInvalid := startQP
+		QPCandidate := startQP - 1
+		// Search
+		for {
+			// Check QP
+			if QPCandidate < ffmpegutils.QPMinimum {
+				fmt.Fprintf(bypass, "Scene %d: QP %d is invalid, rolling back to QP %d\n",
+					scene, QPCandidate, lastInvalid)
+				finalQP = lastInvalid
 				return
 			}
-			// Remove the current QP as it is invalid
+			// We can still test candidate QP, delete previous invalid QP
 			if !*keep {
-				if err = os.Remove(output); err != nil {
-					err = fmt.Errorf("failed to remove invalid QP at %s: %w", output, err)
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, lastInvalid))); err != nil {
+					err = fmt.Errorf("failed to remove previous invalid QP at %s: %w", output, err)
 					return
 				}
 			}
-			// In case we had a valid one but tried to decrease quality, we are done
-			if lastValid != -1 {
-				// We already had a valid QP and decreasing quality is not working anymore. We are done
-				qp = lastValid
+			// Test QP
+			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
+			report = output + "_vmaf.json"
+			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
+				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
 				return
 			}
-			// Current QP is not good enough, let's increase quality
+			// We found a valid QP after encountering an invalid QP, let's use it
+			if valid {
+				fmt.Fprintf(bypass, "Scene %d: QP %d is finaly good enough, keeping it\n",
+					scene, QPCandidate)
+				finalQP = QPCandidate
+				return
+			}
+			// If still invalid, continue to increase quality
 			lastInvalid = QPCandidate
 			QPCandidate--
 			fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, let's try to increase quality with QP %d\n",

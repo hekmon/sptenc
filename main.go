@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
 
@@ -67,6 +68,11 @@ func main() {
 	}
 	if *sceneThreshold < 0 || *sceneThreshold > 100 {
 		fmt.Fprintln(os.Stderr, "Scene threshold must be between 0 and 100")
+		exitCode = 1
+		return
+	}
+	if *startQP < ffmpegutils.QPMinimum || *startQP > ffmpegutils.QPMaximum {
+		fmt.Fprintf(os.Stderr, "Start QP must be between [%d, %d]\n", ffmpegutils.QPMinimum, ffmpegutils.QPMaximum)
 		exitCode = 1
 		return
 	}
