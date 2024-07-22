@@ -125,6 +125,7 @@ func main() {
 func scenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
+
 	// Prepare
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
@@ -178,6 +179,18 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	fmt.Fprintf(bypass, "Output has been written to: %s\n", outputPath)
+	// Step 6 - Recompute MKV stats if necessary
+	ext := filepath.Ext(*output)
+	if ext == ".mkv" {
+		fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
+		if err = regenerateMKVStats(*output); err != nil {
+			fmt.Fprintf(bypass, "Failed to regenerate MKV stats: %s\n", err)
+			exitCode = 2
+			return
+		}
+	} else if *debug {
+		fmt.Fprintf(bypass, "Skipping MKV stats regeneration as ext is %s\n", ext)
+	}
 	// Done
 	if !*keep {
 		if err = os.RemoveAll(tmpDir); err != nil {

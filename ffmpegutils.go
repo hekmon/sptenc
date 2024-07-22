@@ -345,3 +345,42 @@ func scenesMerge(originalFile, scenesDir, outputPath string, tagsFlags []string,
 	}
 	return
 }
+
+func regenerateMKVStats(path string) (err error) {
+	// live progress
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(100)),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " MKV Stats | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return " remaining"
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(percent int) {
+		bar.CurrentSet(uint64(percent))
+	}
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.GenerateMKVStats(ffmpegutils.GenerateMKVStatsConfig{
+		// Input
+		Path: path,
+		// Reporting
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+		ProgressReport:      progress,
+	}); err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	fmt.Fprintf(liveprogress.Bypass(), "MKV stats regenerated in %s\n", duration.Round(time.Second))
+	return
+}
