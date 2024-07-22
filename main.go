@@ -40,6 +40,7 @@ func main() {
 	var exitCode int
 	defer func() {
 		if exitCode != 0 {
+			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", *workingDir)
 			os.Exit(exitCode)
 		}
 	}()
