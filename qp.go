@@ -12,8 +12,10 @@ import (
 )
 
 type QPStats struct {
-	ScenesQPMean     float64
-	GlobalWeightedQP float64
+	Minimum        int
+	Maximum        int
+	ScenesMean     float64
+	GlobalWeighted float64
 }
 
 func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, stats QPStats, err error) {
@@ -44,6 +46,8 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 		sceneDuration, scenesDuration time.Duration
 		sceneQP, totalQP, QPWeights   int
 	)
+	stats.Minimum = ffmpegutils.QPMaximum + 1
+	stats.Maximum = ffmpegutils.QPMinimum - 1
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
 		fmt.Fprintf(bypass, "Scene %d: Search for the right QP, starting with %d\n", scene, startQP)
@@ -53,6 +57,12 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 		}
 		results[scene] = sceneQP
 		// Compute stats
+		if sceneQP < stats.Minimum {
+			stats.Minimum = sceneQP
+		}
+		if sceneQP > stats.Maximum {
+			stats.Maximum = sceneQP
+		}
 		totalQP += sceneQP
 		scenesDuration += sceneDuration
 		QPWeights += sceneQP * int(sceneDuration.Milliseconds())
@@ -62,12 +72,12 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 	}
 	duration := time.Since(start)
 	// Done
-	stats.ScenesQPMean = float64(totalQP) / float64(len(results))
-	stats.GlobalWeightedQP = float64(QPWeights) / float64(scenesDuration.Milliseconds())
+	stats.ScenesMean = float64(totalQP) / float64(len(results))
+	stats.GlobalWeighted = float64(QPWeights) / float64(scenesDuration.Milliseconds())
 	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s. Mean scene QP is %s and weighted global QP is %s.\n",
 		duration.Round(time.Second),
-		strconv.FormatFloat(stats.ScenesQPMean, 'f', -1, 64),
-		strconv.FormatFloat(stats.GlobalWeightedQP, 'f', -1, 64),
+		strconv.FormatFloat(stats.ScenesMean, 'f', -1, 64),
+		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
 	if *debug {
 		fmt.Fprintf(bypass, "Scenes QPs: %+v\nScenes duration: %s (original duration: %s)\n",
