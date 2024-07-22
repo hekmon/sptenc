@@ -12,9 +12,12 @@ import (
 
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
+	"github.com/hekmon/liveterm/v2"
 )
 
 var (
+	//  overrided during compilation
+	Version = "dev"
 	// Flags
 	input          *string
 	workingDir     *string
@@ -80,7 +83,12 @@ func main() {
 	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
 	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
 	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
+	version := flag.Bool("version", false, "Show the current version of the upscailer.")
 	flag.Parse()
+	if *version {
+		fmt.Printf("%s %s\n", liveterm.Hyperlink(scencURLTagValue, "Sc(enes)Enc(oder)"), Version)
+		return
+	}
 	// Validate common flags
 	if *input == "" {
 		fmt.Fprintln(os.Stderr, "Please set the -input flag")
