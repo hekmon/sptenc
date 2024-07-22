@@ -14,13 +14,15 @@ const (
 	scencURLTagValue         = "https://github.com/hekmon/scenc"
 	scencEncoderTagKey       = "scenc_encoder"
 	scencEncoderPresetTagKey = "scenc_encoder_preset"
-	scencVMAFMeanTagKey      = "scenc_vmaf_mean"
-	scencVMAFHMeanTagKey     = "scenc_vmaf_hmean"
-	scencVMAFP1TagKey        = "scenc_vmaf_p1"
-	scencVMAFMinTagKey       = "scenc_vmaf_min"
+	scencVMAFMeanTagKey      = "scenc_vmaf_conf_mean"
+	scencVMAFHMeanTagKey     = "scenc_vmaf_conf_hmean"
+	scencVMAFP1TagKey        = "scenc_vmaf_conf_p1"
+	scencVMAFMinTagKey       = "scenc_vmaf_conf_min"
+	scencStatsMeanQP         = "scenc_stats_scenes_mean_qp"
+	scenceStatsWeightedQP    = "scenc_stats_global_weighted_qp"
 )
 
-func generateTags(format ffmpegutils.FFProbeFormat) (flags []string) {
+func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []string) {
 	switch format.Name {
 	case ffmpegutils.FormatQuickTime:
 		// write metadata using iTunes-style metadata tags in MOV/MP4 files
@@ -44,7 +46,9 @@ func generateTags(format ffmpegutils.FFProbeFormat) (flags []string) {
 			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=libx265", scencEncoderTagKey))
 			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.Libx265Preset))
 		}
-		// VMAF
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.ScenesQPMean, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scenceStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeightedQP, 'f', -1, 64)))
+		// VMAF conf
 		if *vmafLimitMin != VMAFOffValue {
 			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
 		}

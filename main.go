@@ -166,8 +166,11 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	fmt.Fprintf(bypass, "Splitting managed to separate %d scenes (on %d detected)\n", splittedScenes, len(scenes)+1)
 	// Step 4 - Encode scenes
 	fmt.Fprintf(bypass, "Searching the right QP for each scenes...\n")
-	var scenesQP []int
-	if scenesQP, err = findScenesQP(tmpDir, splittedScenes, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
+	var (
+		scenesQP []int
+		statsQP  QPStats
+	)
+	if scenesQP, statsQP, err = findScenesQP(tmpDir, splittedScenes, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode scenes: %s\n", err)
 		exitCode = 2
 		return
@@ -175,7 +178,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	// Step 5 - Merge scenes
 	fmt.Fprintln(bypass, "Remuxing encoded scenes to final file...")
 	outputPath := computeOutputFilePath(*input, *output)
-	tagsFlags := generateTags(*stats.Format)
+	tagsFlags := generateTags(*stats.Format, statsQP)
 	if err = scenesMerge(*input, tmpDir, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)
 		exitCode = 2

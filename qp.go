@@ -11,7 +11,12 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, err error) {
+type QPStats struct {
+	ScenesQPMean     float64
+	GlobalWeightedQP float64
+}
+
+func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, stats QPStats, err error) {
 	// Prepare
 	results = make([]int, nbScenes)
 	bypass := liveprogress.Bypass()
@@ -58,13 +63,15 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 	}
 	duration := time.Since(start)
 	// Done
+	stats.ScenesQPMean = float64(totalQP) / float64(len(results))
+	stats.GlobalWeightedQP = float64(QPWeights) / float64(scenesDuration.Milliseconds())
 	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s. Mean scene QP is %s and weighted global QP is %s.\n",
 		duration.Round(time.Second),
-		strconv.FormatFloat(float64(totalQP)/float64(len(results)), 'f', -1, 64),
-		strconv.FormatFloat(float64(QPWeights)/float64(scenesDuration.Milliseconds()), 'f', -1, 64),
+		strconv.FormatFloat(stats.ScenesQPMean, 'f', -1, 64),
+		strconv.FormatFloat(stats.GlobalWeightedQP, 'f', -1, 64),
 	)
 	if *debug {
-		fmt.Fprintf(bypass, "Scenes QPs: %+v\nScenes duration: %s (expected duration: %s)\n",
+		fmt.Fprintf(bypass, "Scenes QPs: %+v\nScenes duration: %s (original duration: %s)\n",
 			results, scenesDuration, totalDuration)
 	}
 	return
