@@ -32,20 +32,36 @@ var (
 	vmafLimitP1    *float64
 	vmafLimitHMean *float64
 	vmafLimitMean  *float64
-	// Reencoder flags
 	// Run
 	children Children
+	tmpDir   string
 )
 
 func main() {
 	var exitCode int
 	defer func() {
-		if exitCode == 2 {
-			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", *workingDir)
+		switch exitCode {
+		case 0:
+			// all good
+			fallthrough
+		case 3:
+			// exit error
+			if *keep {
+				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", tmpDir)
+			} else {
+				if err := os.RemoveAll(tmpDir); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to clean working directory: %s\n", err)
+					exitCode = 3
+				}
+			}
+		case 1:
+			// warmup / config issue
+			// no tmp files to delete
+		case 2:
+			// runtime error, keep tmp files even if no -keep flag
+			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", tmpDir)
 		}
-		if exitCode != 0 {
-			os.Exit(exitCode)
-		}
+		os.Exit(exitCode)
 	}()
 	// Flags
 	input = flag.String("input", "", "Input file to transcode.")
@@ -130,7 +146,6 @@ func main() {
 func scenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
-
 	// Prepare
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
@@ -138,7 +153,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	tmpDir := getWorkingDirPath(*workingDir)
+	tmpDir = getWorkingDirPath(*workingDir)
 	if err = os.MkdirAll(tmpDir, 0755); err != nil {
 		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
 		exitCode = 2
@@ -199,14 +214,6 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	} else if *debug {
 		fmt.Fprintf(bypass, "Skipping MKV stats regeneration as ext is %s\n", ext)
 	}
-	// Done
-	if !*keep {
-		if err = os.RemoveAll(tmpDir); err != nil {
-			fmt.Fprintf(bypass, "Failed to clean working directory: %s\n", err)
-		}
-	} else {
-		fmt.Fprintf(bypass, "You can find kept temporary files here: %s\n", tmpDir)
-	}
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Complete process took %s\n", duration.Round(time.Second))
 	return
@@ -222,5 +229,5 @@ func cleanStop(ctx context.Context) {
 	if err = children.StopAndWait(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to stop and wait for current child process(es): %s\n", err)
 	}
-	os.Exit(2)
+	os.Exit(3)
 }
