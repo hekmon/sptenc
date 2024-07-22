@@ -42,7 +42,7 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 
 	start := time.Now()
 	for scene := 0; scene < nbScenes; scene++ {
-		fmt.Fprintf(bypass, "Scene %d: searching for the right QP\n", scene)
+		fmt.Fprintf(bypass, "Scene %d: searching for the right QP, starting with %d\n", scene, startQP)
 		if sceneQP, sceneDuration, err = findSceneQP(dir, scene, startQP, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
 			err = fmt.Errorf("failed to find the right scene %d encoding QP: %w", scene, err)
 			return
@@ -93,7 +93,6 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		output, report string
 	)
 	// Execute first test and loop
-	fmt.Fprintf(bypass, "Scene %d: start search with QP %d\n", scene, startQP)
 	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, startQP))
 	report = output + "_vmaf.json"
 	if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, startQP, auditor, ultraHD, videoCUDA, VMAFCUDA, gpu); err != nil {
