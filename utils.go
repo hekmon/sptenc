@@ -34,6 +34,6 @@ func computeOutputFilePath(file, outputDir string) (output string) {
 	baseName := inputFileName[:len(inputFileName)-len(extension)]
 	// Recompose
 	output = filepath.Join(outputDir,
-		fmt.Sprintf("%s [scencoded]%s", baseName, extension))
+		fmt.Sprintf("%s [%s]%s", baseName, titleTagValue, extension))
 	return
 }

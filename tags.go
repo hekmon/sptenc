@@ -9,7 +9,7 @@ import (
 
 const (
 	titleTagKey              = "title"
-	titleTagValue            = "ScEnc"
+	titleTagValue            = "ScEncoded"
 	scencURLTagKey           = "scenc_url"
 	scencURLTagValue         = "https://github.com/hekmon/scenc"
 	scencEncoderTagKey       = "scenc_encoder"
