@@ -23,44 +23,40 @@ const (
 )
 
 func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []string) {
-	switch format.Name {
-	case ffmpegutils.FormatQuickTime:
-		// write metadata using iTunes-style metadata tags in MOV/MP4 files
-		flags = append(flags, "-movflags", "use_metadata_tags")
-		fallthrough
-	case ffmpegutils.FormatAVI:
-		flags = append(flags, "-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)))
-	default:
-		// ffmpeg does not seem to fail when non injectable tags are provided, let's try to set them in case the format supports them
-		fallthrough
-	case ffmpegutils.FormatMatroska:
+	flags = make([]string, 0, 10)
+	// Global
+	flags = append(flags,
+		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencURLTagKey, scencURLTagValue),
+	)
+	// Encoding
+	if *nvc {
 		flags = append(flags,
-			"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencURLTagKey, scencURLTagValue),
+			"-metadata:s:v:0", fmt.Sprintf("%s=hevc_nvenc", scencEncoderTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.NVENCPreset),
 		)
-		// Encoding
-		if *nvc {
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=hevc_nvenc", scencEncoderTagKey))
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.NVENCPreset))
-		} else {
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=libx265", scencEncoderTagKey))
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.Libx265Preset))
-		}
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.ScenesQPMean, 'f', -1, 64)))
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scenceStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeightedQP, 'f', -1, 64)))
-		// VMAF conf
-		if *vmafLimitMin != VMAFOffValue {
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
-		}
-		if *vmafLimitP1 != VMAFOffValue {
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
-		}
-		if *vmafLimitHMean != VMAFOffValue {
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
-		}
-		if *vmafLimitMean != VMAFOffValue {
-			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
-		}
+	} else {
+		flags = append(flags,
+			"-metadata:s:v:0", fmt.Sprintf("%s=libx265", scencEncoderTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.Libx265Preset),
+		)
+	}
+	flags = append(flags,
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.ScenesQPMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scenceStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeightedQP, 'f', -1, 64)),
+	)
+	// VMAF conf
+	if *vmafLimitMin != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
+	}
+	if *vmafLimitP1 != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
+	}
+	if *vmafLimitHMean != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
+	}
+	if *vmafLimitMean != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
 	}
 	return
 }
