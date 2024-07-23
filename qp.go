@@ -35,7 +35,7 @@ func findPartsQP(dir string, nbParts, startQP int, totalDuration time.Duration, 
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "   Parts | "
+			return "  Global | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
