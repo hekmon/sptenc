@@ -94,6 +94,7 @@ func findPartsQP(dir string, nbParts, startQP int, totalDuration time.Duration, 
 }
 
 func findPartQP(dir string, part, startQP int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (finalQP int, duration time.Duration, err error) {
+	bypass := liveprogress.Bypass()
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, part))
 	partInfos, err := getStreamsInfosCF(input)
@@ -108,9 +109,11 @@ func findPartQP(dir string, part, startQP int, auditor VMAFChecker, videoCUDA, V
 		err = fmt.Errorf("failed to get total frames: %w", err)
 		return
 	}
+	if *debug {
+		fmt.Fprintf(bypass, "Part %d: contains %d frames\n", part, totalFrames)
+	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
-	bypass := liveprogress.Bypass()
 	var (
 		valid          bool
 		output, report string
