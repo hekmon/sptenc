@@ -115,6 +115,30 @@ func findPartQP(dir string, part, startQP int, auditor VMAFChecker, videoCUDA, V
 		valid          bool
 		output, report string
 	)
+	// Verify output files frames count when done
+	defer func() {
+		if err != nil {
+			return
+		}
+		finalPart := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, finalQP))
+		finalPartInfos, err := getStreamsInfosCF(finalPart)
+		if err != nil {
+			err = fmt.Errorf("failed to get streams infos of final part: %w", err)
+			return
+		}
+		finalPartTotalFrames, err := strconv.Atoi(finalPartInfos.VideoTrack().NbReadFrames)
+		if err != nil {
+			err = fmt.Errorf("failed to get total frames of final part: %w", err)
+			return
+		}
+		if finalPartTotalFrames != totalFrames {
+			err = fmt.Errorf("final part has %d frames instead of %d", finalPartTotalFrames, totalFrames)
+			return
+		}
+		if *debug {
+			fmt.Fprintf(bypass, "Final part has %d frames as original part.\n", finalPartTotalFrames)
+		}
+	}()
 	// Execute first test and loop
 	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, startQP))
 	report = output + "_vmaf.json"
