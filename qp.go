@@ -79,20 +79,20 @@ func findPartsQP(dir string, nbParts, startQP int, totalDuration time.Duration, 
 	}
 	duration := time.Since(start)
 	// Done
-	stats.PartsMean = float64(totalQP) / float64(len(results))
-	stats.GlobalWeighted = float64(QPWeights) / float64(partsDuration.Milliseconds())
-	fmt.Fprintf(bypass, "Parts encoding QP search done in %s. Mean part QP is %s and weighted global QP is %s.\n",
-		duration.Round(time.Second),
-		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
-		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
-	)
 	if partsDuration != totalDuration {
 		fmt.Fprintf(bypass, "WARNING: Desync possible: does the original file has B-Frames that were lost during segmentation ? Scenes duration: %s, original duration: %s\n",
 			partsDuration, totalDuration)
 	}
+	stats.PartsMean = float64(totalQP) / float64(len(results))
+	stats.GlobalWeighted = float64(QPWeights) / float64(partsDuration.Milliseconds())
+	fmt.Fprintf(bypass, "Mean part QP is %s and weighted global QP is %s.\n",
+		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
+		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
+	)
 	if *debug {
 		fmt.Fprintf(bypass, "Parts QPs: %+v\n", results)
 	}
+	fmt.Fprintf(bypass, "Parts encoding QP search done in %s.\n", duration.Round(time.Second))
 	return
 }
 
