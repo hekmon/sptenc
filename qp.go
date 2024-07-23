@@ -15,34 +15,34 @@ import (
 type QPStats struct {
 	Minimum        int
 	Maximum        int
-	ScenesMean     float64
+	PartsMean      float64
 	GlobalWeighted float64
 }
 
-func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, stats QPStats, err error) {
+func findPartsQP(dir string, nbParts, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
-		sceneDuration, scenesDuration time.Duration
-		sceneQP, totalQP, QPWeights   int
-		sceneSize, scenesSize         cunits.Bits
+		partDuration, partsDuration time.Duration
+		partQP, totalQP, QPWeights  int
+		partSize, partsSize         cunits.Bits
 	)
-	results = make([]int, nbScenes)
+	results = make([]int, nbParts)
 	bypass := liveprogress.Bypass()
 	// Live progress
-	var scenesDone int
+	var partsDone int
 	bar := liveprogress.SetMainLineAsBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "  Scenes | "
+			return "  Parts | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d/%d scenes done (%s)",
-				scenesDone, nbScenes, scenesSize,
+			return fmt.Sprintf(" left | %d/%d parts done (%s)",
+				partsDone, nbParts, partsSize,
 			)
 		}),
 	)
@@ -51,58 +51,58 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 	stats.Minimum = ffmpegutils.QPMaximum + 1
 	stats.Maximum = ffmpegutils.QPMinimum - 1
 	start := time.Now()
-	for scene := 0; scene < nbScenes; scene++ {
-		fmt.Fprintf(bypass, "Scene %d: Search for the right QP, starting with %d\n", scene, startQP)
-		if sceneQP, sceneDuration, err = findSceneQP(dir, scene, startQP, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP scene %d: %w", scene, err)
+	for part := 0; part < nbParts; part++ {
+		fmt.Fprintf(bypass, "Part %d: Search for the right QP, starting with %d\n", part, startQP)
+		if partQP, partDuration, err = findPartQP(dir, part, startQP, auditor, videoCUDA, VMAFCUDA, gpu); err != nil {
+			err = fmt.Errorf("failed to find the right encoding QP part %d: %w", part, err)
 			return
 		}
-		results[scene] = sceneQP
+		results[part] = partQP
 		// Compute stats
-		if sceneQP < stats.Minimum {
-			stats.Minimum = sceneQP
+		if partQP < stats.Minimum {
+			stats.Minimum = partQP
 		}
-		if sceneQP > stats.Maximum {
-			stats.Maximum = sceneQP
+		if partQP > stats.Maximum {
+			stats.Maximum = partQP
 		}
-		totalQP += sceneQP
-		scenesDuration += sceneDuration
-		QPWeights += sceneQP * int(sceneDuration.Milliseconds())
-		if sceneSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, sceneQP))); err != nil {
-			err = fmt.Errorf("failed to get the size of scene %d: %w", scene, err)
+		totalQP += partQP
+		partsDuration += partDuration
+		QPWeights += partQP * int(partDuration.Milliseconds())
+		if partSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, partQP))); err != nil {
+			err = fmt.Errorf("failed to get the size of part %d: %w", part, err)
 			return
 		}
-		scenesSize += sceneSize
+		partsSize += partSize
 		// Update live progress
-		bar.CurrentAdd(uint64(sceneDuration))
-		scenesDone++
+		bar.CurrentAdd(uint64(partDuration))
+		partsDone++
 	}
 	duration := time.Since(start)
 	// Done
-	stats.ScenesMean = float64(totalQP) / float64(len(results))
-	stats.GlobalWeighted = float64(QPWeights) / float64(scenesDuration.Milliseconds())
-	fmt.Fprintf(bypass, "Scenes encoding QP search done in %s. Mean scene QP is %s and weighted global QP is %s.\n",
+	stats.PartsMean = float64(totalQP) / float64(len(results))
+	stats.GlobalWeighted = float64(QPWeights) / float64(partsDuration.Milliseconds())
+	fmt.Fprintf(bypass, "Parts encoding QP search done in %s. Mean part QP is %s and weighted global QP is %s.\n",
 		duration.Round(time.Second),
-		strconv.FormatFloat(stats.ScenesMean, 'f', -1, 64),
+		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
 	if *debug {
-		fmt.Fprintf(bypass, "Scenes QPs: %+v\nScenes duration: %s (original duration: %s)\n",
-			results, scenesDuration, totalDuration)
+		fmt.Fprintf(bypass, "Parts QPs: %+v\nParts duration: %s (original duration: %s)\n",
+			results, partsDuration, totalDuration)
 	}
 	return
 }
 
-func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (finalQP int, duration time.Duration, err error) {
+func findPartQP(dir string, part, startQP int, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (finalQP int, duration time.Duration, err error) {
 	// Prepare
-	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, scene))
-	sceneInfos, err := getStreamsInfosCF(input)
+	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, part))
+	partInfos, err := getStreamsInfosCF(input)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
 	}
-	duration = sceneInfos.Format.Duration
-	videoTrack := sceneInfos.VideoTrack()
+	duration = partInfos.Format.Duration
+	videoTrack := partInfos.VideoTrack()
 	totalFrames, err := strconv.Atoi(videoTrack.NbReadFrames)
 	if err != nil {
 		err = fmt.Errorf("failed to get total frames: %w", err)
@@ -116,9 +116,9 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		output, report string
 	)
 	// Execute first test and loop
-	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, startQP))
+	output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, startQP))
 	report = output + "_vmaf.json"
-	if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, startQP, auditor, ultraHD, *vmafNEG, videoCUDA, VMAFCUDA, gpu); err != nil {
+	if valid, err = partQP(input, output, report, frameRate, totalFrames, part, startQP, auditor, ultraHD, *vmafNEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 		err = fmt.Errorf("failed to test QP %d: %w", startQP, err)
 		return
 	}
@@ -129,31 +129,31 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		QPCandidate := startQP + 1
 		// Search
 		for {
-			fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, let's try to decrease size with QP %d\n",
-				scene, lastValid, QPCandidate)
+			fmt.Fprintf(bypass, "Part %d: QP %d is good enough, let's try to decrease size with QP %d\n",
+				part, lastValid, QPCandidate)
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "Scene %d: QP %d is invalid, rolling back to QP %d\n",
-					scene, QPCandidate, lastValid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d\n",
+					part, QPCandidate, lastValid)
 				finalQP = lastValid
 				return
 			}
 			// Test QP
-			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
+			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))
 			report = output + "_vmaf.json"
-			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, *vmafNEG, videoCUDA, VMAFCUDA, gpu); err != nil {
+			if valid, err = partQP(input, output, report, frameRate, totalFrames, part, QPCandidate, auditor, ultraHD, *vmafNEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
 				return
 			}
 			// If the new QP is invalid, we return the previous one
 			if !valid {
 				// We reach an invalid QP, let's use the previous valid QP
-				fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, rolling back to QP %d\n",
-					scene, QPCandidate, lastValid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, rolling back to QP %d\n",
+					part, QPCandidate, lastValid)
 				finalQP = lastValid
 				// Remove invalid QP
 				if !*keep {
-					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))); err != nil {
+					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))); err != nil {
 						err = fmt.Errorf("failed to remove previous valid QP at %s: %w", output, err)
 						return
 					}
@@ -163,7 +163,7 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 			// We found a new valid QP
 			if !*keep {
 				// Remove previous valid QP
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, lastValid))); err != nil {
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, lastValid))); err != nil {
 					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", output, err)
 					return
 				}
@@ -178,33 +178,33 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 		QPCandidate := startQP - 1
 		// Search
 		for {
-			fmt.Fprintf(bypass, "Scene %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
-				scene, lastInvalid, QPCandidate)
+			fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
+				part, lastInvalid, QPCandidate)
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
-				fmt.Fprintf(bypass, "Scene %d: QP %d is invalid, rolling back to QP %d\n",
-					scene, QPCandidate, lastInvalid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d\n",
+					part, QPCandidate, lastInvalid)
 				finalQP = lastInvalid
 				return
 			}
 			// We can still test candidate QP, delete previous invalid QP
 			if !*keep {
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, lastInvalid))); err != nil {
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, lastInvalid))); err != nil {
 					err = fmt.Errorf("failed to remove previous invalid QP at %s: %w", output, err)
 					return
 				}
 			}
 			// Test QP
-			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, QPCandidate))
+			output = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))
 			report = output + "_vmaf.json"
-			if valid, err = sceneQP(input, output, report, frameRate, totalFrames, scene, QPCandidate, auditor, ultraHD, *vmafNEG, videoCUDA, VMAFCUDA, gpu); err != nil {
+			if valid, err = partQP(input, output, report, frameRate, totalFrames, part, QPCandidate, auditor, ultraHD, *vmafNEG, videoCUDA, VMAFCUDA, gpu); err != nil {
 				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
 				return
 			}
 			// We found a valid QP after encountering an invalid QP, let's use it
 			if valid {
-				fmt.Fprintf(bypass, "Scene %d: QP %d is good enough, keeping it\n",
-					scene, QPCandidate)
+				fmt.Fprintf(bypass, "Part %d: QP %d is good enough, keeping it\n",
+					part, QPCandidate)
 				finalQP = QPCandidate
 				return
 			}
@@ -215,22 +215,22 @@ func findSceneQP(dir string, scene, startQP int, auditor VMAFChecker, videoCUDA,
 	}
 }
 
-func sceneQP(input, output, vmafReportPath, frameRate string, totalFrames, sceneID, qp int, auditor VMAFChecker, ultraHD, NEG, videoCUDA, VMAFCUDA bool, gpu int) (valid bool, err error) {
+func partQP(input, output, vmafReportPath, frameRate string, totalFrames, partID, qp int, auditor VMAFChecker, ultraHD, NEG, videoCUDA, VMAFCUDA bool, gpu int) (valid bool, err error) {
 	// Encode
 	if err = encodeQP(input, output, totalFrames, qp, videoCUDA, gpu); err != nil {
-		err = fmt.Errorf("failed to encode scene: %w", err)
+		err = fmt.Errorf("failed to encode part: %w", err)
 		return
 	}
 	// Compute VMAF
 	var vmaf ffmpegutils.VMAFStats
 	if vmaf, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD, NEG, videoCUDA, VMAFCUDA, gpu); err != nil {
-		err = fmt.Errorf("failed to compute VMAF for scene: %w", err)
+		err = fmt.Errorf("failed to compute VMAF for part: %w", err)
 		return
 	}
 	// Check
 	valid = auditor.Validate(vmaf)
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Scene %d: QP %d: VMAF results:\n%s", sceneID, qp, vmaf.String())
+		fmt.Fprintf(liveprogress.Bypass(), "Part %d: QP %d: VMAF results:\n%s", partID, qp, vmaf.String())
 	}
 	return
 }

@@ -19,15 +19,14 @@ var (
 	//  overrided during compilation
 	Version = "dev"
 	// Flags
-	input          *string
-	tmpDir         *string
-	output         *string
-	sceneThreshold *float64
-	startQP        *int
-	gpu            *int
-	nvc            *bool
-	debug          *bool
-	keep           *bool
+	input   *string
+	tmpDir  *string
+	output  *string
+	startQP *int
+	gpu     *int
+	nvc     *bool
+	debug   *bool
+	keep    *bool
 	//// vmaf
 	vmafcuda       *bool
 	vmafNEG        *bool
@@ -68,10 +67,9 @@ func main() {
 	}()
 	// Flags
 	input = flag.String("input", "", "Input file to transcode.")
-	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded scenes and VMAF reports.")
+	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded parts and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
-	sceneThreshold = flag.Float64("scenethreshold", 14, "Scene detection threshold. Valid range is [0., 100], good values are [8.0, 14.0].")
-	startQP = flag.Int("qp", 18, "Quantization Parameter value to start scene encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
+	startQP = flag.Int("qp", 18, "Quantization Parameter value to start part encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
@@ -79,11 +77,11 @@ func main() {
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
-	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this minimum VMAF limit is not used.")
-	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
-	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
-	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the scene encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
-	version := flag.Bool("version", false, "Show the current version of the Scenes Encoder.")
+	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this minimum VMAF limit is not used.")
+	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
+	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
+	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF limit is not used.")
+	version := flag.Bool("version", false, "Show the current version of the Parts Encoder.")
 	flag.Parse()
 	if *version {
 		fmt.Printf("%s %s\n", liveterm.Hyperlink(scencURLTagValue, "Sc(enes)Enc(oder)"), Version)
@@ -92,11 +90,6 @@ func main() {
 	// Validate common flags
 	if *input == "" {
 		fmt.Fprintln(os.Stderr, "Please set the -input flag")
-		exitCode = 1
-		return
-	}
-	if *sceneThreshold < 0 || *sceneThreshold > 100 {
-		fmt.Fprintln(os.Stderr, "Scene threshold must be between 0 and 100")
 		exitCode = 1
 		return
 	}
@@ -174,50 +167,42 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	// Step 1 - Detect scenes
-	fmt.Fprintf(bypass, "Detecting scenes...\n")
-	scenes, err := getScenes(*input, stats.Format.Duration, *sceneThreshold, *nvc, gpu)
+	// Step 1 - Split file by GOP
+	fmt.Fprintf(bypass, "Splitting file by Group Of Pictures (GOPs)...\n")
+	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
+		fmt.Fprintf(bypass, "Failed to split parts: %s\n", err)
+		exitCode = 2
+		return
+	}
+	parts, err := getDirFilesNumber(workingDirectory)
 	if err != nil {
-		fmt.Fprintf(bypass, "Failed to detect scenes: %s\n", err)
+		fmt.Fprintf(bypass, "Failed to get number of splitted GOPs: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 3 - Split file by scenes
-	fmt.Fprintf(bypass, "Splitting scenes...\n")
-	if err = splitScenes(*input, workingDirectory, stats.Format.Duration, scenes); err != nil {
-		fmt.Fprintf(bypass, "Failed to split scenes: %s\n", err)
-		exitCode = 2
-		return
-	}
-	splittedScenes, err := getDirFilesNumber(workingDirectory)
-	if err != nil {
-		fmt.Fprintf(bypass, "Failed to get number of splitted scenes: %s\n", err)
-		exitCode = 2
-		return
-	}
-	fmt.Fprintf(bypass, "Splitting managed to separate %d scenes (on %d detected)\n", splittedScenes, len(scenes)+1)
-	// Step 4 - Encode scenes
-	fmt.Fprintf(bypass, "Searching the right QP for each scenes...\n")
+	fmt.Fprintf(bypass, "Splitting managed to separate the file in %d parts\n", parts)
+	// Step 2 - Encode parts
+	fmt.Fprintf(bypass, "Searching the right QP for each parts...\n")
 	var (
-		scenesQP []int
-		statsQP  QPStats
+		partsQP []int
+		statsQP QPStats
 	)
-	if scenesQP, statsQP, err = findScenesQP(workingDirectory, splittedScenes, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
-		fmt.Fprintf(bypass, "Failed to encode scenes: %s\n", err)
+	if partsQP, statsQP, err = findPartsQP(workingDirectory, parts, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
+		fmt.Fprintf(bypass, "Failed to encode parts: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 5 - Merge scenes
-	fmt.Fprintln(bypass, "Remuxing encoded scenes to final file...")
+	// Step 3 - Merge parts and remux original file
+	fmt.Fprintln(bypass, "Remuxing encoded parts to final file...")
 	outputPath := computeOutputFilePath(*input, *output)
 	tagsFlags := generateTags(*stats.Format, statsQP)
-	if err = scenesMerge(*input, workingDirectory, outputPath, tagsFlags, scenesQP, stats.Format.Duration); err != nil {
-		fmt.Fprintf(bypass, "Failed to merge scenes: %s\n", err)
+	if err = partsMerge(*input, workingDirectory, outputPath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
+		fmt.Fprintf(bypass, "Failed to merge parts: %s\n", err)
 		exitCode = 2
 		return
 	}
 	fmt.Fprintf(bypass, "Output has been written to: %s\n", outputPath)
-	// Step 6 - Recompute MKV stats if necessary
+	// Step 4 - Recompute MKV stats if necessary
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
 	if err = regenerateMKVStats(outputPath); err != nil {
 		fmt.Fprintf(bypass, "Failed to regenerate MKV stats: %s\n", err)

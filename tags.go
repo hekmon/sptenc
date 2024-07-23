@@ -16,7 +16,7 @@ const (
 	scencEncoderPresetTagKey = "scenc_encoder_preset"
 	scencStatsMinQP          = "scenc_stats_min_qp"
 	scencStatsWaxQP          = "scenc_stats_max_qp"
-	scencStatsMeanQP         = "scenc_stats_scenes_mean_qp"
+	scencStatsMeanQP         = "scenc_stats_part_mean_qp"
 	scencStatsWeightedQP     = "scenc_stats_global_weighted_qp"
 	scencVMAFMeanTagKey      = "scenc_vmaf_conf_mean"
 	scencVMAFHMeanTagKey     = "scenc_vmaf_conf_hmean"
@@ -47,7 +47,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []st
 	flags = append(flags,
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsMinQP, statsQP.Minimum),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsWaxQP, statsQP.Maximum),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.ScenesMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.PartsMean, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
 	)
 	// VMAF conf
