@@ -86,9 +86,12 @@ func findPartsQP(dir string, nbParts, startQP int, totalDuration time.Duration, 
 		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
+	if partsDuration != totalDuration {
+		fmt.Fprintf(bypass, "WARNING: Desync possible: does the original file has B-Frames that were lost during segmentation ? Scenes duration: %s, original duration: %s\n",
+			partsDuration, totalDuration)
+	}
 	if *debug {
-		fmt.Fprintf(bypass, "Parts QPs: %+v\nParts duration: %s (original duration: %s)\n",
-			results, partsDuration, totalDuration)
+		fmt.Fprintf(bypass, "Parts QPs: %+v\n", results)
 	}
 	return
 }
