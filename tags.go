@@ -45,7 +45,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []st
 	}
 	// Stats
 	flags = append(flags,
-		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsMeanQP, statsQP.Minimum),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsMinQP, statsQP.Minimum),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsWaxQP, statsQP.Maximum),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.ScenesMean, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
