@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/hekmon/cunits/v2"
 )
 
 func getWorkingDirPath(basePath string) string {
@@ -35,5 +37,15 @@ func computeOutputFilePath(file, outputDir string) (output string) {
 	// Recompose
 	output = filepath.Join(outputDir,
 		fmt.Sprintf("%s [%s].mkv", baseName, titleTagValue))
+	return
+}
+
+func getFileSize(path string) (size cunits.Bits, err error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		err = fmt.Errorf("failed to stat path: %w", err)
+		return
+	}
+	size = cunits.ImportInByte(float64(info.Size()))
 	return
 }

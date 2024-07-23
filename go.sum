@@ -1,3 +1,5 @@
+al.essio.dev/pkg/shellescape v1.5.0 h1:7oTvSsQ5kg9WksA9O58y9wjYnY4jP0CL82/Q8WLUGKk=
+al.essio.dev/pkg/shellescape v1.5.0/go.mod h1:6sIqp7X2P6mThCQ7twERpZTuigpr6KbZWtls1U8I890=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
@@ -7,6 +9,8 @@ github.com/go-ole/go-ole v1.2.6/go.mod h1:pprOEPIfldk/42T2oK7lQ4v4JSDwmV0As9GaiU
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 h1:El6M4kTTCOh6aBiKaUGG7oYTSPP8MxqL4YI3kZKwcP4=
+github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510/go.mod h1:pupxD2MaaD3pAXIBCelhxNneeOaAeabZDe5s4K6zSpQ=
 github.com/hekmon/cunits/v2 v2.1.0 h1:k6wIjc4PlacNOHwKEMBgWV2/c8jyD4eRMs5mR1BBhI0=
 github.com/hekmon/cunits/v2 v2.1.0/go.mod h1:9r1TycXYXaTmEWlAIfFV8JT+Xo59U96yUJAYHxzii2M=
 github.com/hekmon/liveprogress/v2 v2.0.3 h1:2+DhmlcyDLiW0a64UYURU3DSI/QUX5pnz4YUHhwqoqU=

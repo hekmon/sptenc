@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hekmon/cunits/v2"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -20,6 +21,11 @@ type QPStats struct {
 
 func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration, auditor VMAFChecker, videoCUDA, VMAFCUDA bool, gpu int) (results []int, stats QPStats, err error) {
 	// Prepare
+	var (
+		sceneDuration, scenesDuration time.Duration
+		sceneQP, totalQP, QPWeights   int
+		sceneSize, scenesSize         cunits.Bits
+	)
 	results = make([]int, nbScenes)
 	bypass := liveprogress.Bypass()
 	// Live progress
@@ -35,17 +41,13 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d/%d scenes completed",
-				scenesDone, nbScenes,
+			return fmt.Sprintf(" left | %d/%d scenes done (%s)",
+				scenesDone, nbScenes, scenesSize,
 			)
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
 	// Go
-	var (
-		sceneDuration, scenesDuration time.Duration
-		sceneQP, totalQP, QPWeights   int
-	)
 	stats.Minimum = ffmpegutils.QPMaximum + 1
 	stats.Maximum = ffmpegutils.QPMinimum - 1
 	start := time.Now()
@@ -66,6 +68,11 @@ func findScenesQP(dir string, nbScenes, startQP int, totalDuration time.Duration
 		totalQP += sceneQP
 		scenesDuration += sceneDuration
 		QPWeights += sceneQP * int(sceneDuration.Milliseconds())
+		if sceneSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, scene, sceneQP))); err != nil {
+			err = fmt.Errorf("failed to get the size of scene %d: %w", scene, err)
+			return
+		}
+		scenesSize += sceneSize
 		// Update live progress
 		bar.CurrentAdd(uint64(sceneDuration))
 		scenesDone++
