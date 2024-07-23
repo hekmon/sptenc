@@ -209,6 +209,26 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
+	// Step 5 - Check both files
+	fmt.Fprintf(bypass, "Checking both files...\n")
+	originalStats, err := getStreamsInfosCF(*input)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to get original file stats: %s\n", err)
+		exitCode = 2
+		return
+	}
+	reencodedStats, err := getStreamsInfosCF(outputPath)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to get reencoded file stats: %s\n", err)
+		exitCode = 2
+		return
+	}
+	if originalStats.VideoTrack().NbReadFrames != reencodedStats.VideoTrack().NbReadFrames {
+		fmt.Fprintf(bypass, "Number of read frames is different between original and reencoded files: original has %s and reencoded has %s\n",
+			originalStats.VideoTrack().NbReadFrames, reencodedStats.VideoTrack().NbReadFrames)
+		exitCode = 2
+		return
+	}
 	// Done
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Complete process took %s\n", duration.Round(time.Second))
