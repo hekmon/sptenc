@@ -85,13 +85,11 @@ func findPartsQP(dir string, nbParts, startQP int, totalDuration time.Duration, 
 	}
 	stats.PartsMean = float64(totalQP) / float64(len(results))
 	stats.GlobalWeighted = float64(QPWeights) / float64(partsDuration.Milliseconds())
+	fmt.Fprintf(bypass, "Parts QPs: %+v\n", results)
 	fmt.Fprintf(bypass, "Mean part QP is %s and weighted global QP is %s.\n",
 		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
-	if *debug {
-		fmt.Fprintf(bypass, "Parts QPs: %+v\n", results)
-	}
 	fmt.Fprintf(bypass, "Parts encoding QP search done in %s.\n", duration.Round(time.Second))
 	return
 }
