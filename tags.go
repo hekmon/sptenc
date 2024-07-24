@@ -8,20 +8,20 @@ import (
 )
 
 const (
-	titleTagKey              = "title"
-	titleTagValue            = "ScEncoded"
-	scencURLTagKey           = "scenc_url"
-	scencURLTagValue         = "https://github.com/hekmon/scenc"
-	scencEncoderTagKey       = "scenc_encoder"
-	scencEncoderPresetTagKey = "scenc_encoder_preset"
-	scencStatsMinQP          = "scenc_stats_min_qp"
-	scencStatsWaxQP          = "scenc_stats_max_qp"
-	scencStatsMeanQP         = "scenc_stats_part_mean_qp"
-	scencStatsWeightedQP     = "scenc_stats_global_weighted_qp"
-	scencVMAFMeanTagKey      = "scenc_vmaf_conf_mean"
-	scencVMAFHMeanTagKey     = "scenc_vmaf_conf_hmean"
-	scencVMAFP1TagKey        = "scenc_vmaf_conf_p1"
-	scencVMAFMinTagKey       = "scenc_vmaf_conf_min"
+	titleTagKey               = "title"
+	titleTagValue             = "SptEncoded"
+	sptencURLTagKey           = "sptenc_url"
+	sptencURLTagValue         = "https://github.com/hekmon/sptenc"
+	sptencEncoderTagKey       = "sptenc_encoder"
+	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
+	sptencStatsMinQP          = "sptenc_stats_min_qp"
+	sptencStatsWaxQP          = "sptenc_stats_max_qp"
+	sptencStatsMeanQP         = "sptenc_stats_part_mean_qp"
+	sptencStatsWeightedQP     = "sptenc_stats_global_weighted_qp"
+	sptencVMAFMeanTagKey      = "sptenc_vmaf_conf_mean"
+	sptencVMAFHMeanTagKey     = "sptenc_vmaf_conf_hmean"
+	sptencVMAFP1TagKey        = "sptenc_vmaf_conf_p1"
+	sptencVMAFMinTagKey       = "sptenc_vmaf_conf_min"
 )
 
 func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []string) {
@@ -29,39 +29,39 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []st
 	// Global
 	flags = append(flags,
 		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencURLTagKey, scencURLTagValue),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencURLTagKey, sptencURLTagValue),
 	)
 	// Encoding
 	if *nvc {
 		flags = append(flags,
-			"-metadata:s:v:0", fmt.Sprintf("%s=hevc_nvenc", scencEncoderTagKey),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.NVENCPreset),
+			"-metadata:s:v:0", fmt.Sprintf("%s=hevc_nvenc", sptencEncoderTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.NVENCPreset),
 		)
 	} else {
 		flags = append(flags,
-			"-metadata:s:v:0", fmt.Sprintf("%s=libx265", scencEncoderTagKey),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencEncoderPresetTagKey, ffmpegutils.Libx265Preset),
+			"-metadata:s:v:0", fmt.Sprintf("%s=libx265", sptencEncoderTagKey),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.Libx265Preset),
 		)
 	}
 	// Stats
 	flags = append(flags,
-		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsMinQP, statsQP.Minimum),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%d", scencStatsWaxQP, statsQP.Maximum),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsMeanQP, strconv.FormatFloat(statsQP.PartsMean, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", scencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsMinQP, statsQP.Minimum),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsWaxQP, statsQP.Maximum),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsMeanQP, strconv.FormatFloat(statsQP.PartsMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
 	)
 	// VMAF conf
 	if *vmafLimitMin != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
 	}
 	if *vmafLimitP1 != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
 	}
 	if *vmafLimitHMean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
 	}
 	if *vmafLimitMean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", scencVMAFMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
 	}
 	return
 }

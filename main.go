@@ -83,7 +83,7 @@ func main() {
 	version := flag.Bool("version", false, "Show the current version of the Parts Encoder.")
 	flag.Parse()
 	if *version {
-		fmt.Printf("%s %s\n", liveterm.Hyperlink(scencURLTagValue, "Sp(li)tEnc(oder)"), Version)
+		fmt.Printf("%s %s\n", liveterm.Hyperlink(sptencURLTagValue, "Sp(li)tEnc(oder)"), Version)
 		return
 	}
 	// Validate common flags
@@ -124,7 +124,7 @@ func main() {
 	if !filepath.IsAbs(*tmpDir) {
 		*tmpDir = filepath.Join(currentWorkingDirectory, *tmpDir)
 	}
-	workingDirectory = getWorkingDirPath(*tmpDir)
+	workingDirectory = generateWorkingDirectroryPath(*tmpDir)
 	// Properly handle stop
 	runCtx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	go cleanStop(runCtx)
@@ -144,10 +144,10 @@ func main() {
 	}()
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
-	exitCode = scenc(vmafAuditor)
+	exitCode = sptenc(vmafAuditor)
 }
 
-func scenc(auditor VMAFChecker) (exitCode int) {
+func sptenc(auditor VMAFChecker) (exitCode int) {
 	var err error
 	bypass := liveprogress.Bypass()
 	start := time.Now()
@@ -193,7 +193,7 @@ func scenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 3 - Merge parts and remux original file
 	fmt.Fprintln(bypass, "Remuxing encoded parts to final file...")
-	outputPath := computeOutputFilePath(*input, *output)
+	outputPath := computeOutputFilePath(*input, *tmpDir)
 	tagsFlags := generateTags(*stats.Format, statsQP)
 	if err = partsMerge(*input, workingDirectory, outputPath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge parts: %s\n", err)

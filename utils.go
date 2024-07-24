@@ -9,8 +9,8 @@ import (
 	"github.com/hekmon/cunits/v2"
 )
 
-func getWorkingDirPath(basePath string) string {
-	return filepath.Join(basePath, fmt.Sprintf("scenc-%d", time.Now().Unix()))
+func generateWorkingDirectroryPath(basePath string) string {
+	return filepath.Join(basePath, fmt.Sprintf("sptenc-%d", time.Now().Unix()))
 }
 
 func getDirFilesNumber(dir string) (num int, err error) {

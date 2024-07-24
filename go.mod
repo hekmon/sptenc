@@ -1,4 +1,4 @@
-module github.com/hekmon/scenc
+module github.com/hekmon/sptenc
 
 go 1.22.5
 
