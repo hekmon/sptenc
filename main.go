@@ -242,12 +242,13 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 6 - Move final file to output directory
 	fmt.Fprintf(bypass, "Moving final file to output directory...\n")
-	if err = MoveProgress(finalFilePath, computeNewDirFilePath(finalFilePath, *output)); err != nil {
+	finalOutputPath := computeNewDirFilePath(finalFilePath, *output)
+	if err = MoveProgress(finalFilePath, finalOutputPath); err != nil {
 		fmt.Fprintf(bypass, "Failed to move final file to output directory: %s\n", err)
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "Final file has been moved to: %s\n", computeNewDirFilePath(finalFilePath, *output))
+	fmt.Fprintf(bypass, "Final file has been moved to: %s\n", finalOutputPath)
 	// Done
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Complete process took %s\n", duration.Round(time.Second))
