@@ -4,12 +4,12 @@ version=$(git describe --tags --always --dirty)
 
 crosscompile () {
     if [ "$1" == "windows" ]; then
-        name='scenc.exe'
+        name='sptenc.exe'
     else
-        name='scenc'
+        name='sptenc'
     fi
     GOOS="$1" GOARCH="$2" go build -ldflags="-s -w -X 'main.Version=${version}'" -o "$name"
-    zip -9 "scenc_${version}_${1}_${2}.zip" "$name"
+    zip -9 "sptenc_${version}_${1}_${2}.zip" "$name"
     rm "$name"
 }
 

@@ -45,9 +45,6 @@ func main() {
 		switch exitCode {
 		case 0:
 			// all good
-			fallthrough
-		case 3:
-			// exit error
 			if *keep {
 				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", workingDirectory)
 			} else {
@@ -62,6 +59,8 @@ func main() {
 		case 2:
 			// runtime error, keep tmp files even if no -keep flag
 			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", workingDirectory)
+		case 3:
+			// exit error
 		}
 		os.Exit(exitCode)
 	}()
@@ -84,7 +83,7 @@ func main() {
 	version := flag.Bool("version", false, "Show the current version of the Parts Encoder.")
 	flag.Parse()
 	if *version {
-		fmt.Printf("%s %s\n", liveterm.Hyperlink(scencURLTagValue, "Sc(enes)Enc(oder)"), Version)
+		fmt.Printf("%s %s\n", liveterm.Hyperlink(scencURLTagValue, "Sp(li)tEnc(oder)"), Version)
 		return
 	}
 	// Validate common flags
