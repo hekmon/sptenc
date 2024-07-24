@@ -193,17 +193,17 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 3 - Merge parts and remux original file
 	fmt.Fprintln(bypass, "Remuxing encoded parts to final file...")
-	outputPath := computeOutputFilePath(*input, *tmpDir)
+	finalFilePath := computeNewDirFilePath(*input, *tmpDir)
 	tagsFlags := generateTags(*stats.Format, statsQP)
-	if err = partsMerge(*input, workingDirectory, outputPath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
+	if err = partsMerge(*input, workingDirectory, finalFilePath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge parts: %s\n", err)
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "Output has been written to: %s\n", outputPath)
+	fmt.Fprintf(bypass, "Output has been written to: %s\n", finalFilePath)
 	// Step 4 - Recompute MKV stats if necessary
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
-	if err = regenerateMKVStats(outputPath); err != nil {
+	if err = regenerateMKVStats(finalFilePath); err != nil {
 		fmt.Fprintf(bypass, "Failed to regenerate MKV stats: %s\n", err)
 		exitCode = 2
 		return
@@ -216,7 +216,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	reencodedStats, err := getStreamsInfosCF(outputPath)
+	reencodedStats, err := getStreamsInfosCF(finalFilePath)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to get reencoded file stats: %s\n", err)
 		exitCode = 2
@@ -228,6 +228,14 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
+	// Step 6 - Move final file to output directory
+	fmt.Fprintf(bypass, "Moving final file to output directory...\n")
+	if err = MoveProgress(finalFilePath, computeNewDirFilePath(finalFilePath, *output)); err != nil {
+		fmt.Fprintf(bypass, "Failed to move final file to output directory: %s\n", err)
+		exitCode = 2
+		return
+	}
+	fmt.Fprintf(bypass, "Final file has been moved to: %s\n", computeNewDirFilePath(finalFilePath, *output))
 	// Done
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Complete process took %s\n", duration.Round(time.Second))
