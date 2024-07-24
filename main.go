@@ -152,6 +152,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Prepare
+	//// Working directory
 	if err = os.MkdirAll(workingDirectory, 0755); err != nil {
 		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
 		exitCode = 2
@@ -160,6 +161,17 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	if *debug {
 		fmt.Fprintf(bypass, "Working directory: %s\n", workingDirectory)
 	}
+	//// Filesystems check (to be removed when properly tested)
+	var sameFS bool
+	if sameFS, err = sameFileSystem(*input, workingDirectory); err != nil {
+		fmt.Fprintf(bypass, "Failed to check filesystems: %s\n", err)
+		exitCode = 2
+		return
+	}
+	if *debug {
+		fmt.Fprintf(bypass, "Same filesystem: %t\n", sameFS)
+	}
+	//// Input file container infos
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
