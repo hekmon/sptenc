@@ -20,7 +20,7 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	// Get the drive type for each drive
 	//// drive 1
 	var driveType1 uint32
-	drive1UTF16, err := syscall.UTF16PtrFromString(drive1)
+	drive1UTF16Ptr, err := syscall.UTF16PtrFromString(drive1)
 	if err != nil {
 		err = fmt.Errorf("Error converting drive1 to UTF-16: %w", err)
 		return
@@ -28,13 +28,13 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	syscall.SyscallN(
 		procGetDriveType.Addr(),
 		1,
-		uintptr(unsafe.Pointer(drive1UTF16)),
+		uintptr(unsafe.Pointer(drive1UTF16Ptr)),
 		uintptr(unsafe.Pointer(&driveType1)),
 		0,
 	)
 	//// drive 2
 	var driveType2 uint32
-	drive2UTF16, err := syscall.UTF16PtrFromString(drive2)
+	drive2UTF16Ptr, err := syscall.UTF16PtrFromString(drive2)
 	if err != nil {
 		err = fmt.Errorf("Error converting drive2 to UTF-16: %w", err)
 		return
@@ -42,7 +42,7 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	syscall.SyscallN(
 		procGetDriveType.Addr(),
 		1,
-		uintptr(unsafe.Pointer(drive2UTF16)),
+		uintptr(unsafe.Pointer(drive2UTF16Ptr)),
 		uintptr(unsafe.Pointer(&driveType2)),
 		0,
 	)
@@ -60,7 +60,7 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	syscall.SyscallN(
 		procGetVolumeInformation.Addr(),
 		5,
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(drive1))),
+		uintptr(unsafe.Pointer(drive1UTF16Ptr)),
 		uintptr(unsafe.Pointer(&volumeName1[0])),
 		256,
 		uintptr(unsafe.Pointer(&bytesReturned1)),
@@ -73,7 +73,7 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	syscall.SyscallN(
 		procGetVolumeInformation.Addr(),
 		5,
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(drive2))),
+		uintptr(unsafe.Pointer(drive2UTF16Ptr)),
 		uintptr(unsafe.Pointer(&volumeName2[0])),
 		256,
 		uintptr(unsafe.Pointer(&bytesReturned2)),
