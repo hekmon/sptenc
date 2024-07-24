@@ -22,7 +22,7 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	var driveType1 uint32
 	drive1UTF16, err := syscall.UTF16PtrFromString(drive1)
 	if err != nil {
-		err = fmt.Errorf("Error converting drive1 to UTF-16:", err)
+		err = fmt.Errorf("Error converting drive1 to UTF-16: %w", err)
 		return
 	}
 	syscall.SyscallN(
@@ -36,7 +36,7 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	var driveType2 uint32
 	drive2UTF16, err := syscall.UTF16PtrFromString(drive2)
 	if err != nil {
-		err = fmt.Errorf("Error converting drive2 to UTF-16:", err)
+		err = fmt.Errorf("Error converting drive2 to UTF-16: %w", err)
 		return
 	}
 	syscall.SyscallN(
