@@ -60,7 +60,7 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 	)
 	defer liveprogress.RemoveBar(bar)
 	progress := func(n int) {
-		bar.CurrentSet(uint64(n))
+		bar.CurrentAdd(uint64(n))
 	}
 	// Execute
 	return ffmpegutils.GetStreamsInfosCF(ffmpegutils.GetStreamsInfosCFConfig{
