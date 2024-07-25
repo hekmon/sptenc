@@ -149,8 +149,8 @@ func main() {
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
 	exitCode = sptenc(vmafAuditor)
 	if interrupted {
-		freeze := make(chan struct{})
-		<-freeze
+		// Freeze
+		<-make(chan struct{})
 	}
 }
 
