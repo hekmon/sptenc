@@ -115,7 +115,6 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
-
 	// Verify output files frames count when done
 	defer func() {
 		if err != nil {
@@ -145,13 +144,13 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 	// Execute first test and loop
 	partQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, *startQP))
 	report := partQPOutput + "_vmaf.json"
-	var valid bool
-	if valid, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, *startQP, auditor, ultraHD); err != nil {
-		err = fmt.Errorf("failed to test QP %d: %w", *startQP, err)
+	var vmafStats ffmpegutils.VMAFStats
+	if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, *startQP, ultraHD); err != nil {
+		err = fmt.Errorf("failed to produce QP %d: %w", *startQP, err)
 		return
 	}
 	// Inscrease search or decrease search
-	if valid {
+	if auditor.Validate(vmafStats) {
 		// We got a valid QP, try to increase QP to reduce space while we can
 		lastValid := *startQP
 		QPCandidate := *startQP + 1
@@ -161,20 +160,20 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 				part, lastValid, QPCandidate)
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d\n",
-					part, QPCandidate, lastValid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d:\n%s\n",
+					part, QPCandidate, lastValid, vmafStats)
 				finalQP = lastValid
 				return
 			}
 			// Test QP
 			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))
 			report = partQPOutput + "_vmaf.json"
-			if valid, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, auditor, ultraHD); err != nil {
-				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
+			if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, ultraHD); err != nil {
+				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
 			// If the new QP is invalid, we return the previous one
-			if !valid {
+			if !auditor.Validate(vmafStats) {
 				// We reach an invalid QP, let's use the previous valid QP
 				fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, rolling back to QP %d\n",
 					part, QPCandidate, lastValid)
@@ -210,8 +209,8 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 				part, lastInvalid, QPCandidate)
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d\n",
-					part, QPCandidate, lastInvalid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d:%s\n",
+					part, QPCandidate, lastInvalid, vmafStats)
 				finalQP = lastInvalid
 				return
 			}
@@ -225,12 +224,12 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 			// Test QP
 			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))
 			report = partQPOutput + "_vmaf.json"
-			if valid, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, auditor, ultraHD); err != nil {
-				err = fmt.Errorf("failed to test QP %d: %w", QPCandidate, err)
+			if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, ultraHD); err != nil {
+				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
 			// We found a valid QP after encountering an invalid QP, let's use it
-			if valid {
+			if auditor.Validate(vmafStats) {
 				fmt.Fprintf(bypass, "Part %d: QP %d is good enough, keeping it\n",
 					part, QPCandidate)
 				finalQP = QPCandidate
@@ -243,22 +242,19 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 	}
 }
 
-func partQP(input, output, vmafReportPath, frameRate string, totalFrames, partID, qp int, auditor VMAFChecker, ultraHD bool) (valid bool, err error) {
+func partQP(input, output, vmafReportPath, frameRate string, totalFrames, partID, qp int, ultraHD bool) (vmafStats ffmpegutils.VMAFStats, err error) {
 	// Encode
 	if err = encodeQP(input, output, totalFrames, qp); err != nil {
 		err = fmt.Errorf("failed to encode part: %w", err)
 		return
 	}
 	// Compute VMAF
-	var vmaf ffmpegutils.VMAFStats
-	if vmaf, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD); err != nil {
+	if vmafStats, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD); err != nil {
 		err = fmt.Errorf("failed to compute VMAF for part: %w", err)
 		return
 	}
-	// Check
-	valid = auditor.Validate(vmaf)
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Part %d: QP %d: VMAF results:\n%s", partID, qp, vmaf.String())
+		fmt.Fprintf(liveprogress.Bypass(), "Part %d: QP %d: VMAF results:\n%s\n", partID, qp, vmafStats)
 	}
 	return
 }
