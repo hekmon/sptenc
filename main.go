@@ -207,7 +207,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 3 - Merge parts and remux original file
 	fmt.Fprintln(bypass, "Remuxing encoded parts to final file...")
-	finalFilePath := computeNewDirFilePath(*input, workingDirectory)
+	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
 	tagsFlags := generateTags(*stats.Format, statsQP)
 	if err = partsMerge(*input, workingDirectory, finalFilePath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge parts: %s\n", err)
@@ -244,7 +244,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 6 - Move final file to output directory
 	fmt.Fprintf(bypass, "Moving final file to output directory...\n")
-	finalOutputPath := computeNewDirFilePath(finalFilePath, *output)
+	finalOutputPath := computeNewDirFilePath(finalFilePath, *output, false)
 	if err = MoveProgress(finalFilePath, finalOutputPath); err != nil {
 		fmt.Fprintf(bypass, "Failed to move final file to output directory: %s\n", err)
 		exitCode = 2

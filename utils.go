@@ -25,20 +25,27 @@ func getDirFilesNumber(dir string) (num int, err error) {
 	return
 }
 
-func computeNewDirFilePath(file, outputDir string) (output string) {
+func computeNewDirFilePath(file, outputDir string, rename bool) (output string) {
 	// Work on a clean path
 	file = filepath.Clean(file)
-	// If no output dir set, use file dir
-	if outputDir == "" {
-		outputDir = filepath.Dir(file)
+	if !rename {
+		output = filepath.Join(outputDir, filepath.Base(file))
+		return
 	}
 	// Cut part of file name
 	inputFileName := filepath.Base(file)
 	extension := filepath.Ext(file)
 	baseName := inputFileName[:len(inputFileName)-len(extension)]
+	// encoder
+	var encoder string
+	if *nvenc {
+		encoder = "HEVC NVENC"
+	} else {
+		encoder = "libx265"
+	}
 	// Recompose
 	output = filepath.Join(outputDir,
-		fmt.Sprintf("%s [%s].mkv", baseName, titleTagValue))
+		fmt.Sprintf("%s [%s %s].mkv", baseName, encoder, titleTagValue))
 	return
 }
 
