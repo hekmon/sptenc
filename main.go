@@ -38,6 +38,7 @@ var (
 	// Run
 	children         Children
 	workingDirectory string
+	interrupted      bool
 )
 
 func main() {
@@ -147,6 +148,10 @@ func main() {
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
 	exitCode = sptenc(vmafAuditor)
+	if interrupted {
+		freeze := make(chan struct{})
+		<-freeze
+	}
 }
 
 func sptenc(auditor VMAFChecker) (exitCode int) {
@@ -260,22 +265,17 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 func cleanStop(ctx context.Context) {
 	var err error
 	<-ctx.Done()
+	interrupted = true
 	fmt.Fprintf(liveprogress.Bypass(), "Stop signal catched, stopping...\n")
 	// Stop subprocess if any
 	if err = children.StopAndWait(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to stop and wait for current child process(es): %s\n", err)
 	}
+	// Cleanup
+	cleanUpTMPFiles(workingDirectory)
 	// Stop UI
 	if err = liveprogress.Stop(false); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to stop liveprogress properly: %s\n", err)
-	}
-	// Cleanup
-	if *keep {
-		fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", workingDirectory)
-	} else {
-		if err := os.RemoveAll(workingDirectory); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to clean working directory: %s\n", err)
-		}
 	}
 	os.Exit(3)
 }

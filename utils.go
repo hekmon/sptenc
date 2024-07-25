@@ -157,3 +157,17 @@ func (rc readerCounter) Read(p []byte) (n int, err error) {
 	}
 	return
 }
+
+func cleanUpTMPFiles(path string) {
+	if *keep {
+		fmt.Fprintf(liveprogress.Bypass(), "Temporary files can be found here: %s\n", path)
+		return
+	}
+	cl := liveprogress.AddCustomLine(func() string {
+		return "Cleaning working directory..."
+	})
+	defer liveprogress.RemoveCustomLine(cl)
+	if err := os.RemoveAll(path); err != nil {
+		fmt.Fprintf(liveprogress.Bypass(), "Failed to clean working directory %q: %s\n", path, err)
+	}
+}
