@@ -253,7 +253,7 @@ func partsMerge(originalFile, partsDir, outputPath string, tagsFlags []string, q
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Splitting | "
+			return " Merging | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -289,9 +289,9 @@ func partsMerge(originalFile, partsDir, outputPath string, tagsFlags []string, q
 	duration := time.Since(start)
 	// Done
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Parts remuxed within %q in %s\n", outputPath, duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "Parts merged within %q in %s\n", outputPath, duration.Round(time.Second))
 	} else {
-		fmt.Fprintf(liveprogress.Bypass(), "Parts remuxed in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "Parts merged in %s\n", duration.Round(time.Second))
 	}
 	return
 }

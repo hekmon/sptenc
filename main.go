@@ -211,7 +211,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	// Step 3 - Merge parts and remux original file
-	fmt.Fprintln(bypass, "Remuxing encoded parts to final file...")
+	fmt.Fprintln(bypass, "Merging encoded parts to final file...")
 	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
 	tagsFlags := generateTags(*stats.Format, statsQP)
 	if err = partsMerge(*input, workingDirectory, finalFilePath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
