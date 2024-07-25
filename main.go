@@ -24,7 +24,8 @@ var (
 	output  *string
 	startQP *int
 	gpu     *int
-	nvc     *bool
+	nvdec   *bool
+	nvenc   *bool
 	debug   *bool
 	keep    *bool
 	//// vmaf
@@ -70,7 +71,8 @@ func main() {
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	startQP = flag.Int("qp", 18, "Quantization Parameter value to start part encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
-	nvc = flag.Bool("nvc", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC) and video encoding (NVENC). Recommended for NVIDIA graphic (and not compute!) cards.")
+	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
+	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC).")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
 	//// vmaf
@@ -198,7 +200,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		partsQP []int
 		statsQP QPStats
 	)
-	if partsQP, statsQP, err = findPartsQP(workingDirectory, parts, *startQP, stats.Format.Duration, auditor, *nvc, *vmafcuda, *gpu); err != nil {
+	if partsQP, statsQP, err = findPartsQP(workingDirectory, parts, stats.Format.Duration, auditor); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode parts: %s\n", err)
 		exitCode = 2
 		return

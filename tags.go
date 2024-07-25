@@ -32,7 +32,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []st
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencURLTagKey, sptencURLTagValue),
 	)
 	// Encoding
-	if *nvc {
+	if *nvenc {
 		flags = append(flags,
 			"-metadata:s:v:0", fmt.Sprintf("%s=hevc_nvenc", sptencEncoderTagKey),
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.NVENCPreset),

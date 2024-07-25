@@ -122,7 +122,7 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 	return
 }
 
-func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (err error) {
+func encodeQP(input, output string, totalFrames, qp int) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -158,8 +158,9 @@ func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (er
 		Quantization:   qp,
 		Tags:           nil,
 		// Hardware Acceleration
-		NVDECENC: cuda,
-		GPUID:    &gpu,
+		NVDEC: *nvdec,
+		NVENC: *nvenc,
+		GPUID: gpu,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
@@ -176,7 +177,7 @@ func encodeQP(input, output string, totalFrames, qp int, cuda bool, gpu int) (er
 	return
 }
 
-func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, NEG, videoCUDA, VMAFCUDA bool, gpu int) (vmaf ffmpegutils.VMAFStats, err error) {
+func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD bool) (vmaf ffmpegutils.VMAFStats, err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -212,10 +213,10 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		// VMAF generation
 		ReportPath:        reportPath,
 		UltraHD:           ultraHD,
-		VideoCuda:         videoCUDA,
-		NoEnhancementGain: NEG,
-		VMAFCuda:          VMAFCUDA,
-		GPUID:             &gpu,
+		NVDEC:             *nvdec,
+		NoEnhancementGain: *vmafNEG,
+		VMAFCuda:          *vmafcuda,
+		GPUID:             gpu,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
