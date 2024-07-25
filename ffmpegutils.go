@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hekmon/cunits/v2"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -39,7 +40,6 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 		return
 	}
 	// Live Progress
-	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(fileInfos.Size())),
 		liveprogress.WithLineFillRunes(),
@@ -52,8 +52,8 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d frames (%0.0f fps, speed: %0.2fx)",
-				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
+			build.WriteString(fmt.Sprintf(" | %s/%s",
+				cunits.ImportInByte(float64(bar.Current())), cunits.ImportInByte(float64(bar.Total())),
 			))
 			return build.String()
 		}),
