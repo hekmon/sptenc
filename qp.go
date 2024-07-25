@@ -160,7 +160,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 				part, lastValid, QPCandidate)
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d with:\n%s",
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d with the following VMAF:\n%s",
 					part, QPCandidate, lastValid, vmafStats)
 				finalQP = lastValid
 				return
@@ -209,7 +209,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 				part, lastInvalid, QPCandidate)
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d with:\n%s",
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d with the following VMAF:\n%s",
 					part, QPCandidate, lastInvalid, vmafStats)
 				finalQP = lastInvalid
 				return
