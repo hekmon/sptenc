@@ -278,6 +278,7 @@ func partsMerge(originalFile, partsDir, outputPath string, tagsFlags []string, q
 		// Output
 		OutputFilePath: outputPath,
 		Tags:           tagsFlags,
+		FLAC:           *flac,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,

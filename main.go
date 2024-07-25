@@ -26,6 +26,7 @@ var (
 	gpu     *int
 	nvdec   *bool
 	nvenc   *bool
+	flac    *bool
 	debug   *bool
 	keep    *bool
 	//// vmaf
@@ -74,6 +75,7 @@ func main() {
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce bigger files than libx265.")
+	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
 	//// vmaf
