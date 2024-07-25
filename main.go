@@ -246,8 +246,6 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	if originalStats.VideoTrack().NbReadFrames != reencodedStats.VideoTrack().NbReadFrames {
 		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s. Does the input file has been encoded with open GOP?\n",
 			originalStats.VideoTrack().NbReadFrames, reencodedStats.VideoTrack().NbReadFrames)
-		exitCode = 2
-		return
 	}
 	// Step 6 - Move final file to output directory
 	fmt.Fprintf(bypass, "Moving final file to output directory...\n")
