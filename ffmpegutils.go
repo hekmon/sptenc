@@ -239,7 +239,7 @@ func partsMerge(originalFile, partsDir, outputPath string, tagsFlags []string, q
 	// Generate the concat script
 	filesnames := make([]string, len(qps))
 	for part, qp := range qps {
-		filesnames[part] = fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, qp)
+		filesnames[part] = fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, qp)
 	}
 	concatScript, err := ffmpegutils.GenerateConcatScript(partsDir, filesnames)
 	if err != nil {

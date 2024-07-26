@@ -70,7 +70,7 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 		totalQP += partQP
 		partsDuration += partDuration
 		QPWeights += partQP * int(partDuration.Milliseconds())
-		if partSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, partQP))); err != nil {
+		if partSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, partQP))); err != nil {
 			err = fmt.Errorf("failed to get the size of part %d: %w", part, err)
 			return
 		}
@@ -105,7 +105,7 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	// Prepare
-	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, part))
+	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, part))
 	partInfos, err := getStreamsInfosCF(input)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
@@ -133,7 +133,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			finalPartInfos       ffmpegutils.FFProbeStats
 			finalPartTotalFrames int
 		)
-		if finalPartInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, finalQP))); err != nil {
+		if finalPartInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, finalQP))); err != nil {
 			err = fmt.Errorf("failed to get streams infos of final part: %w", err)
 			return
 		}
@@ -150,7 +150,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 		}
 	}()
 	// Execute first test and loop
-	partQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, *startQP))
+	partQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, *startQP))
 	report := partQPOutput + "_vmaf.json"
 	var vmafStats ffmpegutils.VMAFStats
 	if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, *startQP, ultraHD); err != nil {
@@ -174,7 +174,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 				return
 			}
 			// Test QP
-			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))
+			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, QPCandidate))
 			report = partQPOutput + "_vmaf.json"
 			if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, ultraHD); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
@@ -188,7 +188,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 				finalQP = lastValid
 				// Remove invalid QP
 				if !*keep {
-					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))); err != nil {
+					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, QPCandidate))); err != nil {
 						err = fmt.Errorf("failed to remove previous valid QP at %s: %w", partQPOutput, err)
 						return
 					}
@@ -198,7 +198,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			// We found a new valid QP
 			if !*keep {
 				// Remove previous valid QP
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, lastValid))); err != nil {
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, lastValid))); err != nil {
 					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", partQPOutput, err)
 					return
 				}
@@ -225,13 +225,13 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			}
 			// We can still test candidate QP, delete previous invalid QP
 			if !*keep {
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, lastInvalid))); err != nil {
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, lastInvalid))); err != nil {
 					err = fmt.Errorf("failed to remove previous invalid QP at %s: %w", partQPOutput, err)
 					return
 				}
 			}
 			// Test QP
-			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneEncodedOutputFormat, part, QPCandidate))
+			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, QPCandidate))
 			report = partQPOutput + "_vmaf.json"
 			if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, ultraHD); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
