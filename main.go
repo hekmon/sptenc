@@ -211,7 +211,13 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "Output has been written to: %s\n", finalFilePath)
+	finalFileSize, err := getFileSize(finalFilePath)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to get final file size: %s\n", err)
+		exitCode = 2
+		return
+	}
+	fmt.Fprintf(bypass, "File file %q size: %s\n", finalFilePath, finalFileSize)
 	// Step 4 - Recompute MKV stats if necessary
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
 	if err = regenerateMKVStats(finalFilePath); err != nil {
