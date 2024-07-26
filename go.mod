@@ -9,6 +9,7 @@ require (
 	github.com/hekmon/ffmpegutils v1.0.0
 	github.com/hekmon/liveprogress/v2 v2.0.3
 	github.com/hekmon/liveterm/v2 v2.4.0
+	github.com/muesli/termenv v0.15.2
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
-	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

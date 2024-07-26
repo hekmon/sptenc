@@ -164,12 +164,13 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 		QPCandidate := *startQP + 1
 		// Search
 		for {
-			fmt.Fprintf(bypass, "Part %d: QP %d is good enough, let's try to decrease size with QP %d\n",
-				part, lastValid, QPCandidate)
+			fmt.Fprintln(bypass, faint.Styled(
+				fmt.Sprintf("Part %d: QP %d is good enough, let's try to decrease size with QP %d", part, lastValid, QPCandidate),
+			))
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d\n",
-					part, QPCandidate, lastValid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %s\n",
+					part, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
 				finalQP = lastValid
 				return
 			}
@@ -183,8 +184,8 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			// If the new QP is invalid, we return the previous one
 			if !auditor.Validate(vmafStats) {
 				// We reach an invalid QP, let's use the previous valid QP
-				fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, rolling back to QP %d\n",
-					part, QPCandidate, lastValid)
+				fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, rolling back to QP %s\n",
+					part, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
 				finalQP = lastValid
 				// Remove invalid QP
 				if !*keep {
@@ -213,12 +214,13 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 		QPCandidate := *startQP - 1
 		// Search
 		for {
-			fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, let's try to increase quality with QP %d\n",
-				part, lastInvalid, QPCandidate)
+			fmt.Fprintln(bypass, faint.Styled(
+				fmt.Sprintf("Part %d: QP %d is not good enough, let's try to increase quality with QP %d", part, lastInvalid, QPCandidate),
+			))
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d with the following VMAF:\n%s",
-					part, QPCandidate, lastInvalid, vmafStats)
+				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %s with the following VMAF:\n%s",
+					part, QPCandidate, bold.Styled(strconv.Itoa(lastInvalid)), vmafStats)
 				finalQP = lastInvalid
 				bestEffort = true
 				return
@@ -239,8 +241,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			}
 			// We found a valid QP after encountering an invalid QP, let's use it
 			if auditor.Validate(vmafStats) {
-				fmt.Fprintf(bypass, "Part %d: QP %d is good enough, keeping it\n",
-					part, QPCandidate)
+				fmt.Fprintf(bypass, "Part %d: QP %s is good enough, keeping it\n", part, bold.Styled(strconv.Itoa(QPCandidate)))
 				finalQP = QPCandidate
 				return
 			}
