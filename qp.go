@@ -96,7 +96,7 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
 	if nbBestEfforts > 0 {
-		fmt.Fprintf(bypass, "WARNING: %d parts were encoded with best effort, stopping at QP 0 but not validating VMAF config.\n", nbBestEfforts)
+		fmt.Fprintf(bypass, "WARNING: %d parts were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
 	}
 	fmt.Fprintf(bypass, "Parts encoding QP search done in %s.\n", duration.Round(time.Second))
 	return
