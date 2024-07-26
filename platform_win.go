@@ -7,12 +7,14 @@ import (
 	"os"
 	"syscall"
 	"unsafe"
+
+	"github.com/hekmon/liveprogress/v2"
 )
 
 type driveType uintptr
 
 const (
-	successfullError = "The operation completed successfully."
+	bufferSize = 256
 	// https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-getdrivetypew#return-value
 	DRIVE_UNKNOWN     driveType = 0
 	DRIVE_NO_ROOT_DIR driveType = 1
@@ -40,7 +42,7 @@ func (dt driveType) String() string {
 	case DRIVE_RAMDISK:
 		return "RAM Disk"
 	default:
-		return "Unknown"
+		return "UNKNOWN"
 	}
 }
 
@@ -50,84 +52,105 @@ var (
 )
 
 func sameFileSystem(path1, path2 string) (same bool, err error) {
+	bypass := liveprogress.Bypass()
 	drive1 := path1[:3]
 	drive2 := path2[:3]
 	// Get the drive type for each drive
-	//// drive 1
-	drive1UTF16Ptr, err := syscall.UTF16PtrFromString(drive1)
+	// https://learn.microsoft.com/fr-fr/windows/win32/api/fileapi/nf-fileapi-getdrivetypew
+	//// path 1
+	driveType1, err := getDriveType(drive1)
 	if err != nil {
-		err = fmt.Errorf("Error converting drive1 to UTF-16: %w", err)
+		err = fmt.Errorf("failed to get drive type for %q: %w", drive1, err)
 		return
 	}
-	driveType1, _, err := syscall.SyscallN(
-		procGetDriveType.Addr(),
-		uintptr(unsafe.Pointer(drive1UTF16Ptr)),
-	)
-	if err.Error() != successfullError {
-		err = fmt.Errorf("Error calling GetDriveType: %w", err)
-		return
-	}
-	if driveType(driveType1) == DRIVE_NO_ROOT_DIR || driveType(driveType1) == DRIVE_UNKNOWN {
-		err = fmt.Errorf("Drive %s has an unsupported type: %s", drive1, driveType(driveType1))
-		return
-	}
-	//// drive 2
-	drive2UTF16Ptr, err := syscall.UTF16PtrFromString(drive2)
-	if err != nil {
-		err = fmt.Errorf("Error converting drive2 to UTF-16: %w", err)
-		return
-	}
-	driveType2, _, err := syscall.SyscallN(
-		procGetDriveType.Addr(),
-		uintptr(unsafe.Pointer(drive2UTF16Ptr)),
-	)
-	if err.Error() != successfullError {
-		err = fmt.Errorf("Error calling GetDriveType: %w", err)
-		return
-	}
-	if driveType(driveType2) == DRIVE_NO_ROOT_DIR || driveType(driveType2) == DRIVE_UNKNOWN {
-		err = fmt.Errorf("Drive %s has an unsupported type: %s", drive2, driveType(driveType2))
-		return
-	}
-	//// If the drive types are different, the paths are on different filesystems
-	if driveType1 != driveType2 {
-		if *debug {
-			fmt.Printf("%q (%s) and %q (%s) are on different drive types\n", path1, driveType(driveType1), path2, driveType(driveType2))
-		}
+	if driveType1 == DRIVE_UNKNOWN || driveType1 == DRIVE_NO_ROOT_DIR {
+		err = fmt.Errorf("invalid drive type for %q: %w", drive1, err)
 		return
 	}
 	if *debug {
-		fmt.Printf("%q and %q has the same drive type: %s\n", path1, path2, driveType(driveType2))
+		fmt.Fprintf(bypass, "Drive %s is %s\n", drive1, driveType1)
 	}
-	// Get the volume name for each drive
-	//// drive 1
-	var volumeName1 [256]uint16
-	var bytesReturned1 uint32
-	syscall.SyscallN(
+	//// path 2
+	driveType2, err := getDriveType(drive2)
+	if err != nil {
+		err = fmt.Errorf("failed to get drive type for %q: %w", drive2, err)
+		return
+	}
+	if driveType2 == DRIVE_UNKNOWN || driveType2 == DRIVE_NO_ROOT_DIR {
+		err = fmt.Errorf("invalid drive type for %q: %w", drive2, err)
+		return
+	}
+	if *debug {
+		fmt.Fprintf(bypass, "Drive %s is %s\n", drive2, driveType2)
+	}
+	//// If the drive types are different, the paths are necessarily on different filesystems
+	if driveType1 != driveType2 {
+		return
+	}
+	// Get the volume informations
+	// https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-getvolumeinformationw
+	drive1VolName, drive1Serial, err := getDriveInfos(drive1)
+	if *debug {
+		fmt.Fprintf(bypass, "Drive %s is named '%s' (SN: %d)\n", drive1, drive1VolName, drive1Serial)
+	}
+	drive2VolName, drive2Serial, err := getDriveInfos(drive2)
+	if *debug {
+		fmt.Fprintf(bypass, "Drive %s is named '%s' (SN: %d)\n", drive2, drive2VolName, drive2Serial)
+	}
+	//// Compare the serial numbers
+	same = drive1Serial == drive2Serial
+	return
+}
+
+func getDriveType(rootPath string) (dtype driveType, err error) {
+	driveUTF16Ptr, err := syscall.UTF16PtrFromString(rootPath)
+	if err != nil {
+		err = fmt.Errorf("failed to convert rootPath to UTF-16: %w", err)
+		return
+	}
+	returnValue, _, _ := syscall.SyscallN(
+		procGetDriveType.Addr(),
+		uintptr(unsafe.Pointer(driveUTF16Ptr)),
+	)
+	dtype = driveType(returnValue)
+	return
+}
+
+func getDriveInfos(rootPath string) (volName string, serial int, err error) {
+	volUTF16Ptr, err := syscall.UTF16PtrFromString(rootPath)
+	if err != nil {
+		err = fmt.Errorf("failed to convert rootPath to UTF-16: %w", err)
+		return
+	}
+	var (
+		vName [bufferSize]uint16
+		vSN   uint32
+	)
+	returnValue, _, _ := syscall.SyscallN(
 		procGetVolumeInformation.Addr(),
-		5,
-		uintptr(unsafe.Pointer(drive1UTF16Ptr)),
-		uintptr(unsafe.Pointer(&volumeName1[0])),
-		256,
-		uintptr(unsafe.Pointer(&bytesReturned1)),
+		// [in, optional] lpRootPathName
+		uintptr(unsafe.Pointer(volUTF16Ptr)),
+		// [out, optional] lpVolumeNameBuffer
+		uintptr(unsafe.Pointer(&vName[0])),
+		// [in] nVolumeNameSize
+		bufferSize,
+		// [out, optional] lpVolumeSerialNumber
+		uintptr(unsafe.Pointer(&vSN)),
+		// [out, optional] lpMaximumComponentLength
 		0,
+		// [out, optional] lpFileSystemFlags
+		0,
+		// [out, optional] lpFileSystemNameBuffer
+		0,
+		// [out, optional] lpFileSystemNameBuffer
 		0,
 	)
-	//// drive 2
-	var volumeName2 [256]uint16
-	var bytesReturned2 uint32
-	syscall.SyscallN(
-		procGetVolumeInformation.Addr(),
-		5,
-		uintptr(unsafe.Pointer(drive2UTF16Ptr)),
-		uintptr(unsafe.Pointer(&volumeName2[0])),
-		256,
-		uintptr(unsafe.Pointer(&bytesReturned2)),
-		0,
-		0,
-	)
-	//// Compare the volume names
-	same = syscall.UTF16ToString(volumeName1[:bytesReturned1]) == syscall.UTF16ToString(volumeName2[:bytesReturned2])
+	if returnValue == 0 {
+		err = fmt.Errorf("Error getting volume infos for %s: %w", rootPath, syscall.GetLastError())
+		return
+	}
+	volName = syscall.UTF16ToString(vName[:])
+	serial = int(vSN)
 	return
 }
 
