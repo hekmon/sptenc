@@ -11,6 +11,11 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
+var (
+	procGetDriveType         = syscall.MustLoadDLL("kernel32.dll").MustFindProc("GetDriveTypeW")
+	procGetVolumeInformation = syscall.MustLoadDLL("kernel32.dll").MustFindProc("GetVolumeInformationW")
+)
+
 type driveType uintptr
 
 const (
@@ -45,11 +50,6 @@ func (dt driveType) String() string {
 		return "UNKNOWN"
 	}
 }
-
-var (
-	procGetDriveType         = syscall.MustLoadDLL("kernel32.dll").MustFindProc("GetDriveTypeW")
-	procGetVolumeInformation = syscall.MustLoadDLL("kernel32.dll").MustFindProc("GetVolumeInformationW")
-)
 
 func sameFileSystem(path1, path2 string) (same bool, err error) {
 	bypass := liveprogress.Bypass()
