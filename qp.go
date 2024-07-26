@@ -43,7 +43,7 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d/%d parts done | %s)",
+			return fmt.Sprintf(" left | %d/%d parts done | %s",
 				partsDone, nbParts, partsSize,
 			)
 		}),
