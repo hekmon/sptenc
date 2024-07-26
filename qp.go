@@ -25,6 +25,8 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 		partDuration, partsDuration time.Duration
 		partQP, totalQP, QPWeights  int
 		partSize, partsSize         cunits.Bits
+		bestEffort                  bool
+		nbBestEfforts               int
 	)
 	results = make([]int, nbParts)
 	bypass := liveprogress.Bypass()
@@ -53,7 +55,7 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 	start := time.Now()
 	for part := 0; part < nbParts; part++ {
 		fmt.Fprintf(bypass, "Part %d: Search for the right QP, starting with %d\n", part, *startQP)
-		if partQP, partDuration, err = findPartQP(dir, part, auditor); err != nil {
+		if partQP, bestEffort, partDuration, err = findPartQP(dir, part, auditor); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP part %d: %w", part, err)
 			return
 		}
@@ -73,6 +75,9 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 			return
 		}
 		partsSize += partSize
+		if bestEffort {
+			nbBestEfforts++
+		}
 		// Update live progress
 		bar.CurrentAdd(uint64(partDuration))
 		partsDone++
@@ -90,11 +95,14 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
+	if nbBestEfforts > 0 {
+		fmt.Fprintf(bypass, "WARNING: %d parts were encoded with best effort, stopping at QP 0 but not validating VMAF config.\n", nbBestEfforts)
+	}
 	fmt.Fprintf(bypass, "Parts encoding QP search done in %s.\n", duration.Round(time.Second))
 	return
 }
 
-func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duration time.Duration, err error) {
+func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SceneOutputFormat, part))
@@ -212,6 +220,7 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, duratio
 				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %d with the following VMAF:\n%s",
 					part, QPCandidate, lastInvalid, vmafStats)
 				finalQP = lastInvalid
+				bestEffort = true
 				return
 			}
 			// We can still test candidate QP, delete previous invalid QP
