@@ -178,7 +178,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	// Step 1 - Split file by GOP
-	fmt.Fprintf(bypass, "Splitting %s by groups of pictures (GOP)...\n", filepath.Base(*input))
+	fmt.Fprintf(bypass, "Splitting %q by groups of pictures (GOP)...\n", filepath.Base(*input))
 	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to split parts: %s\n", err)
 		exitCode = 2
