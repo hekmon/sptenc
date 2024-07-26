@@ -15,23 +15,23 @@ import (
 type QPStats struct {
 	Minimum        int
 	Maximum        int
-	PartsMean      float64
+	GOPMean        float64
 	GlobalWeighted float64
 }
 
-func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor VMAFChecker) (results []int, stats QPStats, err error) {
+func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VMAFChecker) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
-		partDuration, partsDuration time.Duration
-		partQP, totalQP, QPWeights  int
-		partSize, partsSize         cunits.Bits
+		GOPDuration, allGOPDuration time.Duration
+		GOPQP, totalQP, QPWeights   int
+		GOPSize, allGOPSize         cunits.Bits
 		bestEffort                  bool
 		nbBestEfforts               int
 	)
-	results = make([]int, nbParts)
+	results = make([]int, nbGOP)
 	bypass := liveprogress.Bypass()
 	// Live progress
-	var partsDone int
+	var GOPDone int
 	bar := liveprogress.SetMainLineAsBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
 		liveprogress.WithLineFillRunes(),
@@ -43,8 +43,8 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d/%d parts done | %s",
-				partsDone, nbParts, partsSize,
+			return fmt.Sprintf(" left | %d/%d GOP done | %s",
+				GOPDone, nbGOP, allGOPSize,
 			)
 		}),
 	)
@@ -53,73 +53,73 @@ func findPartsQP(dir string, nbParts int, totalDuration time.Duration, auditor V
 	stats.Minimum = ffmpegutils.QPMaximum + 1
 	stats.Maximum = ffmpegutils.QPMinimum - 1
 	start := time.Now()
-	for part := 0; part < nbParts; part++ {
-		fmt.Fprintf(bypass, "Part %d: Search for the right QP, starting with %d\n", part, *startQP)
-		if partQP, bestEffort, partDuration, err = findPartQP(dir, part, auditor); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP part %d: %w", part, err)
+	for GOP := 0; GOP < nbGOP; GOP++ {
+		fmt.Fprintf(bypass, "GOP %d: Search for the right QP, starting with %d\n", GOP, *startQP)
+		if GOPQP, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
+			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
-		results[part] = partQP
+		results[GOP] = GOPQP
 		// Compute stats
-		if partQP < stats.Minimum {
-			stats.Minimum = partQP
+		if GOPQP < stats.Minimum {
+			stats.Minimum = GOPQP
 		}
-		if partQP > stats.Maximum {
-			stats.Maximum = partQP
+		if GOPQP > stats.Maximum {
+			stats.Maximum = GOPQP
 		}
-		totalQP += partQP
-		partsDuration += partDuration
-		QPWeights += partQP * int(partDuration.Milliseconds())
-		if partSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, partQP))); err != nil {
-			err = fmt.Errorf("failed to get the size of part %d: %w", part, err)
+		totalQP += GOPQP
+		allGOPDuration += GOPDuration
+		QPWeights += GOPQP * int(GOPDuration.Milliseconds())
+		if GOPSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, GOPQP))); err != nil {
+			err = fmt.Errorf("failed to get the size of GOP %d: %w", GOP, err)
 			return
 		}
-		partsSize += partSize
+		allGOPSize += GOPSize
 		if bestEffort {
 			nbBestEfforts++
 		}
 		// Update live progress
-		bar.CurrentAdd(uint64(partDuration))
-		partsDone++
+		bar.CurrentAdd(uint64(GOPDuration))
+		GOPDone++
 	}
 	duration := time.Since(start)
 	// Done
-	if partsDuration != totalDuration {
-		fmt.Fprintf(bypass, "WARNING: Desync possible: encoded parts duration: %s, original duration: %s\n",
-			partsDuration, totalDuration)
+	if allGOPDuration != totalDuration {
+		fmt.Fprintf(bypass, "WARNING: Desync possible: encoded GOP duration: %s, original duration: %s\n",
+			allGOPDuration, totalDuration)
 	}
-	stats.PartsMean = float64(totalQP) / float64(len(results))
-	stats.GlobalWeighted = float64(QPWeights) / float64(partsDuration.Milliseconds())
-	fmt.Fprintf(bypass, "Parts QPs: %+v\n", results)
-	fmt.Fprintf(bypass, "Mean part QP is %s and weighted global QP is %s.\n",
-		strconv.FormatFloat(stats.PartsMean, 'f', -1, 64),
+	stats.GOPMean = float64(totalQP) / float64(len(results))
+	stats.GlobalWeighted = float64(QPWeights) / float64(allGOPDuration.Milliseconds())
+	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
+	fmt.Fprintf(bypass, "Mean GOP QP is %s and weighted global QP is %s.\n",
+		strconv.FormatFloat(stats.GOPMean, 'f', -1, 64),
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
 	if nbBestEfforts > 0 {
-		fmt.Fprintf(bypass, "WARNING: %d parts were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
+		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
 	}
-	fmt.Fprintf(bypass, "Parts encoding QP search done in %s.\n", duration.Round(time.Second))
+	fmt.Fprintf(bypass, "GOP encoding QP search done in %s.\n", duration.Round(time.Second))
 	return
 }
 
-func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	// Prepare
-	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, part))
-	partInfos, err := getStreamsInfosCF(input)
+	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
+	GOPInfos, err := getStreamsInfosCF(input)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
 	}
-	duration = partInfos.Format.Duration
-	videoTrack := partInfos.VideoTrack()
+	duration = GOPInfos.Format.Duration
+	videoTrack := GOPInfos.VideoTrack()
 	totalFrames, err := strconv.Atoi(videoTrack.NbReadFrames)
 	if err != nil {
 		err = fmt.Errorf("failed to get total frames: %w", err)
 		return
 	}
 	if *debug {
-		fmt.Fprintf(bypass, "Part %d: contains %d frames\n", part, totalFrames)
+		fmt.Fprintf(bypass, "GOP %d: contains %d frames\n", GOP, totalFrames)
 	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
@@ -130,30 +130,30 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			return
 		}
 		var (
-			finalPartInfos       ffmpegutils.FFProbeStats
-			finalPartTotalFrames int
+			finalGOPInfos       ffmpegutils.FFProbeStats
+			finalGOPTotalFrames int
 		)
-		if finalPartInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, finalQP))); err != nil {
-			err = fmt.Errorf("failed to get streams infos of final part: %w", err)
+		if finalGOPInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, finalQP))); err != nil {
+			err = fmt.Errorf("failed to get streams infos of final GOP: %w", err)
 			return
 		}
-		if finalPartTotalFrames, err = strconv.Atoi(finalPartInfos.VideoTrack().NbReadFrames); err != nil {
-			err = fmt.Errorf("failed to get total frames of final part: %w", err)
+		if finalGOPTotalFrames, err = strconv.Atoi(finalGOPInfos.VideoTrack().NbReadFrames); err != nil {
+			err = fmt.Errorf("failed to get total frames of final GOP: %w", err)
 			return
 		}
-		if finalPartTotalFrames != totalFrames {
-			err = fmt.Errorf("final part has %d frames instead of %d", finalPartTotalFrames, totalFrames)
+		if finalGOPTotalFrames != totalFrames {
+			err = fmt.Errorf("final GOP has %d frames instead of %d", finalGOPTotalFrames, totalFrames)
 			return
 		}
 		if *debug {
-			fmt.Fprintf(bypass, "Final part has %d frames as original part.\n", finalPartTotalFrames)
+			fmt.Fprintf(bypass, "Final GOP has %d frames as original GOP.\n", finalGOPTotalFrames)
 		}
 	}()
 	// Execute first test and loop
-	partQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, *startQP))
-	report := partQPOutput + "_vmaf.json"
+	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, *startQP))
+	report := GOPQPOutput + "_vmaf.json"
 	var vmafStats ffmpegutils.VMAFStats
-	if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, *startQP, ultraHD); err != nil {
+	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, *startQP, ultraHD); err != nil {
 		err = fmt.Errorf("failed to produce QP %d: %w", *startQP, err)
 		return
 	}
@@ -165,32 +165,32 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 		// Search
 		for {
 			fmt.Fprintln(bypass, faint.Styled(
-				fmt.Sprintf("Part %d: QP %d is good enough, let's try to decrease size with QP %d", part, lastValid, QPCandidate),
+				fmt.Sprintf("GOP %d: QP %d is good enough, let's try to decrease size with QP %d", GOP, lastValid, QPCandidate),
 			))
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %s\n",
-					part, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+				fmt.Fprintf(bypass, "GOP %d: QP %d is invalid, rolling back to QP %s\n",
+					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
 				finalQP = lastValid
 				return
 			}
 			// Test QP
-			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, QPCandidate))
-			report = partQPOutput + "_vmaf.json"
-			if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, ultraHD); err != nil {
+			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))
+			report = GOPQPOutput + "_vmaf.json"
+			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
 			// If the new QP is invalid, we return the previous one
 			if !auditor.Validate(vmafStats) {
 				// We reach an invalid QP, let's use the previous valid QP
-				fmt.Fprintf(bypass, "Part %d: QP %d is not good enough, rolling back to QP %s\n",
-					part, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+				fmt.Fprintf(bypass, "GOP %d: QP %d is not good enough, rolling back to QP %s\n",
+					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
 				finalQP = lastValid
 				// Remove invalid QP
 				if !*keep {
-					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, QPCandidate))); err != nil {
-						err = fmt.Errorf("failed to remove previous valid QP at %s: %w", partQPOutput, err)
+					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))); err != nil {
+						err = fmt.Errorf("failed to remove previous valid QP at %s: %w", GOPQPOutput, err)
 						return
 					}
 				}
@@ -199,8 +199,8 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 			// We found a new valid QP
 			if !*keep {
 				// Remove previous valid QP
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, lastValid))); err != nil {
-					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", partQPOutput, err)
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, lastValid))); err != nil {
+					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", GOPQPOutput, err)
 					return
 				}
 			}
@@ -215,33 +215,33 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 		// Search
 		for {
 			fmt.Fprintln(bypass, faint.Styled(
-				fmt.Sprintf("Part %d: QP %d is not good enough, let's try to increase quality with QP %d", part, lastInvalid, QPCandidate),
+				fmt.Sprintf("GOP %d: QP %d is not good enough, let's try to increase quality with QP %d", GOP, lastInvalid, QPCandidate),
 			))
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
-				fmt.Fprintf(bypass, "Part %d: QP %d is invalid, rolling back to QP %s with the following VMAF:\n%s",
-					part, QPCandidate, bold.Styled(strconv.Itoa(lastInvalid)), vmafStats)
+				fmt.Fprintf(bypass, "GOP %d: QP %d is invalid, rolling back to QP %s with the following VMAF:\n%s",
+					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastInvalid)), vmafStats)
 				finalQP = lastInvalid
 				bestEffort = true
 				return
 			}
 			// We can still test candidate QP, delete previous invalid QP
 			if !*keep {
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, lastInvalid))); err != nil {
-					err = fmt.Errorf("failed to remove previous invalid QP at %s: %w", partQPOutput, err)
+				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, lastInvalid))); err != nil {
+					err = fmt.Errorf("failed to remove previous invalid QP at %s: %w", GOPQPOutput, err)
 					return
 				}
 			}
 			// Test QP
-			partQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, QPCandidate))
-			report = partQPOutput + "_vmaf.json"
-			if vmafStats, err = partQP(input, partQPOutput, report, frameRate, totalFrames, part, QPCandidate, ultraHD); err != nil {
+			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))
+			report = GOPQPOutput + "_vmaf.json"
+			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
 			// We found a valid QP after encountering an invalid QP, let's use it
 			if auditor.Validate(vmafStats) {
-				fmt.Fprintf(bypass, "Part %d: QP %s is good enough, keeping it\n", part, bold.Styled(strconv.Itoa(QPCandidate)))
+				fmt.Fprintf(bypass, "GOP %d: QP %s is good enough, keeping it\n", GOP, bold.Styled(strconv.Itoa(QPCandidate)))
 				finalQP = QPCandidate
 				return
 			}
@@ -252,19 +252,19 @@ func findPartQP(dir string, part int, auditor VMAFChecker) (finalQP int, bestEff
 	}
 }
 
-func partQP(input, output, vmafReportPath, frameRate string, totalFrames, partID, qp int, ultraHD bool) (vmafStats ffmpegutils.VMAFStats, err error) {
+func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, qp int, ultraHD bool) (vmafStats ffmpegutils.VMAFStats, err error) {
 	// Encode
 	if err = encodeQP(input, output, totalFrames, qp); err != nil {
-		err = fmt.Errorf("failed to encode part: %w", err)
+		err = fmt.Errorf("failed to encode GOP: %w", err)
 		return
 	}
 	// Compute VMAF
 	if vmafStats, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD); err != nil {
-		err = fmt.Errorf("failed to compute VMAF for part: %w", err)
+		err = fmt.Errorf("failed to compute VMAF for GOP: %w", err)
 		return
 	}
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Part %d: QP %d: VMAF results:\n%s\n", partID, qp, vmafStats)
+		fmt.Fprintf(liveprogress.Bypass(), "GOP %d: QP %d: VMAF results:\n%s\n", GOPID, qp, vmafStats)
 	}
 	return
 }

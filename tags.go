@@ -16,7 +16,7 @@ const (
 	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
 	sptencStatsMinQP          = "sptenc_stats_min_qp"
 	sptencStatsWaxQP          = "sptenc_stats_max_qp"
-	sptencStatsMeanQP         = "sptenc_stats_part_mean_qp"
+	sptencStatsMeanQP         = "sptenc_stats_GOP_mean_qp"
 	sptencStatsWeightedQP     = "sptenc_stats_global_weighted_qp"
 	sptencVMAFMeanTagKey      = "sptenc_vmaf_conf_mean"
 	sptencVMAFHMeanTagKey     = "sptenc_vmaf_conf_hmean"
@@ -47,7 +47,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []st
 	flags = append(flags,
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsMinQP, statsQP.Minimum),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsWaxQP, statsQP.Maximum),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsMeanQP, strconv.FormatFloat(statsQP.PartsMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsMeanQP, strconv.FormatFloat(statsQP.GOPMean, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
 	)
 	// VMAF conf

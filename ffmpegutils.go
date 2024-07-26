@@ -118,7 +118,7 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 	}
 	duration := time.Since(start)
 	// Done
-	fmt.Fprintf(liveprogress.Bypass(), "Parts slicing done in %s\n", duration.Round(time.Second))
+	fmt.Fprintf(liveprogress.Bypass(), "GOP slicing done in %s\n", duration.Round(time.Second))
 	return
 }
 
@@ -172,7 +172,7 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 	duration := time.Since(start)
 	// Done
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Part encoded in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "GOP encoded in %s\n", duration.Round(time.Second))
 	}
 	return
 }
@@ -230,18 +230,18 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	// Done
 	vmaf = report.GetStats()
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Part VMAF computed in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "GOP VMAF computed in %s\n", duration.Round(time.Second))
 	}
 	return
 }
 
-func partsMerge(originalFile, partsDir, outputPath string, tagsFlags []string, qps []int, expectedDuration time.Duration) (err error) {
+func GOPMerge(originalFile, GOPDir, outputPath string, tagsFlags []string, qps []int, expectedDuration time.Duration) (err error) {
 	// Generate the concat script
 	filesnames := make([]string, len(qps))
-	for part, qp := range qps {
-		filesnames[part] = fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, part, qp)
+	for GOP, qp := range qps {
+		filesnames[GOP] = fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, qp)
 	}
-	concatScript, err := ffmpegutils.GenerateConcatScript(partsDir, filesnames)
+	concatScript, err := ffmpegutils.GenerateConcatScript(GOPDir, filesnames)
 	if err != nil {
 		err = fmt.Errorf("failed to create the concat script file: %w", err)
 		return
@@ -290,9 +290,9 @@ func partsMerge(originalFile, partsDir, outputPath string, tagsFlags []string, q
 	duration := time.Since(start)
 	// Done
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Parts merged within %q in %s\n", outputPath, duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "GOP merged within %q in %s\n", outputPath, duration.Round(time.Second))
 	} else {
-		fmt.Fprintf(liveprogress.Bypass(), "Parts merged in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "GOP merged in %s\n", duration.Round(time.Second))
 	}
 	return
 }

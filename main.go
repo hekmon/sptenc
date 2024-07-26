@@ -72,9 +72,9 @@ func main() {
 	}()
 	// Flags
 	input = flag.String("input", "", "Input file to transcode.")
-	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded parts and VMAF reports.")
+	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
-	startQP = flag.Int("qp", 18, "Quantization Parameter value to start part encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
+	startQP = flag.Int("qp", 18, "Quantization Parameter value to start GOP encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce bigger files than libx265.")
@@ -84,11 +84,11 @@ func main() {
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
-	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the part encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	version := flag.Bool("version", false, "Show the current version of the Parts Encoder.")
+	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
 	flag.Parse()
 	if *version {
 		fmt.Printf("%s %s\n", liveterm.Hyperlink(sptencURLTagValue, "Sp(li)tEnc(oder)"), Version)
@@ -185,34 +185,34 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	// Step 1 - Split file by GOP
 	fmt.Fprintf(bypass, "Splitting %q by groups of pictures (GOP)...\n", filepath.Base(*input))
 	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
-		fmt.Fprintf(bypass, "Failed to split parts: %s\n", err)
+		fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
 		exitCode = 2
 		return
 	}
-	parts, err := getDirFilesNumber(workingDirectory)
+	GOP, err := getDirFilesNumber(workingDirectory)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to get number of splitted GOPs: %s\n", err)
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "Splitting managed to separate the file in %d parts\n", parts)
-	// Step 2 - Encode parts
-	fmt.Fprintf(bypass, "Searching the right QP for each parts...\n")
+	fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
+	// Step 2 - Encode GOP
+	fmt.Fprintf(bypass, "Searching the right QP for each GOP...\n")
 	var (
-		partsQP []int
+		GOPQP   []int
 		statsQP QPStats
 	)
-	if partsQP, statsQP, err = findPartsQP(workingDirectory, parts, stats.Format.Duration, auditor); err != nil {
-		fmt.Fprintf(bypass, "Failed to encode parts: %s\n", err)
+	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, stats.Format.Duration, auditor); err != nil {
+		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 3 - Merge parts and remux original file
-	fmt.Fprintln(bypass, "Merging encoded parts to final file...")
+	// Step 3 - Merge GOP and remux original file
+	fmt.Fprintln(bypass, "Merging encoded GOP to final file...")
 	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
 	tagsFlags := generateTags(*stats.Format, statsQP)
-	if err = partsMerge(*input, workingDirectory, finalFilePath, tagsFlags, partsQP, stats.Format.Duration); err != nil {
-		fmt.Fprintf(bypass, "Failed to merge parts: %s\n", err)
+	if err = GOPMerge(*input, workingDirectory, finalFilePath, tagsFlags, GOPQP, stats.Format.Duration); err != nil {
+		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
 		return
 	}

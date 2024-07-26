@@ -32,7 +32,7 @@ func computeNewDirFilePath(file, outputDir string, rename bool) (output string) 
 		output = filepath.Join(outputDir, filepath.Base(file))
 		return
 	}
-	// Cut part of file name
+	// Cut GOP of file name
 	inputFileName := filepath.Base(file)
 	extension := filepath.Ext(file)
 	baseName := inputFileName[:len(inputFileName)-len(extension)]
