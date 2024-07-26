@@ -67,8 +67,8 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 		err = fmt.Errorf("Error calling GetDriveType: %w", err)
 		return
 	}
-	if driveType(driveType1) == DRIVE_NO_ROOT_DIR {
-		err = fmt.Errorf("Drive %s does not have a root directory (invalid letter)", drive1)
+	if driveType(driveType1) == DRIVE_NO_ROOT_DIR || driveType(driveType1) == DRIVE_UNKNOWN {
+		err = fmt.Errorf("Drive %s has an unsupported type: %s", drive1, driveType(driveType1))
 		return
 	}
 	//// drive 2
@@ -85,16 +85,19 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 		err = fmt.Errorf("Error calling GetDriveType: %w", err)
 		return
 	}
-	if driveType(driveType2) == DRIVE_NO_ROOT_DIR {
-		err = fmt.Errorf("Drive %s does not have a root directory (invalid letter)", drive2)
+	if driveType(driveType2) == DRIVE_NO_ROOT_DIR || driveType(driveType2) == DRIVE_UNKNOWN {
+		err = fmt.Errorf("Drive %s has an unsupported type: %s", drive2, driveType(driveType2))
 		return
 	}
 	//// If the drive types are different, the paths are on different filesystems
 	if driveType1 != driveType2 {
 		if *debug {
-			fmt.Printf("%s (%s) and %s (%s) are on different drive types\n", path1, driveType(driveType1), path2, driveType(driveType2))
+			fmt.Printf("%q (%s) and %q (%s) are on different drive types\n", path1, driveType(driveType1), path2, driveType(driveType2))
 		}
 		return
+	}
+	if *debug {
+		fmt.Printf("%q and %q has the same drive type: %s\n", path1, path2, driveType(driveType2))
 	}
 	// Get the volume name for each drive
 	//// drive 1
