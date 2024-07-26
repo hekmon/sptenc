@@ -170,16 +170,6 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	if *debug {
 		fmt.Fprintf(bypass, "Working directory: %s\n", workingDirectory)
 	}
-	//// Filesystems check (to be removed when properly tested)
-	var sameFS bool
-	if sameFS, err = sameFileSystem(*input, workingDirectory); err != nil {
-		fmt.Fprintf(bypass, "Failed to check filesystems: %s\n", err)
-		exitCode = 2
-		return
-	}
-	if *debug {
-		fmt.Fprintf(bypass, "Same filesystem: %t\n", sameFS)
-	}
 	//// Input file container infos
 	stats, err := getStreamsInfos(*input)
 	if err != nil {
