@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
+	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
 
@@ -59,7 +61,7 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 	return
 }
 
-func compareFilesFramesCount(original, encoded string) (err error) {
+func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err error) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Get original file stats
@@ -77,13 +79,31 @@ func compareFilesFramesCount(original, encoded string) (err error) {
 	// Compare
 	duration := time.Since(start)
 	if originalStats.VideoTrack().NbReadFrames != encodedStats.VideoTrack().NbReadFrames {
-		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s. Does the input file has been encoded with open GOP?\n",
+		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s.\n\tFinal VMAF won't be computed. Does the input file has been encoded with open GOP?\n",
 			originalStats.VideoTrack().NbReadFrames, encodedStats.VideoTrack().NbReadFrames)
-	} else {
-		fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded files: %s\n",
-			originalStats.VideoTrack().NbReadFrames)
+		fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
+		return
 	}
+	fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded files: %s\n", originalStats.VideoTrack().NbReadFrames)
 	fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
+	// Now compute their VMAF together
+	encodedVideoTrack := encodedStats.VideoTrack()
+	totalFrames, err := strconv.Atoi(encodedVideoTrack.NbReadFrames)
+	if err != nil {
+		err = fmt.Errorf("failed to convert number of frames to int: %w", err)
+		return
+	}
+	start = time.Now()
+	vmaf, err := computeVMAF(encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, totalFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight)
+	if err != nil {
+		err = fmt.Errorf("failed to compute VMAF: %w", err)
+		return
+	}
+	vmafStats = &vmaf
+	duration = time.Since(start)
+	// Print VMAF
+	fmt.Fprintf(bypass, "Final VMAF:\n%s\n", vmaf)
+	fmt.Fprintf(bypass, "VMAF computation took %s\n", duration.Round(time.Second))
 	return
 }
 

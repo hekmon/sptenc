@@ -14,18 +14,31 @@ const (
 	sptencURLTagValue         = "https://github.com/hekmon/sptenc"
 	sptencEncoderTagKey       = "sptenc_encoder"
 	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
-	sptencStatsMinQP          = "sptenc_stats_min_qp"
-	sptencStatsWaxQP          = "sptenc_stats_max_qp"
-	sptencStatsMeanQP         = "sptenc_stats_GOP_mean_qp"
-	sptencStatsWeightedQP     = "sptenc_stats_global_weighted_qp"
-	sptencVMAFMeanTagKey      = "sptenc_vmaf_conf_mean"
-	sptencVMAFHMeanTagKey     = "sptenc_vmaf_conf_hmean"
-	sptencVMAFP1TagKey        = "sptenc_vmaf_conf_p1"
-	sptencVMAFMinTagKey       = "sptenc_vmaf_conf_min"
+	// Encoding QP stats
+	sptencStatsMinQP      = "sptenc_stats_min_qp"
+	sptencStatsWaxQP      = "sptenc_stats_max_qp"
+	sptencStatsMeanQP     = "sptenc_stats_GOP_mean_qp"
+	sptencStatsWeightedQP = "sptenc_stats_global_weighted_qp"
+	// VMAF Conf
+	sptencVMAFConfMeanTagKey  = "sptenc_vmaf_conf_mean"
+	sptencVMAFConfHMeanTagKey = "sptenc_vmaf_conf_hmean"
+	sptencVMAFConfP1TagKey    = "sptenc_vmaf_conf_p1"
+	sptencVMAFConfMinTagKey   = "sptenc_vmaf_conf_min"
+	// VMAF Results (version, min, p1, p5, p10, p25, median, HarmonicMean, Mean, Max)
+	sptencVMAFResultVersionTagKey = "sptenc_vmaf_result_version"
+	sptencVMAFResultMinTagKey     = "sptenc_vmaf_result_min"
+	sptencVMAFResultP1TagKey      = "sptenc_vmaf_result_p1"
+	sptencVMAFResultP5TagKey      = "sptenc_vmaf_result_p5"
+	sptencVMAFResultP10TagKey     = "sptenc_vmaf_result_p10"
+	sptencVMAFResultP25TagKey     = "sptenc_vmaf_result_p25"
+	sptencVMAFResultMedianTagKey  = "sptenc_vmaf_result_median"
+	sptencVMAFResultHMeanTagKey   = "sptenc_vmaf_result_hmean"
+	sptencVMAFResultMeanTagKey    = "sptenc_vmaf_result_mean"
+	sptencVMAFResultMaxTagKey     = "sptenc_vmaf_result_max"
 )
 
-func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []string) {
-	flags = make([]string, 0, 10)
+func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpegutils.VMAFStats) (flags []string) {
+	flags = make([]string, 0, 40)
 	// Global
 	flags = append(flags,
 		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
@@ -52,16 +65,31 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats) (flags []st
 	)
 	// VMAF conf
 	if *vmafLimitMin != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
 	}
 	if *vmafLimitP1 != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
 	}
 	if *vmafLimitHMean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
 	}
 	if *vmafLimitMean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
+	}
+	// VMAF results
+	if vmaf != nil {
+		flags = append(flags,
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultVersionTagKey, vmaf.Version),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Minimum, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP1TagKey, strconv.FormatFloat(vmaf.Percentile1, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP5TagKey, strconv.FormatFloat(vmaf.Percentile5, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP10TagKey, strconv.FormatFloat(vmaf.Percentile10, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP25TagKey, strconv.FormatFloat(vmaf.Percentile25, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMedianTagKey, strconv.FormatFloat(vmaf.Median, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultHMeanTagKey, strconv.FormatFloat(vmaf.HarmonicMean, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Mean, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Maximum, 'f', -1, 64)),
+		)
 	}
 	return
 }

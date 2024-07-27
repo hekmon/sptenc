@@ -207,11 +207,25 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	// Step 3 - Merge GOP and remux original file
+	// Step 3 - Check results
+	fmt.Fprintf(bypass, "Checking result...\n")
+	concatScriptPath, err := generateConcatScript(workingDirectory, GOPQP)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to generate concat script: %s\n", err)
+		exitCode = 2
+		return
+	}
+	var vmafStats *ffmpegutils.VMAFStats
+	if vmafStats, err = filesCheck(*input, concatScriptPath); err != nil {
+		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
+		exitCode = 2
+		return
+	}
+	// Step 4 - Merge GOP and remux original file
 	fmt.Fprintln(bypass, "Merging encoded GOP to final file...")
 	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
-	tagsFlags := generateTags(*stats.Format, statsQP)
-	if err = GOPMerge(*input, workingDirectory, finalFilePath, tagsFlags, GOPQP, stats.Format.Duration); err != nil {
+	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats)
+	if err = GOPMerge(*input, concatScriptPath, finalFilePath, tagsFlags, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
 		return
@@ -222,18 +236,11 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "File file %q size: %s\n", finalFilePath, finalFileSize)
-	// Step 4 - Recompute MKV stats if necessary
+	fmt.Fprintf(bypass, "Final file %q size: %s\n", filepath.Base(finalFilePath), finalFileSize)
+	// Step 5 - Recompute MKV stats if necessary
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
 	if err = regenerateMKVStats(finalFilePath); err != nil {
 		fmt.Fprintf(bypass, "Failed to regenerate MKV stats: %s\n", err)
-		exitCode = 2
-		return
-	}
-	// Step 5 - Check both files
-	fmt.Fprintf(bypass, "Checking both files...\n")
-	if err = compareFilesFramesCount(*input, finalFilePath); err != nil {
-		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
 		exitCode = 2
 		return
 	}

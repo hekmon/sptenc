@@ -235,17 +235,19 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	return
 }
 
-func GOPMerge(originalFile, GOPDir, outputPath string, tagsFlags []string, qps []int, expectedDuration time.Duration) (err error) {
+func generateConcatScript(segmentsDir string, qps []int) (concatScriptPath string, err error) {
 	// Generate the concat script
 	filesnames := make([]string, len(qps))
 	for GOP, qp := range qps {
 		filesnames[GOP] = fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, qp)
 	}
-	concatScript, err := ffmpegutils.GenerateConcatScript(GOPDir, filesnames)
-	if err != nil {
+	if concatScriptPath, err = ffmpegutils.GenerateConcatScript(segmentsDir, filesnames); err != nil {
 		err = fmt.Errorf("failed to create the concat script file: %w", err)
-		return
 	}
+	return
+}
+
+func GOPMerge(originalFile, concatScript, outputPath string, tagsFlags []string, expectedDuration time.Duration) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
