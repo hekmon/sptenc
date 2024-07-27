@@ -156,6 +156,7 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 		// Output
 		OutputFilePath: output,
 		Quantization:   qp,
+		Animation:      *animation,
 		Tags:           nil,
 		// Hardware Acceleration
 		NVDEC: *nvdec,
