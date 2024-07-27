@@ -207,7 +207,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
-	// Step 3 - Check results
+	// Step 3 - Merge segments and check them
 	fmt.Fprintf(bypass, "Checking result...\n")
 	concatScriptPath, err := generateConcatScript(workingDirectory, GOPQP)
 	if err != nil {
@@ -215,17 +215,23 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
+	concatVideoPath := filepath.Join(workingDirectory, "concat.mkv")
+	if err = GOPMerge(concatScriptPath, concatVideoPath, stats.Format.Duration); err != nil {
+		fmt.Fprintf(bypass, "Failed to merge encoded GOP: %s\n", err)
+		exitCode = 2
+		return
+	}
 	var vmafStats *ffmpegutils.VMAFStats
-	if vmafStats, err = filesCheck(*input, concatScriptPath); err != nil {
+	if vmafStats, err = filesCheck(*input, concatVideoPath); err != nil {
 		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 4 - Merge GOP and remux original file
-	fmt.Fprintln(bypass, "Merging encoded GOP to final file...")
+	// Step 4 - Remux original file with new video
+	fmt.Fprintln(bypass, "Remuxing to final file...")
 	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
 	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats)
-	if err = GOPMerge(*input, concatScriptPath, finalFilePath, tagsFlags, stats.Format.Duration); err != nil {
+	if err = Remux(*input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
 		return

@@ -247,7 +247,7 @@ func generateConcatScript(segmentsDir string, qps []int) (concatScriptPath strin
 	return
 }
 
-func GOPMerge(originalFile, concatScript, outputPath string, tagsFlags []string, expectedDuration time.Duration) (err error) {
+func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -273,10 +273,58 @@ func GOPMerge(originalFile, concatScript, outputPath string, tagsFlags []string,
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.ConcatRemux(ffmpegutils.ConcatRemuxConfig{
+	if err = ffmpegutils.Concat(ffmpegutils.ConcatConfig{
 		// Input
-		OriginalFile:     originalFile,
 		ConcatScriptPath: concatScript,
+		OutputPath:       outputPath,
+		// Reporting
+		Debug:               debugPrint,
+		RuntimeError:        runtimeError,
+		ProcessRegistration: children.ProcessRegistration,
+		FFMPEGStatsReport:   progress,
+	}); err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "GOP merged within %q in %s\n", outputPath, duration.Round(time.Second))
+	} else {
+		fmt.Fprintf(liveprogress.Bypass(), "GOP merged in %s\n", duration.Round(time.Second))
+	}
+	return
+}
+
+func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expectedDuration time.Duration) (err error) {
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(expectedDuration)),
+		liveprogress.WithLineFillRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Merging | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.Remux(ffmpegutils.RemuxConfig{
+		// Input
+		OriginalFile: originalFile,
+		NewVideoFile: newVideo,
 		// Output
 		OutputFilePath: outputPath,
 		Tags:           tagsFlags,
