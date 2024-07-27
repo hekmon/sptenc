@@ -232,24 +232,10 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	}
 	// Step 5 - Check both files
 	fmt.Fprintf(bypass, "Checking both files...\n")
-	originalStats, err := getStreamsInfosCF(*input)
-	if err != nil {
-		fmt.Fprintf(bypass, "Failed to get original file stats: %s\n", err)
+	if err = compareFilesFramesCount(*input, finalFilePath); err != nil {
+		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
 		exitCode = 2
 		return
-	}
-	reencodedStats, err := getStreamsInfosCF(finalFilePath)
-	if err != nil {
-		fmt.Fprintf(bypass, "Failed to get reencoded file stats: %s\n", err)
-		exitCode = 2
-		return
-	}
-	if originalStats.VideoTrack().NbReadFrames != reencodedStats.VideoTrack().NbReadFrames {
-		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s. Does the input file has been encoded with open GOP?\n",
-			originalStats.VideoTrack().NbReadFrames, reencodedStats.VideoTrack().NbReadFrames)
-	} else {
-		fmt.Fprintf(bypass, "Number of read frames is the same between original and reencoded files: %s\n",
-			originalStats.VideoTrack().NbReadFrames)
 	}
 	// Step 6 - Move final file to output directory
 	fmt.Fprintf(bypass, "Moving final file to output directory...\n")

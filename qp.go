@@ -85,7 +85,7 @@ func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VM
 	duration := time.Since(start)
 	// Done
 	if allGOPDuration != totalDuration {
-		fmt.Fprintf(bypass, "WARNING: Desync possible: encoded GOP duration: %s, original duration: %s\n",
+		fmt.Fprintf(bypass, "WARNING: Possible desync: encoded GOP duration: %s, original duration: %s. Pay attention at the results of frames count check at the end of the process.\n",
 			allGOPDuration, totalDuration)
 	}
 	stats.GOPMean = float64(totalQP) / float64(len(results))

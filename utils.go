@@ -59,6 +59,34 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 	return
 }
 
+func compareFilesFramesCount(original, encoded string) (err error) {
+	bypass := liveprogress.Bypass()
+	start := time.Now()
+	// Get original file stats
+	originalStats, err := getStreamsInfosCF(original)
+	if err != nil {
+		err = fmt.Errorf("failed to get original file stats: %w", err)
+		return
+	}
+	// Get reencoded file stats
+	encodedStats, err := getStreamsInfosCF(encoded)
+	if err != nil {
+		err = fmt.Errorf("failed to get reencoded file stats: %w", err)
+		return
+	}
+	// Compare
+	duration := time.Since(start)
+	if originalStats.VideoTrack().NbReadFrames != encodedStats.VideoTrack().NbReadFrames {
+		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s. Does the input file has been encoded with open GOP?\n",
+			originalStats.VideoTrack().NbReadFrames, encodedStats.VideoTrack().NbReadFrames)
+	} else {
+		fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded files: %s\n",
+			originalStats.VideoTrack().NbReadFrames)
+	}
+	fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
+	return
+}
+
 func MoveProgress(old, new string) (err error) {
 	// Check that the target directory exists or create it
 	if _, err = os.Stat(filepath.Dir(new)); err != nil {
