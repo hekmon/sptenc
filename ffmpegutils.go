@@ -137,8 +137,8 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d frames (%0.0f fps, speed: %0.2fx)",
-				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
+			build.WriteString(fmt.Sprintf(" | %d/%d frames (%0.0f fps, speed: %0.2fx)",
+				currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
 		}),
@@ -192,8 +192,8 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d frames (%0.0f fps, speed: %0.2fx)",
-				currentStats.CurrentFrame, currentStats.FPS, currentStats.Speed,
+			build.WriteString(fmt.Sprintf(" | %d/%d frames (%0.0f fps, speed: %0.2fx)",
+				currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
 			))
 			return build.String()
 		}),
