@@ -151,7 +151,7 @@ func main() {
 		}
 	}()
 	faint = liveprogress.BaseStyle().Faint()
-	liveprogress.BaseStyle().Bold()
+	bold = liveprogress.BaseStyle().Bold()
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
 	exitCode = sptenc(vmafAuditor)
