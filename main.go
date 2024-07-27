@@ -208,7 +208,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		return
 	}
 	// Step 3 - Merge segments and check them
-	fmt.Fprintf(bypass, "Checking result...\n")
+	fmt.Fprintf(bypass, "Merging encoded GOP into one video stream...\n")
 	concatScriptPath, err := generateConcatScript(workingDirectory, GOPQP)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to generate concat script: %s\n", err)
@@ -221,6 +221,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
+	fmt.Fprintf(bypass, "Checking result...\n")
 	var vmafStats *ffmpegutils.VMAFStats
 	if vmafStats, err = filesCheck(*input, concatVideoPath); err != nil {
 		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
