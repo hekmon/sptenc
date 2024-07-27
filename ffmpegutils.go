@@ -340,9 +340,9 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 	duration := time.Since(start)
 	// Done
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "GOP merged within %q in %s\n", outputPath, duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "Remuxed within %q in %s\n", outputPath, duration.Round(time.Second))
 	} else {
-		fmt.Fprintf(liveprogress.Bypass(), "GOP merged in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "Remuxed in %s\n", duration.Round(time.Second))
 	}
 	return
 }
