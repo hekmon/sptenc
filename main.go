@@ -76,7 +76,7 @@ func main() {
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	startQP = flag.Int("qp", 18, "Quantization Parameter value to start GOP encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
-	animation = flag.Bool("animation", false, "Use the animation tuning profile for the libx265 encoder. Has no effect if -nvenc is set.")
+	animation = flag.Bool("animation", false, "Adapt for animation content. Will produce a 10bits color depth output to help with color banding issue. Also set the animation tuning on for libx265.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce bigger files than libx265.")
