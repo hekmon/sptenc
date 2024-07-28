@@ -19,26 +19,28 @@ const (
 	sptencStatsWaxQP      = "sptenc_stats_max_qp"
 	sptencStatsMeanQP     = "sptenc_stats_GOP_mean_qp"
 	sptencStatsWeightedQP = "sptenc_stats_global_weighted_qp"
+	// VMAF INfos
+	sptencVMAFModelTagKey   = "sptenc_vmaf_model"
+	sptencVMAFVersionTagKey = "sptenc_vmaf_version"
 	// VMAF Conf
 	sptencVMAFConfMeanTagKey  = "sptenc_vmaf_conf_mean"
 	sptencVMAFConfHMeanTagKey = "sptenc_vmaf_conf_hmean"
 	sptencVMAFConfP1TagKey    = "sptenc_vmaf_conf_p1"
 	sptencVMAFConfMinTagKey   = "sptenc_vmaf_conf_min"
-	// VMAF Results (version, min, p1, p5, p10, p25, median, HarmonicMean, Mean, Max)
-	sptencVMAFResultVersionTagKey = "sptenc_vmaf_result_version"
-	sptencVMAFResultMinTagKey     = "sptenc_vmaf_result_min"
-	sptencVMAFResultP1TagKey      = "sptenc_vmaf_result_p1"
-	sptencVMAFResultP5TagKey      = "sptenc_vmaf_result_p5"
-	sptencVMAFResultP10TagKey     = "sptenc_vmaf_result_p10"
-	sptencVMAFResultP25TagKey     = "sptenc_vmaf_result_p25"
-	sptencVMAFResultMedianTagKey  = "sptenc_vmaf_result_median"
-	sptencVMAFResultHMeanTagKey   = "sptenc_vmaf_result_hmean"
-	sptencVMAFResultMeanTagKey    = "sptenc_vmaf_result_mean"
-	sptencVMAFResultMaxTagKey     = "sptenc_vmaf_result_max"
+	// VMAF Results (min, p1, p5, p10, p25, median, HarmonicMean, Mean, Max)
+	sptencVMAFResultMinTagKey    = "sptenc_vmaf_result_min"
+	sptencVMAFResultP1TagKey     = "sptenc_vmaf_result_p1"
+	sptencVMAFResultP5TagKey     = "sptenc_vmaf_result_p5"
+	sptencVMAFResultP10TagKey    = "sptenc_vmaf_result_p10"
+	sptencVMAFResultP25TagKey    = "sptenc_vmaf_result_p25"
+	sptencVMAFResultMedianTagKey = "sptenc_vmaf_result_median"
+	sptencVMAFResultHMeanTagKey  = "sptenc_vmaf_result_hmean"
+	sptencVMAFResultMeanTagKey   = "sptenc_vmaf_result_mean"
+	sptencVMAFResultMaxTagKey    = "sptenc_vmaf_result_max"
 )
 
-func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpegutils.VMAFStats) (flags []string) {
-	flags = make([]string, 0, 40)
+func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpegutils.VMAFStats, ultraHD bool) (flags []string) {
+	flags = make([]string, 0, 42)
 	// Global
 	flags = append(flags,
 		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
@@ -63,6 +65,11 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsMeanQP, strconv.FormatFloat(statsQP.GOPMean, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
 	)
+	// VMAF
+	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, ffmpegutils.VMAFModel(ultraHD, *vmafNEG)))
+	if vmaf != nil {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFVersionTagKey, vmaf.Version))
+	}
 	// VMAF conf
 	if *vmafLimitMin != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
@@ -79,7 +86,6 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	// VMAF results
 	if vmaf != nil {
 		flags = append(flags,
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultVersionTagKey, vmaf.Version),
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Minimum, 'f', -1, 64)),
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP1TagKey, strconv.FormatFloat(vmaf.Percentile1, 'f', -1, 64)),
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP5TagKey, strconv.FormatFloat(vmaf.Percentile5, 'f', -1, 64)),

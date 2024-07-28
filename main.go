@@ -233,7 +233,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	// Step 4 - Remux original file with new video
 	fmt.Fprintln(bypass, "Remuxing to final file...")
 	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
-	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats)
+	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
 	if err = Remux(*input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
