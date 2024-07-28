@@ -19,21 +19,22 @@ type QPStats struct {
 	GlobalWeighted float64
 }
 
-func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VMAFChecker) (results []int, stats QPStats, err error) {
+func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor VMAFChecker) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
-		GOPDuration, allGOPDuration time.Duration
-		GOPQP, totalQP, QPWeights   int
-		GOPSize, allGOPSize         cunits.Bits
-		bestEffort                  bool
-		nbBestEfforts               int
+		GOPDuration               time.Duration
+		GOPFrames, totalGOPFrames int
+		GOPQP, totalQP, QPWeights int
+		GOPSize, allGOPSize       cunits.Bits
+		bestEffort                bool
+		nbBestEfforts             int
 	)
 	results = make([]int, nbGOP)
 	bypass := liveprogress.Bypass()
 	// Live progress
 	var GOPDone int
 	bar := liveprogress.SetMainLineAsBar(
-		liveprogress.WithTotal(uint64(totalDuration)),
+		liveprogress.WithTotal(uint64(globalDuration)),
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -55,7 +56,7 @@ func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VM
 	start := time.Now()
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		fmt.Fprintf(bypass, "GOP %d: Search for the right QP, starting with %d\n", GOP, *startQP)
-		if GOPQP, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
+		if GOPQP, GOPFrames, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -68,8 +69,8 @@ func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VM
 			stats.Maximum = GOPQP
 		}
 		totalQP += GOPQP
-		allGOPDuration += GOPDuration
-		QPWeights += GOPQP * int(GOPDuration.Milliseconds())
+		totalGOPFrames += GOPFrames
+		QPWeights += GOPQP * GOPFrames
 		if GOPSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, GOPQP))); err != nil {
 			err = fmt.Errorf("failed to get the size of GOP %d: %w", GOP, err)
 			return
@@ -84,13 +85,9 @@ func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VM
 	}
 	duration := time.Since(start)
 	// Done
-	if allGOPDuration != totalDuration {
-		fmt.Fprintf(bypass, "WARNING: Possible desync: encoded GOP duration: %s, original duration: %s. Pay attention at the results of frames count check at the end of the process.\n",
-			allGOPDuration, totalDuration)
-	}
-	stats.GOPMean = float64(totalQP) / float64(len(results))
-	stats.GlobalWeighted = float64(QPWeights) / float64(allGOPDuration.Milliseconds())
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
+	stats.GOPMean = float64(totalQP) / float64(len(results))
+	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
 	fmt.Fprintf(bypass, "Mean GOP QP is %s and weighted global QP is %s.\n",
 		strconv.FormatFloat(stats.GOPMean, 'f', -1, 64),
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
@@ -102,7 +99,7 @@ func findAllGOPQP(dir string, nbGOP int, totalDuration time.Duration, auditor VM
 	return
 }
 
-func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotalFrames int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
@@ -129,10 +126,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP int, bestEffor
 			// if we exit with an error, no need to check that everything is fine
 			return
 		}
-		var (
-			finalGOPInfos       ffmpegutils.FFProbeStats
-			finalGOPTotalFrames int
-		)
+		var finalGOPInfos ffmpegutils.FFProbeStats
 		if finalGOPInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, finalQP))); err != nil {
 			err = fmt.Errorf("failed to get streams infos of final GOP: %w", err)
 			return
