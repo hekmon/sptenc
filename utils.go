@@ -79,7 +79,7 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	// Compare
 	duration := time.Since(start)
 	if originalStats.VideoTrack().NbReadFrames != encodedStats.VideoTrack().NbReadFrames {
-		fmt.Fprintf(bypass, "WARNING:\tNumber of read frames is different between original and reencoded files: original has %s and reencoded has %s.\n\tFinal VMAF won't be computed. Does the input file has been encoded with open GOP?\n",
+		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s.\n\t Final VMAF won't be computed. Does the input file has been encoded with open GOP?\n",
 			originalStats.VideoTrack().NbReadFrames, encodedStats.VideoTrack().NbReadFrames)
 		fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
 		return

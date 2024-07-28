@@ -123,6 +123,9 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP int, bestEffor
 	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
+	if *debug {
+		fmt.Fprintf(bypass, "GOP %d: Video Height: %d (UltraHD: %t)\n", GOP, videoTrack.Height, ultraHD)
+	}
 	// Verify output files frames count when done
 	defer func() {
 		if err != nil {
