@@ -15,7 +15,6 @@ import (
 type QPStats struct {
 	Minimum        int
 	Maximum        int
-	GOPMean        float64
 	GlobalWeighted float64
 }
 
@@ -24,8 +23,9 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	var (
 		GOPDuration               time.Duration
 		GOPFrames, totalGOPFrames int
-		GOPQP, totalQP, QPWeights int
+		GOPQP, QPWeights          int
 		GOPSize, allGOPSize       cunits.Bits
+		totalNbTries, GOPNbTries  int
 		bestEffort                bool
 		nbBestEfforts             int
 	)
@@ -56,7 +56,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	start := time.Now()
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		fmt.Fprintf(bypass, "GOP %d: Search for the right QP, starting with %d\n", GOP, *startQP)
-		if GOPQP, GOPFrames, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
+		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -68,7 +68,6 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 		if GOPQP > stats.Maximum {
 			stats.Maximum = GOPQP
 		}
-		totalQP += GOPQP
 		totalGOPFrames += GOPFrames
 		QPWeights += GOPQP * GOPFrames
 		if GOPSize, err = getFileSize(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, GOPQP))); err != nil {
@@ -76,6 +75,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 			return
 		}
 		allGOPSize += GOPSize
+		totalNbTries += GOPNbTries
 		if bestEffort {
 			nbBestEfforts++
 		}
@@ -86,12 +86,13 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	duration := time.Since(start)
 	// Done
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
-	stats.GOPMean = float64(totalQP) / float64(len(results))
 	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
-	fmt.Fprintf(bypass, "Mean GOP QP is %s and weighted global QP is %s.\n",
-		strconv.FormatFloat(stats.GOPMean, 'f', -1, 64),
-		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
-	)
+	fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64))
+	fmt.Fprintf(bypass, "%d encoding attempts were performed to find the best possible QP for %d GOPs.\n", totalNbTries, len(results))
+	bestStartQP, nbAttempts := computeIdealStartQP(results)
+	if bestStartQP != *startQP {
+		fmt.Fprintf(bypass, "For this file, the ideal start QP would have been %d (%d encoding attempts).\n", bestStartQP, nbAttempts)
+	}
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
 	}
@@ -99,7 +100,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	return
 }
 
-func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotalFrames int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
@@ -151,6 +152,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 		err = fmt.Errorf("failed to produce QP %d: %w", *startQP, err)
 		return
 	}
+	nbTries++
 	// Inscrease search or decrease search
 	if auditor.Validate(vmafStats) {
 		// We got a valid QP, try to increase QP to reduce space while we can
@@ -175,6 +177,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
+			nbTries++
 			// If the new QP is invalid, we return the previous one
 			if !auditor.Validate(vmafStats) {
 				// We reach an invalid QP, let's use the previous valid QP
@@ -233,6 +236,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
+			nbTries++
 			// We found a valid QP after encountering an invalid QP, let's use it
 			if auditor.Validate(vmafStats) {
 				fmt.Fprintf(bypass, "GOP %d: QP %s is good enough, keeping it\n", GOP, bold.Styled(strconv.Itoa(QPCandidate)))

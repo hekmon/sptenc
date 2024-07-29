@@ -219,3 +219,43 @@ func cleanUpTMPFiles(path string) {
 		fmt.Fprintf(liveprogress.Bypass(), "Failed to clean working directory %q: %s\n", path, err)
 	}
 }
+
+/*
+startqp 10, target 12 (delta 2)
+10 ok, 11 ok, 12 ok, 13ko --> 4 tries (delta +2)
+
+startqp 12, target 12 (delta 0)
+12 ok, 13ko --> 2 tries (delta +2)
+
+startqp 14, target 12 (delta -2)
+14 ko, 13 ko, 12 ok --> 3 tries (-delta +1)
+*/
+func computeIdealStartQP(segmentsQP []int) (idealStartQP, nbAttempts int) {
+	results := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
+		var attempts, delta int
+		for _, targetQP := range segmentsQP {
+			delta = targetQP - startQP
+			if delta >= 0 {
+				attempts += delta + 2
+			} else {
+				attempts += -delta + 1
+			}
+		}
+		results[startQP] = attempts
+	}
+	var initOK bool
+	for qp, qpAttempts := range results {
+		if !initOK {
+			idealStartQP = qp
+			nbAttempts = qpAttempts
+			initOK = true
+			continue
+		}
+		if qpAttempts < nbAttempts {
+			idealStartQP = qp
+			nbAttempts = qpAttempts
+		}
+	}
+	return
+}
