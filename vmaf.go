@@ -3,8 +3,11 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/hekmon/ffmpegutils"
+	"github.com/olekukonko/tablewriter"
 )
 
 const (
@@ -100,4 +103,81 @@ func (vc VMAFChecker) Validate(stats ffmpegutils.VMAFStats) bool {
 		return false
 	}
 	return true
+}
+func (vc VMAFChecker) String() string {
+	var tableBuffer strings.Builder
+	table := tablewriter.NewWriter(&tableBuffer)
+	// headers
+	headers := make([]string, 0, 9)
+	if vc.min != VMAFOffValue {
+		headers = append(headers, "Min")
+	}
+	if vc.p1 != VMAFOffValue {
+		headers = append(headers, "P1")
+	}
+	if vc.p5 != VMAFOffValue {
+		headers = append(headers, "P5")
+	}
+	if vc.p10 != VMAFOffValue {
+		headers = append(headers, "P10")
+	}
+	if vc.p25 != VMAFOffValue {
+		headers = append(headers, "P25")
+	}
+	if vc.median != VMAFOffValue {
+		headers = append(headers, "Median")
+	}
+	if vc.hmean != VMAFOffValue {
+		headers = append(headers, "Harmonic Mean")
+	}
+	if vc.mean != VMAFOffValue {
+		headers = append(headers, "Mean")
+	}
+	table.SetHeader(headers)
+	// body
+	body := make([]string, 0, 9)
+	if vc.min != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.min, 'f', -1, 64))
+	}
+	if vc.p1 != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.p1, 'f', -1, 64))
+	}
+	if vc.p5 != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.p5, 'f', -1, 64))
+	}
+	if vc.p10 != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.p10, 'f', -1, 64))
+	}
+	if vc.p25 != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.p25, 'f', -1, 64))
+	}
+	if vc.median != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.median, 'f', -1, 64))
+	}
+	if vc.hmean != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.hmean, 'f', -1, 64))
+	}
+	if vc.mean != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.mean, 'f', -1, 64))
+	}
+	table.Append(body)
+	// Style
+	table.SetColumnAlignment([]int{
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+		tablewriter.ALIGN_CENTER,
+	})
+	table.SetCenterSeparator("┼")
+	table.SetRowSeparator("─")
+	table.SetColumnSeparator("│")
+	table.SetBorder(false)
+	// Build table
+	table.Render()
+	return tableBuffer.String()
 }

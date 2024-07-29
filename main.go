@@ -176,6 +176,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Prepare
+	fmt.Fprintf(bypass, "Input file: %q\n", filepath.Base(*input))
 	//// Working directory
 	if err = os.MkdirAll(workingDirectory, 0755); err != nil {
 		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
@@ -192,8 +193,10 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		exitCode = 2
 		return
 	}
+	//// Allow user to visually check its VMAF configuration
+	fmt.Fprintf(bypass, "Each GOP encoding will have to reach theses VMAF scores:\n%s", auditor)
 	// Step 1 - Split file by GOP
-	fmt.Fprintf(bypass, "Splitting %q by groups of pictures (GOP)...\n", filepath.Base(*input))
+	fmt.Fprintln(bypass, "Splitting file by groups of pictures (GOP)...")
 	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
 		exitCode = 2
