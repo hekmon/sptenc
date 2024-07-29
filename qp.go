@@ -93,7 +93,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	if bestStartQP != *startQP {
 		fmt.Fprintf(bypass, "For this file, the ideal start QP would have been %d (%d encoding attempts).\n", bestStartQP, nbAttempts)
 	} else {
-		fmt.Fprintf(bypass, "For this file, start QP was ideal.\n", bestStartQP, nbAttempts)
+		fmt.Fprintf(bypass, "For this file, start QP %d was ideal.\n", *startQP)
 	}
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
