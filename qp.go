@@ -55,12 +55,13 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	stats.Maximum = ffmpegutils.QPMinimum - 1
 	start := time.Now()
 	for GOP := 0; GOP < nbGOP; GOP++ {
-		fmt.Fprintf(bypass, "GOP %d: Search for the right QP, starting with %d\n", GOP, *startQP)
+		fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
 		results[GOP] = GOPQP
+		fmt.Fprintf(bypass, "GOP %d: QP %d selected for the %d frames of this GOP (%d tries)\n", GOP, GOPQP, GOPFrames, GOPNbTries)
 		// Compute stats
 		if GOPQP < stats.Minimum {
 			stats.Minimum = GOPQP
@@ -118,11 +119,13 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 		err = fmt.Errorf("failed to get total frames: %w", err)
 		return
 	}
-	if *debug {
-		fmt.Fprintf(bypass, "GOP %d: contains %d frames\n", GOP, totalFrames)
-	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
+	status := fmt.Sprintf("starting with QP %d", *startQP)
+	statusLine := liveprogress.AddCustomLine(func() string {
+		return fmt.Sprintf("       GOP | #%d: %s", GOP, status)
+	})
+	defer liveprogress.RemoveCustomLine(statusLine)
 	// Verify output files frames count when done
 	defer func() {
 		if err != nil {
@@ -162,12 +165,10 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 		QPCandidate := *startQP + 1
 		// Search
 		for {
-			fmt.Fprintln(bypass, faint.Styled(
-				fmt.Sprintf("GOP %d: QP %d is good enough, let's try to decrease size with QP %d", GOP, lastValid, QPCandidate),
-			))
+			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", lastValid, QPCandidate)
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "GOP %d: QP %d is invalid, rolling back to QP %s\n",
+				fmt.Fprintf(bypass, "GOP %d: QP %d does not validate VMAF, rolling back to QP %s\n",
 					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
 				finalQP = lastValid
 				return
@@ -213,9 +214,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 		QPCandidate := *startQP - 1
 		// Search
 		for {
-			fmt.Fprintln(bypass, faint.Styled(
-				fmt.Sprintf("GOP %d: QP %d is not good enough, let's try to increase quality with QP %d", GOP, lastInvalid, QPCandidate),
-			))
+			status = fmt.Sprintf("QP %d is not good enough, let's try to increase quality with QP %d", lastInvalid, QPCandidate)
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
 				fmt.Fprintf(bypass, "GOP %d: QP %d is invalid, rolling back to QP %s with the following VMAF:\n%s",
