@@ -46,7 +46,6 @@ var (
 	children         Children
 	workingDirectory string
 	interrupted      bool
-	faint            termenv.Style
 	bold             termenv.Style
 )
 
@@ -160,7 +159,6 @@ func main() {
 			}
 		}
 	}()
-	faint = liveprogress.BaseStyle().Faint()
 	bold = liveprogress.BaseStyle().Bold()
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress

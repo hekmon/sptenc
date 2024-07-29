@@ -61,7 +61,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 			return
 		}
 		results[GOP] = GOPQP
-		fmt.Fprintf(bypass, "GOP %d: QP %d selected for the %d frames of this GOP (%d tries)\n", GOP, GOPQP, GOPFrames, GOPNbTries)
+		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d tries)\n", GOP, GOPQP, GOPFrames, GOPNbTries)
 		// Compute stats
 		if GOPQP < stats.Minimum {
 			stats.Minimum = GOPQP
@@ -107,7 +107,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 	bypass := liveprogress.Bypass()
 	status := fmt.Sprintf("starting with QP %d", *startQP)
 	statusLine := liveprogress.AddCustomLine(func() string {
-		return fmt.Sprintf("     GOP | #%d: %s", GOP, status)
+		return fmt.Sprintf("     GOP | #%d - %s", GOP, status)
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
 	// Prepare
