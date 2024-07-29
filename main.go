@@ -75,7 +75,7 @@ func main() {
 	input = flag.String("input", "", "Input file to transcode.")
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
-	startQP = flag.Int("qp", 18, "Quantization Parameter value to start GOP encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
+	startQP = flag.Int("qp", 20, "Quantization Parameter value to start GOP encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	animation = flag.Bool("animation", false, "Adapt for animation content. Will produce a 10bits color depth output to help with color banding issue. Also set the animation tuning on for libx265.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
@@ -86,10 +86,10 @@ func main() {
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
-	vmafLimitMin = flag.Float64("vmafmin", 90, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitP1 = flag.Float64("vmafp1", 95, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMin = flag.Float64("vmafmin", 95, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitMean = flag.Float64("vmafmean", 98, "VMAF acceptable score for mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMean = flag.Float64("vmafmean", 99, "VMAF acceptable score for mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
 	flag.Parse()
 	if *version {
