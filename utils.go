@@ -230,31 +230,46 @@ startqp 12, target 12 (delta 0)
 startqp 14, target 12 (delta -2)
 14 ko, 13 ko, 12 ok --> 3 tries (-delta +1)
 */
-func computeIdealStartQP(segmentsQP []int) (idealStartQP, nbAttempts int) {
-	results := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
-	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
-		var attempts, delta int
-		for _, targetQP := range segmentsQP {
-			delta = targetQP - startQP
-			if delta >= 0 {
-				attempts += delta + 2
-			} else {
-				attempts += -delta + 1
-			}
-		}
-		results[startQP] = attempts
+func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealStartQP int) {
+	// Prepare
+	if len(segmentsQP) != len(segmentsFrames) {
+		panic("segmentsQP and segmentsFrames must have the same length")
 	}
-	var initOK bool
-	for qp, qpAttempts := range results {
+	// allTries := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	allFrames := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
+	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
+		// var totalTries int
+		var totalFrames int
+		for _, segmentQP := range segmentsQP {
+			var delta, tries int
+			delta = segmentQP - startQP
+			if delta >= 0 {
+				tries = delta + 2
+			} else {
+				tries = -delta + 1
+			}
+			// totalTries += tries
+			totalFrames += tries * segmentsFrames[segmentQP]
+		}
+		// allTries[startQP] = totalTries
+		allFrames[startQP] = totalFrames
+	}
+	// Find the ideal startQP that encodes the least frames
+	var (
+		initOK              bool
+		lowestEncodedFrames int
+	)
+	for qp, qpEncodedFrames := range allFrames {
 		if !initOK {
 			idealStartQP = qp
-			nbAttempts = qpAttempts
+			lowestEncodedFrames = qpEncodedFrames
+			// nbTries = allTries[qp]
 			initOK = true
-			continue
-		}
-		if qpAttempts < nbAttempts {
+		} else if qpEncodedFrames < lowestEncodedFrames {
 			idealStartQP = qp
-			nbAttempts = qpAttempts
+			lowestEncodedFrames = qpEncodedFrames
+			// nbTries = allTries[qp]
 		}
 	}
 	return

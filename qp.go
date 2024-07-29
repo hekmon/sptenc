@@ -30,6 +30,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 		nbBestEfforts             int
 	)
 	results = make([]int, nbGOP)
+	allGOPFrames := make([]int, nbGOP)
 	bypass := liveprogress.Bypass()
 	// Live progress
 	var GOPDone int
@@ -61,6 +62,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 			return
 		}
 		results[GOP] = GOPQP
+		allGOPFrames[GOP] = GOPFrames
 		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d tries)\n", GOP, GOPQP, GOPFrames, GOPNbTries)
 		// Compute stats
 		if GOPQP < stats.Minimum {
@@ -90,9 +92,9 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64))
 	fmt.Fprintf(bypass, "%d encoding attempts were performed to find the best possible QP for %d GOPs.\n", totalNbTries, len(results))
-	bestStartQP, nbAttempts := computeIdealStartQP(results)
-	if bestStartQP != *startQP {
-		fmt.Fprintf(bypass, "For this file, the ideal start QP would have been %d (%d encoding attempts).\n", bestStartQP, nbAttempts)
+	idealStartQP := computeIdealStartQP(results, allGOPFrames)
+	if idealStartQP != *startQP {
+		fmt.Fprintf(bypass, "For this file, the ideal start QP would have been %d.\n", idealStartQP)
 	} else {
 		fmt.Fprintf(bypass, "For this file, start QP %d was ideal.\n", *startQP)
 	}
