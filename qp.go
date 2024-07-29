@@ -146,7 +146,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			return
 		}
 		if *debug {
-			fmt.Fprintf(bypass, "Final GOP has %d frames as original GOP.\n", finalGOPTotalFrames)
+			fmt.Fprintf(bypass, "Final GOP has %d frames, as original GOP.\n", finalGOPTotalFrames)
 		}
 	}()
 	// Execute first test and loop
@@ -168,8 +168,10 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", lastValid, QPCandidate)
 			// Check QP
 			if QPCandidate > ffmpegutils.QPMaximum {
-				fmt.Fprintf(bypass, "GOP %d: QP %d does not validate VMAF, rolling back to QP %s\n",
-					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+				if *debug {
+					fmt.Fprintf(bypass, "GOP %d: QP %d does not validate VMAF, rolling back to QP %s\n",
+						GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+				}
 				finalQP = lastValid
 				return
 			}
@@ -184,8 +186,10 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			// If the new QP is invalid, we return the previous one
 			if !auditor.Validate(vmafStats) {
 				// We reach an invalid QP, let's use the previous valid QP
-				fmt.Fprintf(bypass, "GOP %d: QP %d is not good enough, rolling back to QP %s\n",
-					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+				if *debug {
+					fmt.Fprintf(bypass, "GOP %d: QP %d is not good enough, rolling back to QP %s\n",
+						GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+				}
 				finalQP = lastValid
 				// Remove invalid QP
 				if !*keep {
@@ -240,7 +244,9 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			nbTries++
 			// We found a valid QP after encountering an invalid QP, let's use it
 			if auditor.Validate(vmafStats) {
-				fmt.Fprintf(bypass, "GOP %d: QP %s is good enough, keeping it\n", GOP, bold.Styled(strconv.Itoa(QPCandidate)))
+				if *debug {
+					fmt.Fprintf(bypass, "GOP %d: QP %s is good enough, keeping it\n", GOP, bold.Styled(strconv.Itoa(QPCandidate)))
+				}
 				finalQP = QPCandidate
 				return
 			}
