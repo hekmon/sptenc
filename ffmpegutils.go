@@ -32,7 +32,7 @@ func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
 	})
 }
 
-func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) {
+func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeStats, err error) {
 	// Prepare
 	fileInfos, err := os.Stat(path)
 	if err != nil {
@@ -40,24 +40,40 @@ func getStreamsInfosCF(path string) (stats ffmpegutils.FFProbeStats, err error) 
 		return
 	}
 	// Live Progress
-	bar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(fileInfos.Size())),
-		liveprogress.WithLineFillRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Analyze | "
-		}),
-		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %s/%s",
-				cunits.ImportInByte(float64(bar.Current())), cunits.ImportInByte(float64(bar.Total())),
-			))
-			return build.String()
-		}),
-	)
+	var bar *liveprogress.Bar
+	if timeStats {
+		bar = liveprogress.AddBar(
+			liveprogress.WithTotal(uint64(fileInfos.Size())),
+			liveprogress.WithLineFillRunes(),
+			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+				return " Analyze | "
+			}),
+			liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+			liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+				return fmt.Sprintf(" left | %s/%s",
+					cunits.ImportInByte(float64(bar.Current())), cunits.ImportInByte(float64(bar.Total())),
+				)
+			}),
+		)
+	} else {
+		bar = liveprogress.AddBar(
+			liveprogress.WithTotal(uint64(fileInfos.Size())),
+			liveprogress.WithLineFillRunes(),
+			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+				return " Analyze | "
+			}),
+			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+				return fmt.Sprintf(" | %s/%s",
+					cunits.ImportInByte(float64(bar.Current())), cunits.ImportInByte(float64(bar.Total())),
+				)
+			}),
+		)
+	}
 	defer liveprogress.RemoveBar(bar)
 	progress := func(n int) {
 		bar.CurrentAdd(uint64(n))
@@ -178,27 +194,47 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 	return
 }
 
-func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD bool) (vmaf ffmpegutils.VMAFStats, err error) {
+func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (vmaf ffmpegutils.VMAFStats, err error) {
 	// live progress
-	var currentStats ffmpegutils.ProgressStats
-	bar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(totalFrames)),
-		liveprogress.WithLineFillRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    VMAF | "
-		}),
-		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d/%d frames (%0.0f fps, speed: %0.2fx)",
-				currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
-			))
-			return build.String()
-		}),
+	var (
+		currentStats ffmpegutils.ProgressStats
+		bar          *liveprogress.Bar
 	)
+	if timeStats {
+		bar = liveprogress.AddBar(
+			liveprogress.WithTotal(uint64(totalFrames)),
+			liveprogress.WithLineFillRunes(),
+			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+				return "    VMAF | "
+			}),
+			liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+			liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+				return fmt.Sprintf(" left | %d/%d frames (%0.0f fps, speed: %0.2fx)",
+					currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
+				)
+			}),
+		)
+	} else {
+		bar = liveprogress.AddBar(
+			liveprogress.WithTotal(uint64(totalFrames)),
+			liveprogress.WithLineFillRunes(),
+			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+				return "    VMAF | "
+			}),
+			// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+			// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+				return fmt.Sprintf(" | %d/%d frames (%0.0f fps, speed: %0.2fx)",
+					currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
+				)
+			}),
+		)
+	}
 	defer liveprogress.RemoveBar(bar)
 	progress := func(stats ffmpegutils.ProgressStats) {
 		currentStats = stats

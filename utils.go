@@ -65,13 +65,13 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Get original file stats
-	originalStats, err := getStreamsInfosCF(original)
+	originalStats, err := getStreamsInfosCF(original, true)
 	if err != nil {
 		err = fmt.Errorf("failed to get original file stats: %w", err)
 		return
 	}
 	// Get reencoded file stats
-	encodedStats, err := getStreamsInfosCF(encoded)
+	encodedStats, err := getStreamsInfosCF(encoded, true)
 	if err != nil {
 		err = fmt.Errorf("failed to get reencoded file stats: %w", err)
 		return
@@ -84,7 +84,7 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 		fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
 		return
 	}
-	fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded files: %s\n", originalStats.VideoTrack().NbReadFrames)
+	fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded merged stream: %s\n", originalStats.VideoTrack().NbReadFrames)
 	fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
 	// Now compute their VMAF together
 	encodedVideoTrack := encodedStats.VideoTrack()
@@ -94,7 +94,7 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 		return
 	}
 	start = time.Now()
-	vmaf, err := computeVMAF(encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, totalFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight)
+	vmaf, err := computeVMAF(encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, totalFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight, true)
 	if err != nil {
 		err = fmt.Errorf("failed to compute VMAF: %w", err)
 		return
@@ -102,7 +102,7 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	vmafStats = &vmaf
 	duration = time.Since(start)
 	// Print VMAF
-	fmt.Fprintf(bypass, "Final VMAF:\n%s\n", vmaf)
+	fmt.Fprintf(bypass, "Final VMAF:\n%s", vmaf)
 	fmt.Fprintf(bypass, "VMAF computation took %s\n", duration.Round(time.Second))
 	return
 }

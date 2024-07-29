@@ -92,6 +92,8 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	bestStartQP, nbAttempts := computeIdealStartQP(results)
 	if bestStartQP != *startQP {
 		fmt.Fprintf(bypass, "For this file, the ideal start QP would have been %d (%d encoding attempts).\n", bestStartQP, nbAttempts)
+	} else {
+		fmt.Fprintf(bypass, "For this file, start QP was ideal.\n", bestStartQP, nbAttempts)
 	}
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
@@ -104,7 +106,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 	bypass := liveprogress.Bypass()
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
-	GOPInfos, err := getStreamsInfosCF(input)
+	GOPInfos, err := getStreamsInfosCF(input, false)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
@@ -128,7 +130,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			return
 		}
 		var finalGOPInfos ffmpegutils.FFProbeStats
-		if finalGOPInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, finalQP))); err != nil {
+		if finalGOPInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, finalQP)), false); err != nil {
 			err = fmt.Errorf("failed to get streams infos of final GOP: %w", err)
 			return
 		}
@@ -257,7 +259,7 @@ func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, 
 		return
 	}
 	// Compute VMAF
-	if vmafStats, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD); err != nil {
+	if vmafStats, err = computeVMAF(output, input, vmafReportPath, frameRate, totalFrames, ultraHD, false); err != nil {
 		err = fmt.Errorf("failed to compute VMAF for GOP: %w", err)
 		return
 	}
