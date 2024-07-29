@@ -105,6 +105,11 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 
 func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
+	status := fmt.Sprintf("starting with QP %d", *startQP)
+	statusLine := liveprogress.AddCustomLine(func() string {
+		return fmt.Sprintf("     GOP | #%d: %s", GOP, status)
+	})
+	defer liveprogress.RemoveCustomLine(statusLine)
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
@@ -121,11 +126,6 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 	}
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
-	status := fmt.Sprintf("starting with QP %d", *startQP)
-	statusLine := liveprogress.AddCustomLine(func() string {
-		return fmt.Sprintf("       GOP | #%d: %s", GOP, status)
-	})
-	defer liveprogress.RemoveCustomLine(statusLine)
 	// Verify output files frames count when done
 	defer func() {
 		if err != nil {
