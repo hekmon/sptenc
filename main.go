@@ -32,12 +32,16 @@ var (
 	debug     *bool
 	keep      *bool
 	//// vmaf
-	vmafcuda       *bool
-	vmafNEG        *bool
-	vmafLimitMin   *float64
-	vmafLimitP1    *float64
-	vmafLimitHMean *float64
-	vmafLimitMean  *float64
+	vmafcuda        *bool
+	vmafNEG         *bool
+	vmafLimitMin    *float64
+	vmafLimitP1     *float64
+	vmafLimitP5     *float64
+	vmafLimitP10    *float64
+	vmafLimitP25    *float64
+	vmafLimitMedian *float64
+	vmafLimitHMean  *float64
+	vmafLimitMean   *float64
 	// Run
 	children         Children
 	workingDirectory string
@@ -86,10 +90,14 @@ func main() {
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
-	vmafLimitMin = flag.Float64("vmafmin", 95, "VMAF acceptable score for the worst frame. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitMean = flag.Float64("vmafmean", 99, "VMAF acceptable score for mean. If the VMAF score is below this value, the GOP encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMin = flag.Float64("vmafmin", 95, "VMAF acceptable score for the worst frame. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP5 = flag.Float64("vmafp5", -1, "VMAF acceptable score for percentil 5. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP10 = flag.Float64("vmafp10", -1, "VMAF acceptable score for percentil 10. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP25 = flag.Float64("vmafp25", -1, "VMAF acceptable score for percentil 25. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMedian = flag.Float64("vmafmedian", -1, "VMAF acceptable score for median (percentil 50). If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMean = flag.Float64("vmafmean", 99, "VMAF acceptable score for mean. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
 	flag.Parse()
 	if *version {
@@ -112,7 +120,7 @@ func main() {
 		exitCode = 1
 		return
 	}
-	vmafAuditor, err := NewVMAFChecker(*vmafLimitMin, *vmafLimitP1, *vmafLimitHMean, *vmafLimitMean)
+	vmafAuditor, err := NewVMAFChecker(*vmafLimitMin, *vmafLimitP1, *vmafLimitP5, *vmafLimitP10, *vmafLimitP25, *vmafLimitMedian, *vmafLimitHMean, *vmafLimitMean)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create VMAF auditor: %s\n", err)
 		exitCode = 1
