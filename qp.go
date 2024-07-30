@@ -57,6 +57,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	defer liveprogress.RemoveBar(bar)
 	// Go
 	start := time.Now()
+	fmt.Fprintf(bypass, "StartQP is set to %d\n", *startQP)
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		// fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
