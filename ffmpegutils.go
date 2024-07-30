@@ -139,6 +139,13 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 }
 
 func encodeQP(input, output string, totalFrames, qp int) (err error) {
+	// Prepare
+	var preset ffmpegutils.EncodingPreset
+	if *nvenc {
+		preset = ffmpegutils.NVENCPresetP5
+	} else {
+		preset = ffmpegutils.Libx265PresetSlow
+	}
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -166,14 +173,15 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.Encode(ffmpegutils.EncodeConfig{
+	if err = ffmpegutils.AnimeEncode(ffmpegutils.AnimeEncodeConfig{
 		// Input
 		Input: input,
 		// Output
-		OutputFilePath: output,
-		Quantization:   qp,
-		Animation:      *animation,
-		Tags:           nil,
+		Quantization:    qp,
+		ConvertTo10bits: true,
+		Preset:          preset,
+		Tags:            nil,
+		OutputFilePath:  output,
 		// Hardware Acceleration
 		NVDEC: *nvdec,
 		NVENC: *nvenc,

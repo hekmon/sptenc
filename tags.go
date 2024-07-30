@@ -48,12 +48,12 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	if *nvenc {
 		flags = append(flags,
 			"-metadata:s:v:0", fmt.Sprintf("%s=hevc_nvenc", sptencEncoderTagKey),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.NVENCPreset),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.NVENCPresetP5),
 		)
 	} else {
 		flags = append(flags,
 			"-metadata:s:v:0", fmt.Sprintf("%s=libx265", sptencEncoderTagKey),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.Libx265Preset),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.Libx265PresetSlow),
 		)
 	}
 	// Stats
