@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
@@ -29,6 +31,8 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 		bestEffort                bool
 		nbBestEfforts             int
 	)
+	stats.Minimum = ffmpegutils.QPMaximum + 1
+	stats.Maximum = ffmpegutils.QPMinimum - 1
 	results = make([]int, nbGOP)
 	allGOPFrames := make([]int, nbGOP)
 	bypass := liveprogress.Bypass()
@@ -52,8 +56,6 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	)
 	defer liveprogress.RemoveBar(bar)
 	// Go
-	stats.Minimum = ffmpegutils.QPMaximum + 1
-	stats.Maximum = ffmpegutils.QPMinimum - 1
 	start := time.Now()
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
@@ -92,12 +94,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64))
 	fmt.Fprintf(bypass, "%d encoding attempts were performed to find the best possible QP for %d GOPs.\n", totalNbTries, len(results))
-	idealStartQP := computeIdealStartQP(results, allGOPFrames)
-	if idealStartQP != *startQP {
-		fmt.Fprintf(bypass, "For this file, the ideal start QP would have been %d.\n", idealStartQP)
-	} else {
-		fmt.Fprintf(bypass, "For this file, start QP %d was ideal.\n", *startQP)
-	}
+	printIdealQP(results, allGOPFrames, totalGOPFrames, totalNbTries)
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
 	}
@@ -273,5 +270,107 @@ func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, 
 	if *debug {
 		fmt.Fprintf(liveprogress.Bypass(), "GOP %d: QP %d: VMAF results:\n%s\n", GOPID, qp, vmafStats)
 	}
+	return
+}
+
+func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, totalTries int) {
+	idealStartQPbyFrames, idealStartQPFrames, idealStartQPbyTries, idealStartQPTries := computeIdealStartQP(segmentsQP, segmentsFrames)
+	// We already are on an optimal setting
+	if idealStartQPbyFrames == idealStartQPbyTries && idealStartQPbyFrames == *startQP {
+		fmt.Fprintf(liveprogress.Bypass(), "For this file, start QP %d was ideal.\n", *startQP)
+		return
+	}
+	// Not ideal, let's compute the diff
+	framesRatio := float64(idealStartQPFrames) / float64(totalEncodedFrames)
+	percentFramesLess := math.Round((1 - framesRatio) * 100)
+	lessTries := totalTries - idealStartQPTries
+	// Current startQP is not ideal, but are the ideal QPs the same ?
+	if idealStartQPbyFrames == idealStartQPbyTries {
+		fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been %d (%d less tries for %0.0f less encoded frames).\n",
+			idealStartQPbyFrames, lessTries, percentFramesLess)
+		return
+	}
+	// Ideal QPs are different but is one of them equals to our actual QP ?
+	if idealStartQPbyFrames == *startQP {
+		fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been %d (current start QP) and %d (%d less tries).\n",
+			idealStartQPbyFrames, idealStartQPTries, lessTries)
+		return
+	}
+	if idealStartQPbyTries == *startQP {
+		fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been %d (current start QP) and %d (%0.0f less encoded frames).\n",
+			idealStartQPbyTries, idealStartQPbyFrames, percentFramesLess)
+		return
+	}
+	// All start QP are differents
+	fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been between %d (%d less tries) and %d (%0.0f less encoded frames).\n",
+		idealStartQPbyTries, lessTries, idealStartQPbyFrames, percentFramesLess)
+}
+
+/*
+startqp 10, target 12 (delta 2)
+10 ok, 11 ok, 12 ok, 13ko --> 4 tries (delta +2)
+
+startqp 12, target 12 (delta 0)
+12 ok, 13ko --> 2 tries (delta +2)
+
+startqp 14, target 12 (delta -2)
+14 ko, 13 ko, 12 ok --> 3 tries (-delta +1)
+*/
+func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestTries, tries, idealQPLowestFrames, frames int) {
+	// Prepare
+	if len(segmentsQP) != len(segmentsFrames) {
+		panic("segmentsQP and segmentsFrames must have the same length")
+	}
+	allTries := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	allFrames := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
+	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
+		var totalTries, totalFrames int
+		for _, segmentQP := range segmentsQP {
+			var delta, tries int
+			delta = segmentQP - startQP
+			if delta >= 0 {
+				tries = delta + 2
+			} else {
+				tries = -delta + 1
+			}
+			totalTries += tries
+			totalFrames += tries * segmentsFrames[segmentQP]
+		}
+		allTries[startQP] = totalTries
+		allFrames[startQP] = totalFrames
+	}
+	// Find the ideal startQP that encodes the least frames and has the least tries
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		var initOK bool
+		for qp, qpTries := range allTries {
+			if !initOK {
+				idealQPLowestTries = qp
+				tries = qpTries
+				initOK = true
+			} else if qpTries < tries {
+				idealQPLowestTries = qp
+				tries = qpTries
+			}
+		}
+		workers.Done()
+	}()
+	go func() {
+		var initOK bool
+		for qp, qpFrames := range allFrames {
+			if !initOK {
+				idealQPLowestFrames = qp
+				frames = qpFrames
+				initOK = true
+			} else if qpFrames < frames {
+				idealQPLowestFrames = qp
+				frames = qpFrames
+			}
+		}
+		workers.Done()
+	}()
+	workers.Wait()
 	return
 }
