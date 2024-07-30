@@ -222,7 +222,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 		QPCandidate := *startQP - 1
 		// Search
 		for {
-			status = fmt.Sprintf("QP %d is not good enough, let's try to increase quality with QP %d", lastInvalid, QPCandidate)
+			status = fmt.Sprintf("QP %d is not good enough, let's increase quality with QP %d", lastInvalid, QPCandidate)
 			// Check QP
 			if QPCandidate < ffmpegutils.QPMinimum {
 				fmt.Fprintf(bypass, "GOP %d: QP %d is invalid, rolling back to QP %s with the following VMAF:\n%s",
@@ -368,7 +368,7 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 	// Print results in debug
 	if *debug {
 		for startQP, tries := range allTries {
-			fmt.Fprintf(liveprogress.Bypass(), "With startQP %d there would have been %d tries and %d encoded frames\n", startQP, tries, allFrames[startQP])
+			fmt.Fprintf(liveprogress.Bypass(), "With startQP %d there would have %d tries and %d encoded frames\n", startQP, tries, allFrames[startQP])
 		}
 	}
 	// Find the ideal startQP that encodes the least frames and has the least tries
