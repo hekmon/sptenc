@@ -323,25 +323,35 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 	}
 	allTries := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
 	allFrames := make(map[int]int, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	var (
+		workers   sync.WaitGroup
+		mapAccess sync.Mutex
+	)
 	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
 	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
-		var totalTries, totalFrames int
-		for segmentIndex, segmentQP := range segmentsQP {
-			var delta, tries int
-			delta = segmentQP - startQP
-			if delta >= 0 {
-				tries = delta + 2
-			} else {
-				tries = -delta + 1
+		workers.Add(1)
+		go func(evaluatedStartQP int) {
+			var totalTries, totalFrames int
+			for segmentIndex, segmentQP := range segmentsQP {
+				var delta, tries int
+				delta = segmentQP - evaluatedStartQP
+				if delta >= 0 {
+					tries = delta + 2
+				} else {
+					tries = -delta + 1
+				}
+				totalTries += tries
+				totalFrames += tries * segmentsFrames[segmentIndex]
 			}
-			totalTries += tries
-			totalFrames += tries * segmentsFrames[segmentIndex]
-		}
-		allTries[startQP] = totalTries
-		allFrames[startQP] = totalFrames
+			mapAccess.Lock()
+			allTries[evaluatedStartQP] = totalTries
+			allFrames[evaluatedStartQP] = totalFrames
+			mapAccess.Unlock()
+			workers.Done()
+		}(startQP)
 	}
+	workers.Wait()
 	// Find the ideal startQP that encodes the least frames and has the least tries
-	var workers sync.WaitGroup
 	workers.Add(2)
 	go func() {
 		var initOK bool
