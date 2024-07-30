@@ -20,7 +20,7 @@ type QPStats struct {
 	GlobalWeighted float64
 }
 
-func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor VMAFChecker) (results []int, stats QPStats, err error) {
+func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor VMAFChecker, convert10bits bool) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
 		GOPDuration                                   time.Duration
@@ -62,7 +62,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
+		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -107,7 +107,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	return
 }
 
-func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	status := fmt.Sprintf("starting with QP %d", *startQP)
 	statusLine := liveprogress.AddCustomLine(func() string {
@@ -157,7 +157,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, *startQP))
 	report := GOPQPOutput + "_vmaf.json"
 	var vmafStats ffmpegutils.VMAFStats
-	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, *startQP, ultraHD); err != nil {
+	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, *startQP, ultraHD, convert10bits); err != nil {
 		err = fmt.Errorf("failed to produce QP %d: %w", *startQP, err)
 		return
 	}
@@ -182,7 +182,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			// Test QP
 			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))
 			report = GOPQPOutput + "_vmaf.json"
-			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD); err != nil {
+			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD, convert10bits); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
@@ -241,7 +241,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 			// Test QP
 			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))
 			report = GOPQPOutput + "_vmaf.json"
-			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD); err != nil {
+			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD, convert10bits); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
 				return
 			}
@@ -261,9 +261,9 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker) (finalQP, finalGOPTotal
 	}
 }
 
-func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, qp int, ultraHD bool) (vmafStats ffmpegutils.VMAFStats, err error) {
+func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, qp int, ultraHD, convert10bits bool) (vmafStats ffmpegutils.VMAFStats, err error) {
 	// Encode
-	if err = encodeQP(input, output, totalFrames, qp); err != nil {
+	if err = encodeQP(input, output, totalFrames, qp, convert10bits); err != nil {
 		err = fmt.Errorf("failed to encode GOP: %w", err)
 		return
 	}

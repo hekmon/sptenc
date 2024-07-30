@@ -138,7 +138,7 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 	return
 }
 
-func encodeQP(input, output string, totalFrames, qp int) (err error) {
+func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (err error) {
 	// Prepare
 	var preset ffmpegutils.EncodingPreset
 	if *nvenc {
@@ -178,7 +178,7 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 		Input: input,
 		// Output
 		Quantization:    qp,
-		ConvertTo10bits: true,
+		ConvertTo10bits: convert10bits,
 		Preset:          preset,
 		Tags:            nil,
 		OutputFilePath:  output,

@@ -20,16 +20,17 @@ var (
 	//  overrided during compilation
 	Version = "dev"
 	// Flags
-	input   *string
-	tmpDir  *string
-	output  *string
-	startQP *int
-	gpu     *int
-	nvdec   *bool
-	nvenc   *bool
-	flac    *bool
-	debug   *bool
-	keep    *bool
+	input       *string
+	tmpDir      *string
+	output      *string
+	startQP     *int
+	gpu         *int
+	nvdec       *bool
+	nvenc       *bool
+	force10bits *bool
+	flac        *bool
+	debug       *bool
+	keep        *bool
 	//// vmaf
 	vmafcuda        *bool
 	vmafNEG         *bool
@@ -83,6 +84,7 @@ func main() {
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce bigger files than libx265 for the same perceived quality.")
+	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
 	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
@@ -213,7 +215,13 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 		GOPQP   []int
 		statsQP QPStats
 	)
-	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, stats.Format.Duration, auditor); err != nil {
+	if !*force10bits && stats.VideoTrack().PixFmt == "yuv420p" {
+		*force10bits = true
+		if *debug {
+			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
+		}
+	}
+	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, stats.Format.Duration, auditor, *force10bits); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
