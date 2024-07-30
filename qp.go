@@ -58,7 +58,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	// Go
 	start := time.Now()
 	for GOP := 0; GOP < nbGOP; GOP++ {
-		fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
+		// fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
