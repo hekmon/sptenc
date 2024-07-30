@@ -58,10 +58,12 @@ func main() {
 			if *keep {
 				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", workingDirectory)
 			} else {
+				fmt.Fprintf(os.Stdout, "Cleaning working directory...")
 				if err := os.RemoveAll(workingDirectory); err != nil {
 					fmt.Fprintf(os.Stderr, "Failed to clean working directory: %s\n", err)
 					exitCode = 3
 				}
+				fmt.Fprintf(os.Stdout, "Done.\n")
 			}
 		case 1:
 			// warmup / config issue

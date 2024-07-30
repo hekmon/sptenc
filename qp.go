@@ -43,7 +43,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "  Global | "
+			return "    Global | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -278,7 +278,7 @@ func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, to
 	idealStartQPbyFrames, idealStartQPFrames, idealStartQPbyTries, idealStartQPTries := computeIdealStartQP(segmentsQP, segmentsFrames)
 	// We already are on an optimal setting
 	if idealStartQPbyFrames == idealStartQPbyTries && idealStartQPbyFrames == *startQP {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file, start QP %d was ideal.\n", *startQP)
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, start QP %d was ideal.\n", *startQP)
 		return
 	}
 	// Not ideal, let's compute the diff
@@ -287,23 +287,23 @@ func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, to
 	lessTries := totalTries - idealStartQPTries
 	// Current startQP is not ideal, but are the ideal QPs the same ?
 	if idealStartQPbyFrames == idealStartQPbyTries {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been %d (%d less tries for %0.0f less encoded frames).\n",
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been %d (%d less tries for %0.0f%% less encoded frames).\n",
 			idealStartQPbyFrames, lessTries, percentFramesLess)
 		return
 	}
 	// Ideal QPs are different but is one of them equals to our actual QP ?
 	if idealStartQPbyFrames == *startQP {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been %d (current start QP) and %d (%d less tries).\n",
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been %d (current start QP) and %d (%d less tries).\n",
 			idealStartQPbyFrames, idealStartQPTries, lessTries)
 		return
 	}
 	if idealStartQPbyTries == *startQP {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been %d (current start QP) and %d (%0.0f less encoded frames).\n",
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been %d (current start QP) and %d (%0.0f%% less encoded frames).\n",
 			idealStartQPbyTries, idealStartQPbyFrames, percentFramesLess)
 		return
 	}
 	// All start QP are differents
-	fmt.Fprintf(liveprogress.Bypass(), "For this file, the ideal start QP would have been between %d (%d less tries) and %d (%0.0f less encoded frames).\n",
+	fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been between %d (%d less tries) and %d (%0.0f%% less encoded frames).\n",
 		idealStartQPbyTries, lessTries, idealStartQPbyFrames, percentFramesLess)
 }
 

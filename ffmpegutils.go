@@ -47,7 +47,7 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 			liveprogress.WithLineFillRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-				return " Analyze | "
+				return "   Analyze | "
 			}),
 			liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -64,7 +64,7 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 			liveprogress.WithLineFillRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-				return " Analyze | "
+				return "   Analyze | "
 			}),
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
@@ -146,7 +146,7 @@ func encodeQP(input, output string, totalFrames, qp int) (err error) {
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "  Encode | "
+			return "    Encode | "
 		}),
 		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -206,7 +206,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 			liveprogress.WithLineFillRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-				return "    VMAF | "
+				return "      VMAF | "
 			}),
 			liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -223,7 +223,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 			liveprogress.WithLineFillRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-				return "    VMAF | "
+				return "      VMAF | "
 			}),
 			// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -292,7 +292,7 @@ func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Merging | "
+			return "  Merging | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -340,7 +340,7 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 		liveprogress.WithLineFillRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Merging | "
+			return "  Remuxing | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),

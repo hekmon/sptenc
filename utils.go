@@ -65,17 +65,23 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Get original file stats
+	cl := liveprogress.AddCustomLine(func() string { return "           | Checking original file..." })
 	originalStats, err := getStreamsInfosCF(original, true)
 	if err != nil {
+		liveprogress.RemoveCustomLine(cl)
 		err = fmt.Errorf("failed to get original file stats: %w", err)
 		return
 	}
+	liveprogress.RemoveCustomLine(cl)
 	// Get reencoded file stats
+	cl = liveprogress.AddCustomLine(func() string { return "           | Checking encoded file..." })
 	encodedStats, err := getStreamsInfosCF(encoded, true)
 	if err != nil {
+		liveprogress.RemoveCustomLine(cl)
 		err = fmt.Errorf("failed to get reencoded file stats: %w", err)
 		return
 	}
+	liveprogress.RemoveCustomLine(cl)
 	// Compare
 	duration := time.Since(start)
 	if originalStats.VideoTrack().NbReadFrames != encodedStats.VideoTrack().NbReadFrames {
