@@ -335,10 +335,7 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 	}
 	allTries := make([]int, ffmpegutils.QPMaximum+1)
 	allFrames := make([]int, ffmpegutils.QPMaximum+1)
-	var (
-		workers   sync.WaitGroup
-		mapAccess sync.Mutex
-	)
+	var workers sync.WaitGroup
 	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
 	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
 		workers.Add(1)
@@ -362,10 +359,8 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 				totalTries += tries
 				totalFrames += tries * segmentsFrames[segmentIndex]
 			}
-			mapAccess.Lock()
 			allTries[evaluatedStartQP] = totalTries
 			allFrames[evaluatedStartQP] = totalFrames
-			mapAccess.Unlock()
 			workers.Done()
 		}(startQP)
 	}
