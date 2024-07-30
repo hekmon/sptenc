@@ -326,7 +326,7 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
 	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
 		var totalTries, totalFrames int
-		for _, segmentQP := range segmentsQP {
+		for segmentIndex, segmentQP := range segmentsQP {
 			var delta, tries int
 			delta = segmentQP - startQP
 			if delta >= 0 {
@@ -335,7 +335,7 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 				tries = -delta + 1
 			}
 			totalTries += tries
-			totalFrames += tries * segmentsFrames[segmentQP]
+			totalFrames += tries * segmentsFrames[segmentIndex]
 		}
 		allTries[startQP] = totalTries
 		allFrames[startQP] = totalFrames
