@@ -83,7 +83,7 @@ func main() {
 	startQP = flag.Int("qp", 20, "Quantization Parameter value to start GOP encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
-	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce bigger files than libx265 for the same perceived quality.")
+	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality.")
 	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
 	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
