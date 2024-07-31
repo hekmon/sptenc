@@ -85,7 +85,7 @@ func main() {
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality.")
 	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
-	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase.")
+	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase if the input audio is in PCM.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
 	//// vmaf
@@ -251,7 +251,17 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	fmt.Fprintln(bypass, "Remuxing to final file...")
 	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
 	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
-	if err = Remux(*input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration); err != nil {
+	var convertFlac bool
+	if *flac {
+		audioTrack := stats.AudioTrack()
+		if audioTrack != nil && audioTrack.CodecName == ffmpegutils.CodecAudioPCM {
+			convertFlac = true
+			if *debug {
+				fmt.Fprintln(bypass, "Input has PCM audio and -flac flag is on: audio stream will be converted to FLAC")
+			}
+		}
+	}
+	if err = Remux(*input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration, convertFlac); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
 		return

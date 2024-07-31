@@ -340,7 +340,7 @@ func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (
 	return
 }
 
-func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expectedDuration time.Duration) (err error) {
+func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expectedDuration time.Duration, convertFlac bool) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -373,7 +373,7 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 		// Output
 		OutputFilePath: outputPath,
 		Tags:           tagsFlags,
-		FLAC:           *flac,
+		FLAC:           convertFlac,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
