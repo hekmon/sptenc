@@ -29,7 +29,7 @@ const (
 	sptencVMAFConfMedianTagKey = "sptenc_vmaf_conf_median"
 	sptencVMAFConfMeanTagKey   = "sptenc_vmaf_conf_mean"
 	sptencVMAFConfHMeanTagKey  = "sptenc_vmaf_conf_hmean"
-	// VMAF Results (min, p1, p5, p10, p25, median, HarmonicMean, Mean, Max)
+	// VMAF Results
 	sptencVMAFResultMinTagKey    = "sptenc_vmaf_result_min"
 	sptencVMAFResultP1TagKey     = "sptenc_vmaf_result_p1"
 	sptencVMAFResultP5TagKey     = "sptenc_vmaf_result_p5"
@@ -60,7 +60,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpegutils.Libx265PresetSlow),
 		)
 	}
-	// Stats
+	// QP Stats
 	flags = append(flags,
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsMinQP, statsQP.Minimum),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsWaxQP, statsQP.Maximum),
@@ -68,7 +68,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	)
 	// VMAF
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, ffmpegutils.VMAFModel(ultraHD, *vmafNEG)))
-	// VMAF conf
+	//// VMAF conf
 	if *vmafLimitMin != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
 	}
@@ -93,7 +93,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	if *vmafLimitMean != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64)))
 	}
-	// VMAF results
+	//// VMAF results
 	if vmaf != nil {
 		flags = append(flags,
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Minimum, 'f', -1, 64)),
