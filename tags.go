@@ -21,10 +21,14 @@ const (
 	// VMAF Infos
 	sptencVMAFModelTagKey = "sptenc_vmaf_model"
 	// VMAF Conf
-	sptencVMAFConfMeanTagKey  = "sptenc_vmaf_conf_mean"
-	sptencVMAFConfHMeanTagKey = "sptenc_vmaf_conf_hmean"
-	sptencVMAFConfP1TagKey    = "sptenc_vmaf_conf_p1"
-	sptencVMAFConfMinTagKey   = "sptenc_vmaf_conf_min"
+	sptencVMAFConfMinTagKey    = "sptenc_vmaf_conf_min"
+	sptencVMAFConfP1TagKey     = "sptenc_vmaf_conf_p1"
+	sptencVMAFConfP5TagKey     = "sptenc_vmaf_conf_p5"
+	sptencVMAFConfP10TagKey    = "sptenc_vmaf_conf_p10"
+	sptencVMAFConfP25TagKey    = "sptenc_vmaf_conf_p25"
+	sptencVMAFConfMedianTagKey = "sptenc_vmaf_conf_median"
+	sptencVMAFConfMeanTagKey   = "sptenc_vmaf_conf_mean"
+	sptencVMAFConfHMeanTagKey  = "sptenc_vmaf_conf_hmean"
 	// VMAF Results (min, p1, p5, p10, p25, median, HarmonicMean, Mean, Max)
 	sptencVMAFResultMinTagKey    = "sptenc_vmaf_result_min"
 	sptencVMAFResultP1TagKey     = "sptenc_vmaf_result_p1"
@@ -70,6 +74,18 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	}
 	if *vmafLimitP1 != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP1TagKey, strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64)))
+	}
+	if *vmafLimitP5 != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP5TagKey, strconv.FormatFloat(*vmafLimitP5, 'f', -1, 64)))
+	}
+	if *vmafLimitP10 != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP10TagKey, strconv.FormatFloat(*vmafLimitP10, 'f', -1, 64)))
+	}
+	if *vmafLimitP25 != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP25TagKey, strconv.FormatFloat(*vmafLimitP25, 'f', -1, 64)))
+	}
+	if *vmafLimitMedian != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMedianTagKey, strconv.FormatFloat(*vmafLimitMedian, 'f', -1, 64)))
 	}
 	if *vmafLimitHMean != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfHMeanTagKey, strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64)))
