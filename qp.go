@@ -294,23 +294,23 @@ func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, to
 	percentTriesLess := math.Round((1-triesRatio)*10000) / 100
 	// Current startQP is not ideal, but are the ideal QPs the same ?
 	if idealStartQPbyFrames == idealStartQPbyTries {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been QP %d (%d less tries [-%0.2f%%] and %d less encoded frames [-%0.2f%%]).\n",
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been %d (%d less tries [-%0.2f%%] and %d less encoded frames [-%0.2f%%]).\n",
 			idealStartQPbyFrames, lessTries, percentTriesLess, lessFrames, percentFramesLess)
 		return
 	}
 	// Ideal QPs are different but is one of them equals to our actual QP ?
 	if idealStartQPbyFrames == *startQP {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been QP %d (current start QP, the lowest encoded frames) and %d (%d less tries [-%0.2f%%]).\n",
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been %d (current start QP, the lowest encoded frames) and %d (%d less tries [-%0.2f%%]).\n",
 			idealStartQPbyFrames, idealStartQPTries, lessTries, percentTriesLess)
 		return
 	}
 	if idealStartQPbyTries == *startQP {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been QP %d (current start QP, the lowest tries) and %d (%d less encoded frames [-%0.2f%%]).\n",
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been %d (current start QP, the lowest tries) and %d (%d less encoded frames [-%0.2f%%]).\n",
 			idealStartQPbyTries, idealStartQPbyFrames, lessFrames, percentFramesLess)
 		return
 	}
 	// All start QP are differents
-	fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal start QP would have been between %d (%d less tries [-%0.2f%%]) and %d (%d less encoded frames [-%0.2f%%]).\n",
+	fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -ap flag value would have been between %d (%d less tries [-%0.2f%%]) and %d (%d less encoded frames [-%0.2f%%]).\n",
 		idealStartQPbyTries, lessTries, percentTriesLess, idealStartQPbyFrames, lessFrames, percentFramesLess)
 }
 
