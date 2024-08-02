@@ -70,7 +70,7 @@ func main() {
 			// no tmp files to delete
 		case 2:
 			// runtime error, keep tmp files even if no -keep flag
-			fmt.Fprintf(os.Stderr, "Temporary files has been kept for inspection: %s\n", workingDirectory)
+			fmt.Fprintf(os.Stderr, "Temporary work directory has been kept for inspection: %s\n", workingDirectory)
 		case 3:
 			// exit error
 		}

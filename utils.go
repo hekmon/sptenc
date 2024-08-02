@@ -214,7 +214,7 @@ func (rc readerCounter) Read(p []byte) (n int, err error) {
 
 func cleanUpTMPFiles(path string) {
 	if *keep {
-		fmt.Fprintf(liveprogress.Bypass(), "Temporary files can be found here: %s\n", path)
+		fmt.Fprintf(liveprogress.Bypass(), "Temporary work directory can be found here: %s\n", path)
 		return
 	}
 	cl := liveprogress.AddCustomLine(func() string {
