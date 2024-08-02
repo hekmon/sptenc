@@ -84,7 +84,7 @@ func main() {
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality.")
-	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
+	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This is normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
 	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase if the input audio is in PCM.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
@@ -196,7 +196,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	//// Allow user to visually check its VMAF configuration
 	fmt.Fprintf(bypass, "Each GOP encoding will have to reach theses VMAF scores:\n%s", auditor)
 	// Step 1 - Split file by GOP
-	fmt.Fprintln(bypass, "Splitting file by groups of pictures (GOP)...")
+	fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
 	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
 		exitCode = 2
