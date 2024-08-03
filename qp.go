@@ -310,7 +310,7 @@ func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, to
 		return
 	}
 	// All start QP are differents
-	fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -ap flag value would have been between %d (%d less tries [-%0.2f%%]) and %d (%d less encoded frames [-%0.2f%%]).\n",
+	fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been between %d (%d less tries [-%0.2f%%]) and %d (%d less encoded frames [-%0.2f%%]).\n",
 		idealStartQPbyTries, lessTries, percentTriesLess, idealStartQPbyFrames, lessFrames, percentFramesLess)
 }
 
