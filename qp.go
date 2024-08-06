@@ -301,7 +301,7 @@ func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, to
 	// Ideal QPs are different but is one of them equals to our actual QP ?
 	if idealStartQPbyFrames == *startQP {
 		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been %d (current start QP, the lowest encoded frames) and %d (%d less tries [-%0.2f%%]).\n",
-			idealStartQPbyFrames, idealStartQPTries, lessTries, percentTriesLess)
+			idealStartQPbyFrames, idealStartQPbyTries, lessTries, percentTriesLess)
 		return
 	}
 	if idealStartQPbyTries == *startQP {
