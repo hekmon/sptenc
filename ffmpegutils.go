@@ -183,9 +183,10 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 		Tags:            nil,
 		OutputFilePath:  output,
 		// Hardware Acceleration
-		NVDEC: *nvdec,
-		NVENC: *nvenc,
-		GPUID: gpu,
+		Libx265HeavyMultiThreading: *heavyMultithreading,
+		NVDEC:                      *nvdec,
+		NVENC:                      *nvenc,
+		GPUID:                      gpu,
 		// Reporting
 		Debug:               debugPrint,
 		RuntimeError:        runtimeError,
