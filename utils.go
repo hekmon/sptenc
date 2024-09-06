@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
@@ -85,22 +84,17 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	// Compare
 	duration := time.Since(start)
 	if originalStats.VideoTrack().NbReadFrames != encodedStats.VideoTrack().NbReadFrames {
-		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %s and reencoded has %s.\n\t Final VMAF won't be computed. Does the input file has been encoded with open GOP?\n",
+		fmt.Fprintf(bypass, "WARNING: Number of read frames is different between original and reencoded files: original has %d and reencoded has %d.\n\t Final VMAF won't be computed. Does the input file has been encoded with open GOP?\n",
 			originalStats.VideoTrack().NbReadFrames, encodedStats.VideoTrack().NbReadFrames)
 		fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
 		return
 	}
-	fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded merged stream: %s\n", originalStats.VideoTrack().NbReadFrames)
+	fmt.Fprintf(bypass, "Number of frames is the same between original and reencoded merged stream: %d\n", originalStats.VideoTrack().NbReadFrames)
 	fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
 	// Now compute their VMAF together
 	encodedVideoTrack := encodedStats.VideoTrack()
-	totalFrames, err := strconv.Atoi(encodedVideoTrack.NbReadFrames)
-	if err != nil {
-		err = fmt.Errorf("failed to convert number of frames to int: %w", err)
-		return
-	}
 	start = time.Now()
-	vmaf, err := computeVMAF(encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, totalFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight, true)
+	vmaf, err := computeVMAF(encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, encodedVideoTrack.NbReadFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight, true)
 	if err != nil {
 		err = fmt.Errorf("failed to compute VMAF: %w", err)
 		return

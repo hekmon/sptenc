@@ -123,11 +123,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	}
 	duration = GOPInfos.Format.Duration
 	videoTrack := GOPInfos.VideoTrack()
-	totalFrames, err := strconv.Atoi(videoTrack.NbReadFrames)
-	if err != nil {
-		err = fmt.Errorf("failed to get total frames: %w", err)
-		return
-	}
+	totalFrames := videoTrack.NbReadFrames
 	frameRate := videoTrack.RFrameRate
 	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
 	// Verify output files frames count when done
@@ -141,10 +137,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 			err = fmt.Errorf("failed to get streams infos of final GOP: %w", err)
 			return
 		}
-		if finalGOPTotalFrames, err = strconv.Atoi(finalGOPInfos.VideoTrack().NbReadFrames); err != nil {
-			err = fmt.Errorf("failed to get total frames of final GOP: %w", err)
-			return
-		}
+		finalGOPTotalFrames = finalGOPInfos.VideoTrack().NbReadFrames
 		if finalGOPTotalFrames != totalFrames {
 			err = fmt.Errorf("final GOP has %d frames instead of %d", finalGOPTotalFrames, totalFrames)
 			return
