@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -399,4 +403,66 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 	}()
 	workers.Wait()
 	return
+}
+
+type idealQPType string
+
+const (
+	qpstatsFormat             = "idealQPs_%s.json"
+	frames        idealQPType = "frames"
+	tries         idealQPType = "tries"
+)
+
+type qpList []int
+
+func (qps qpList) Average() int {
+	sum := 0
+	for _, qp := range qps {
+		sum += qp
+	}
+	return int(math.Round(float64(sum) / float64(len(qps))))
+}
+
+var (
+	idealQPs map[idealQPType]qpList
+)
+
+func computeIdealQPFile() string {
+	var builder bytes.Buffer
+	builder.WriteString(strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitP5, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitP10, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitP25, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitMedian, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64))
+	return fmt.Sprintf(qpstatsFormat, base64.RawStdEncoding.EncodeToString(builder.Bytes()))
+}
+
+func loadIdealQPs() (err error) {
+	fd, err := os.Open(computeIdealQPFile())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			idealQPs = make(map[idealQPType]qpList)
+			err = nil
+		}
+		return
+	}
+	defer fd.Close()
+	return json.NewDecoder(fd).Decode(&idealQPs)
+}
+
+func saveIdealQPs() error {
+	// Create or truncate file
+	fd, err := os.Create(computeIdealQPFile())
+	if err != nil {
+		return err
+	}
+	defer fd.Close()
+	// Make it human readable
+	enc := json.NewEncoder(fd)
+	enc.SetIndent("", "  ")
+	// Dump data
+	return enc.Encode(idealQPs)
 }
