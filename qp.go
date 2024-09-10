@@ -61,12 +61,19 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	defer liveprogress.RemoveBar(bar)
 	// Go
 	start := time.Now()
-	fmt.Fprintf(bypass, "StartQP is set to %d\n", *startQP)
+	var batchStartQP int
+	if *smartStartQP {
+		batchStartQP = idealQPs.GetIdealStartQP()
+		fmt.Fprintf(bypass, "Smart start QP set the start QP at %d\n", batchStartQP)
+	} else {
+		batchStartQP = *startQP
+		fmt.Fprintf(bypass, "Start QP is set to %d\n", batchStartQP)
+	}
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor, convert10bits); err != nil {
+		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, batchStartQP, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -103,7 +110,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64))
 	fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were performed to find the best possible QP for %d GOPs.\n",
 		totalNbTries, totalEncodedFrames, len(results))
-	printIdealQP(results, allGOPFrames, totalEncodedFrames, totalNbTries)
+	processIdealQP(results, allGOPFrames, totalEncodedFrames, totalNbTries, batchStartQP)
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
 	}
@@ -111,9 +118,9 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	return
 }
 
-func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP, batchStartQP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
-	status := fmt.Sprintf("starting with QP %d", *startQP)
+	status := fmt.Sprintf("starting with QP %d", batchStartQP)
 	statusLine := liveprogress.AddCustomLine(func() string {
 		return fmt.Sprintf("       GOP | #%d - %s", GOP, status)
 	})
@@ -151,19 +158,19 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 		}
 	}()
 	// Execute first test and loop
-	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, *startQP))
+	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, batchStartQP))
 	report := GOPQPOutput + "_vmaf.json"
 	var vmafStats ffmpegutils.VMAFStats
-	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, *startQP, ultraHD, convert10bits); err != nil {
-		err = fmt.Errorf("failed to produce QP %d: %w", *startQP, err)
+	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, batchStartQP, ultraHD, convert10bits); err != nil {
+		err = fmt.Errorf("failed to produce QP %d: %w", batchStartQP, err)
 		return
 	}
 	nbTries++
 	// Inscrease search or decrease search
 	if auditor.Validate(vmafStats) {
 		// We got a valid QP, try to increase QP to reduce space while we can
-		lastValid := *startQP
-		QPCandidate := *startQP + 1
+		lastValid := batchStartQP
+		QPCandidate := batchStartQP + 1
 		// Search
 		for {
 			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", lastValid, QPCandidate)
@@ -215,8 +222,8 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 		}
 	} else {
 		// We got an invalid QP, try to decrease QP to increase quality until we have a valid QP
-		lastInvalid := *startQP
-		QPCandidate := *startQP - 1
+		lastInvalid := batchStartQP
+		QPCandidate := batchStartQP - 1
 		// Search
 		for {
 			status = fmt.Sprintf("QP %d is not good enough, let's increase quality with QP %d", lastInvalid, QPCandidate)
@@ -275,11 +282,12 @@ func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, 
 	return
 }
 
-func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, totalTries int) {
+func processIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, totalTries, batchStartQP int) {
 	idealStartQPbyTries, idealStartQPTries, idealStartQPbyFrames, idealStartQPFrames := computeIdealStartQP(segmentsQP, segmentsFrames)
+	idealQPs.AddIdealQPs(idealStartQPbyTries, idealStartQPbyFrames)
 	// We already are on an optimal setting
-	if idealStartQPbyFrames == idealStartQPbyTries && idealStartQPbyFrames == *startQP {
-		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, start QP %d was ideal.\n", *startQP)
+	if idealStartQPbyFrames == idealStartQPbyTries && idealStartQPbyFrames == batchStartQP {
+		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, start QP %d was ideal.\n", batchStartQP)
 		return
 	}
 	// Not ideal, let's compute the diff
@@ -296,12 +304,12 @@ func printIdealQP(segmentsQP []int, segmentsFrames []int, totalEncodedFrames, to
 		return
 	}
 	// Ideal QPs are different but is one of them equals to our actual QP ?
-	if idealStartQPbyFrames == *startQP {
+	if idealStartQPbyFrames == batchStartQP {
 		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been %d (current start QP, the lowest encoded frames) and %d (%d less tries [-%0.2f%%]).\n",
 			idealStartQPbyFrames, idealStartQPbyTries, lessTries, percentTriesLess)
 		return
 	}
-	if idealStartQPbyTries == *startQP {
+	if idealStartQPbyTries == batchStartQP {
 		fmt.Fprintf(liveprogress.Bypass(), "For this file and this VMAF config, the ideal -qp flag value would have been %d (current start QP, the lowest tries) and %d (%d less encoded frames [-%0.2f%%]).\n",
 			idealStartQPbyTries, idealStartQPbyFrames, lessFrames, percentFramesLess)
 		return
@@ -405,13 +413,31 @@ func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestT
 	return
 }
 
-type idealQPType string
+/*
+	Smart ideal start QPs
+*/
 
-const (
-	qpstatsFormat             = "idealQPs_%s.json"
-	frames        idealQPType = "frames"
-	tries         idealQPType = "tries"
-)
+type idealQPsCollection map[idealQPType]qpList
+
+func (c idealQPsCollection) AddIdealQPs(triesQP, framesQP int) {
+	c[idealTries] = append(c[idealTries], triesQP)
+	c[idealFrames] = append(c[idealFrames], framesQP)
+}
+
+func (c idealQPsCollection) GetIdealStartQP() int {
+	var key idealQPType
+	if *nvenc {
+		key = idealTries
+	} else {
+		key = idealFrames
+	}
+	if len(c[key]) == 0 {
+		return *startQP
+	}
+	return c[key].Average()
+}
+
+type idealQPType string
 
 type qpList []int
 
@@ -423,8 +449,14 @@ func (qps qpList) Average() int {
 	return int(math.Round(float64(sum) / float64(len(qps))))
 }
 
+const (
+	qpstatsFormat             = "idealQPs_%s.json"
+	idealFrames   idealQPType = "frames"
+	idealTries    idealQPType = "tries"
+)
+
 var (
-	idealQPs map[idealQPType]qpList
+	idealQPs idealQPsCollection
 )
 
 func computeIdealQPFile() string {
