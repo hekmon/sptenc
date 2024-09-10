@@ -450,7 +450,7 @@ func (qps qpList) Average() int {
 }
 
 const (
-	qpstatsFormat             = "idealQPs_%s.json"
+	qpstatsFormat             = "smartQP_%s.json"
 	idealFrames   idealQPType = "frames"
 	idealTries    idealQPType = "tries"
 )

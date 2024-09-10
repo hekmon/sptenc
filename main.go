@@ -83,7 +83,7 @@ func main() {
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	startQP = flag.Int("qp", 20, "Quantization Parameter value to start GOP encoding with. The higher the value, the more aggressive the encoding will be. Speed up process by setting a QP close to your VMAF limits.")
-	smartStartQP = flag.Bool("qpsmart", false, "Stores optimal start QP after each upscaile in a file corresponding the the actual VMAF config within working directory. If this flag is set, actual start QP will be the average of all previous ideal QP. Recommended when you have found the VMAF config you want to keep.")
+	smartStartQP = flag.Bool("qpsmart", false, "Stores optimal start QP after each encode in a file corresponding the the actual VMAF config within working directory. If this flag is set, actual start QP will be the average of all previous ideal QP. Recommended when you have found the VMAF config you want to keep.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	heavyMultithreading = flag.Bool("heavymt", false, "Use heavy multithreading for libx265 encoding. Only recommended if you have more than 1 CPU socket and CPU usage is not already saturating the CPU cores. Has no effect if -nvenc is set.")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
