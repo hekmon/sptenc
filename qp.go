@@ -120,7 +120,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 
 func findGOPQP(dir string, GOP, batchStartQP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
-	status := fmt.Sprintf("starting with QP %d", batchStartQP)
+	status := fmt.Sprintf("Preparing for GOP %d encoding", GOP)
 	statusLine := liveprogress.AddCustomLine(func() string {
 		return fmt.Sprintf("       GOP | #%d - %s", GOP, status)
 	})
@@ -157,112 +157,253 @@ func findGOPQP(dir string, GOP, batchStartQP int, auditor VMAFChecker, convert10
 			fmt.Fprintf(bypass, "Final GOP has %d frames, as original GOP.\n", finalGOPTotalFrames)
 		}
 	}()
-	// Execute first test and loop
-	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, batchStartQP))
+	results := make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	// Compute first point
+	previousQP := batchStartQP
+	status = fmt.Sprintf("Warming up QP search with QP %d (1/2)", previousQP)
+	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, previousQP))
 	report := GOPQPOutput + "_vmaf.json"
-	var vmafStats ffmpegutils.VMAFStats
-	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, batchStartQP, ultraHD, convert10bits); err != nil {
-		err = fmt.Errorf("failed to produce QP %d: %w", batchStartQP, err)
+	var previousVMAFStats ffmpegutils.VMAFStats
+	if previousVMAFStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, previousQP, ultraHD, convert10bits); err != nil {
+		err = fmt.Errorf("failed to produce QP %d: %w", previousQP, err)
 		return
 	}
+	results[previousQP] = previousVMAFStats
 	nbTries++
-	// Inscrease search or decrease search
-	if auditor.Validate(vmafStats) {
-		// We got a valid QP, try to increase QP to reduce space while we can
-		lastValid := batchStartQP
-		QPCandidate := batchStartQP + 1
-		// Search
-		for {
-			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", lastValid, QPCandidate)
-			// Check QP
-			if QPCandidate > ffmpegutils.QPMaximum {
-				if *debug {
-					fmt.Fprintf(bypass, "GOP %d: QP %d does not validate VMAF, rolling back to QP %s\n",
-						GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
-				}
-				finalQP = lastValid
-				return
+	// Compute second point
+	var currentQP int
+	if auditor.Validate(previousVMAFStats) {
+		currentQP = batchStartQP + 1
+	} else {
+		currentQP = batchStartQP - 1
+	}
+	status = fmt.Sprintf("Warming up QP search with QP %d (2/2)", currentQP)
+	GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, currentQP))
+	report = GOPQPOutput + "_vmaf.json"
+	var currentVMAFStats ffmpegutils.VMAFStats
+	if currentVMAFStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, currentQP, ultraHD, convert10bits); err != nil {
+		err = fmt.Errorf("failed to produce QP %d: %w", currentQP, err)
+		return
+	}
+	results[currentQP] = currentVMAFStats
+	nbTries++
+	for {
+		// Compute candidate
+		candidateQP := InterpolateCandidate(previousQP, currentQP, previousVMAFStats, currentVMAFStats, auditor)
+		if candidateResults, found := results[candidateQP]; found {
+			if *debug {
+				fmt.Fprintf(bypass, "Interpolated candidate %d already computed (valid: %t)\n", candidateQP, auditor.Validate(candidateResults))
 			}
-			// Test QP
-			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))
-			report = GOPQPOutput + "_vmaf.json"
-			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD, convert10bits); err != nil {
-				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
-				return
-			}
-			nbTries++
-			// If the new QP is invalid, we return the previous one
-			if !auditor.Validate(vmafStats) {
-				// We reach an invalid QP, let's use the previous valid QP
-				if *debug {
-					fmt.Fprintf(bypass, "GOP %d: QP %d is not good enough, rolling back to QP %s\n",
-						GOP, QPCandidate, bold.Styled(strconv.Itoa(lastValid)))
+			// we already computed this candidate, let's think this thru
+			if auditor.Validate(candidateResults) {
+				// Are we sure that next higher candidate does not validate ?
+				if candidateQP == ffmpegutils.QPMaximum {
+					finalQP = candidateQP
+					return
 				}
-				finalQP = lastValid
-				// Remove invalid QP
-				if !*keep {
-					if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))); err != nil {
-						err = fmt.Errorf("failed to remove previous valid QP at %s: %w", GOPQPOutput, err)
-						return
+				for i := candidateQP + 1; i <= ffmpegutils.QPMaximum; i++ {
+					if candidateResults, found := results[i]; found {
+						if i == ffmpegutils.QPMaximum {
+							finalQP = i
+							return
+						}
+						// we already computed this candidate
+						if !auditor.Validate(candidateResults) {
+							// Invalid, previous was the last valid
+							finalQP = i - 1
+							return
+						}
+						// else continue to go up
+						if *debug {
+							fmt.Fprintf(bypass, "Looking up: candidate %d already computed (valid: %t)\n", i, true)
+						}
+					} else {
+						// we found a candidate for smaller size that we did not compute yet
+						candidateQP = i
+						break
 					}
 				}
-				return
-			}
-			// We found a new valid QP
-			if !*keep {
-				// Remove previous valid QP
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, lastValid))); err != nil {
-					err = fmt.Errorf("failed to remove previous valid QP at %s: %w", GOPQPOutput, err)
+			} else {
+				// else, this candidate does not validate
+				if candidateQP == ffmpegutils.QPMinimum {
+					// but we can not make it better
+					finalQP = candidateQP
+					bestEffort = true
 					return
 				}
+				// Let's take a candidate with better quality
+				for i := candidateQP - 1; i >= ffmpegutils.QPMinimum; i-- {
+					if candidateResults, found := results[i]; found {
+						if i == ffmpegutils.QPMinimum {
+							finalQP = i
+							bestEffort = true
+							return
+						}
+						// we already computed this candidate
+						if auditor.Validate(candidateResults) {
+							// So if it is valid, this is the one we need as all previous are invalid
+							finalQP = i
+							return
+						}
+						// else continue to go down
+						if *debug {
+							fmt.Fprintf(bypass, "Looking down: candidate %d already computed (valid: %t)\n", i, false)
+						}
+					} else {
+						// we found a candidate for better quality that we did not compute yet
+						candidateQP = i
+						break
+					}
+				}
 			}
-			// Let's try to increase QP to reduce size
-			lastValid = QPCandidate
-			QPCandidate++
+		} else if *debug {
+			fmt.Fprintf(bypass, "Interpolated candidate %d selected for computation\n", candidateQP)
+		}
+		if auditor.Validate(currentVMAFStats) {
+			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", currentQP, candidateQP)
+		} else {
+			status = fmt.Sprintf("QP %d is not good enough, let's try to increase quality with QP %d", currentQP, candidateQP)
+		}
+		// Switch values
+		previousQP = currentQP
+		previousVMAFStats = currentVMAFStats
+		// Encode with candidate
+		currentQP = candidateQP
+		GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, currentQP))
+		report = GOPQPOutput + "_vmaf.json"
+		if currentVMAFStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, currentQP, ultraHD, convert10bits); err != nil {
+			err = fmt.Errorf("failed to produce QP %d: %w", currentQP, err)
+			return
+		}
+		results[currentQP] = currentVMAFStats
+		nbTries++
+	}
+}
+
+func InterpolateCandidate(previousQP, currentQP int, previousResults, currentResult ffmpegutils.VMAFStats, auditor VMAFChecker) (candidateQP int) {
+	var start, increment, end int
+	if auditor.Validate(previousResults) {
+		if auditor.Validate(currentResult) {
+			// We need to further decrease quality
+			start = currentQP + 1
+			increment = 1
+			end = ffmpegutils.QPMaximum
+		} else {
+			// We need more quality (in between)
+			start = currentQP - 1
+			increment = -1
+			end = previousQP + 1
+			if end > start {
+				// avoid infinite loop
+				// Ex: previous 20 OK, current 21 KO
+				return previousQP
+			}
 		}
 	} else {
-		// We got an invalid QP, try to decrease QP to increase quality until we have a valid QP
-		lastInvalid := batchStartQP
-		QPCandidate := batchStartQP - 1
-		// Search
-		for {
-			status = fmt.Sprintf("QP %d is not good enough, let's increase quality with QP %d", lastInvalid, QPCandidate)
-			// Check QP
-			if QPCandidate < ffmpegutils.QPMinimum {
-				fmt.Fprintf(bypass, "GOP %d: QP %d is invalid, rolling back to QP %s with the following VMAF:\n%s",
-					GOP, QPCandidate, bold.Styled(strconv.Itoa(lastInvalid)), vmafStats)
-				finalQP = lastInvalid
-				bestEffort = true
-				return
+		if auditor.Validate(currentResult) {
+			// We need to reduce quality to reduce size (in between)
+			start = currentQP + 1
+			increment = 1
+			end = previousQP - 1
+			if end > start {
+				// avoid infinite loop
+				// Ex: previous 20 KO, current 19 OK
+				return currentQP
 			}
-			// We can still test candidate QP, delete previous invalid QP
-			if !*keep {
-				if err = os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, lastInvalid))); err != nil {
-					err = fmt.Errorf("failed to remove previous invalid QP at %s: %w", GOPQPOutput, err)
-					return
-				}
-			}
-			// Test QP
-			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, QPCandidate))
-			report = GOPQPOutput + "_vmaf.json"
-			if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, QPCandidate, ultraHD, convert10bits); err != nil {
-				err = fmt.Errorf("failed to produce QP %d: %w", QPCandidate, err)
-				return
-			}
-			nbTries++
-			// We found a valid QP after encountering an invalid QP, let's use it
-			if auditor.Validate(vmafStats) {
-				if *debug {
-					fmt.Fprintf(bypass, "GOP %d: QP %s is good enough, keeping it\n", GOP, bold.Styled(strconv.Itoa(QPCandidate)))
-				}
-				finalQP = QPCandidate
-				return
-			}
-			// If still invalid, continue to increase quality
-			lastInvalid = QPCandidate
-			QPCandidate--
+		} else {
+			// We need more quality
+			start = currentQP - 1
+			increment = -1
+			end = ffmpegutils.QPMinimum
 		}
 	}
+	if start < ffmpegutils.QPMinimum {
+		start = ffmpegutils.QPMinimum
+	}
+	if start > ffmpegutils.QPMaximum {
+		start = ffmpegutils.QPMaximum
+	}
+	if end < ffmpegutils.QPMinimum {
+		end = ffmpegutils.QPMinimum
+	}
+	if end > ffmpegutils.QPMaximum {
+		end = ffmpegutils.QPMaximum
+	}
+	for candidateQP = start; candidateQP != end; candidateQP += increment {
+		// Build a theorical VMAF result by interpolation
+		var interpolatedVMAF ffmpegutils.VMAFStats
+		if *vmafLimitMin != -1 {
+			interpolatedVMAF.Minimum = LinearInterpolation(
+				float64(currentQP), currentResult.Minimum,
+				float64(previousQP), previousResults.Minimum,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitP1 != -1 {
+			interpolatedVMAF.Percentile1 = LinearInterpolation(
+				float64(currentQP), currentResult.Percentile1,
+				float64(previousQP), previousResults.Percentile1,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitP5 != -1 {
+			interpolatedVMAF.Percentile5 = LinearInterpolation(
+				float64(currentQP), currentResult.Percentile5,
+				float64(previousQP), previousResults.Percentile5,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitP10 != -1 {
+			interpolatedVMAF.Percentile10 = LinearInterpolation(
+				float64(currentQP), currentResult.Percentile10,
+				float64(previousQP), previousResults.Percentile10,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitP25 != -1 {
+			interpolatedVMAF.Percentile25 = LinearInterpolation(
+				float64(currentQP), currentResult.Percentile25,
+				float64(previousQP), previousResults.Percentile25,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitMedian != -1 {
+			interpolatedVMAF.Median = LinearInterpolation(
+				float64(currentQP), currentResult.Median,
+				float64(previousQP), previousResults.Median,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitHMean != -1 {
+			interpolatedVMAF.HarmonicMean = LinearInterpolation(
+				float64(currentQP), currentResult.HarmonicMean,
+				float64(previousQP), previousResults.HarmonicMean,
+				float64(candidateQP),
+			)
+		}
+		if *vmafLimitMean != -1 {
+			interpolatedVMAF.Mean = LinearInterpolation(
+				float64(currentQP), currentResult.Mean,
+				float64(previousQP), previousResults.Mean,
+				float64(candidateQP),
+			)
+		}
+		validQP := auditor.Validate(interpolatedVMAF)
+		if increment == -1 && validQP {
+			// We were looking for a better quality and we found one
+			return
+		}
+		if increment == 1 && !validQP {
+			// We were looking for a smaller size but we found one that did not validate anymore, take the previous one
+			return candidateQP - 1
+		}
+	}
+	// We either reach minimumQP or maximumQP
+	return
+}
+
+func LinearInterpolation(x0, y0, x1, y1, x float64) float64 {
+	return y0 + (x-x0)*(y1-y0)/(x1-x0)
 }
 
 func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, qp int, ultraHD, convert10bits bool) (vmafStats ffmpegutils.VMAFStats, err error) {
