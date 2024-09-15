@@ -7,16 +7,88 @@ import (
 	"gonum.org/v1/gonum/interp"
 )
 
-func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
+type PredicatorType string
+
+const (
+	AkimaSpline       PredicatorType = "AkimaSpline"
+	ClampedCubic      PredicatorType = "ClampedCubic"
+	FritschButland    PredicatorType = "FritschButland"
+	NaturalCubic      PredicatorType = "NaturalCubic"
+	NotAKnotCubic     PredicatorType = "NotAKnotCubic"
+	PiecewiseConstant PredicatorType = "PiecewiseConstant"
+	PiecewiseLinear   PredicatorType = "PiecewiseLinear"
+)
+
+func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
 	// Spawn the interpolators
-	p.minInterpolator = new(interp.AkimaSpline)
-	p.p1Interpolator = new(interp.AkimaSpline)
-	p.p5Interpolator = new(interp.AkimaSpline)
-	p.p10Interpolator = new(interp.AkimaSpline)
-	p.p25Interpolator = new(interp.AkimaSpline)
-	p.mediansInterpolator = new(interp.AkimaSpline)
-	p.hmeanInterpolator = new(interp.AkimaSpline)
-	p.meanInterpolator = new(interp.AkimaSpline)
+	switch predicatorType {
+	case AkimaSpline:
+		p.minInterpolator = new(interp.AkimaSpline)
+		p.p1Interpolator = new(interp.AkimaSpline)
+		p.p5Interpolator = new(interp.AkimaSpline)
+		p.p10Interpolator = new(interp.AkimaSpline)
+		p.p25Interpolator = new(interp.AkimaSpline)
+		p.mediansInterpolator = new(interp.AkimaSpline)
+		p.hmeanInterpolator = new(interp.AkimaSpline)
+		p.meanInterpolator = new(interp.AkimaSpline)
+	case ClampedCubic:
+		p.minInterpolator = new(interp.ClampedCubic)
+		p.p1Interpolator = new(interp.ClampedCubic)
+		p.p5Interpolator = new(interp.ClampedCubic)
+		p.p10Interpolator = new(interp.ClampedCubic)
+		p.p25Interpolator = new(interp.ClampedCubic)
+		p.mediansInterpolator = new(interp.ClampedCubic)
+		p.hmeanInterpolator = new(interp.ClampedCubic)
+		p.meanInterpolator = new(interp.ClampedCubic)
+	case FritschButland:
+		p.minInterpolator = new(interp.FritschButland)
+		p.p1Interpolator = new(interp.FritschButland)
+		p.p5Interpolator = new(interp.FritschButland)
+		p.p10Interpolator = new(interp.FritschButland)
+		p.p25Interpolator = new(interp.FritschButland)
+		p.mediansInterpolator = new(interp.FritschButland)
+		p.hmeanInterpolator = new(interp.FritschButland)
+		p.meanInterpolator = new(interp.FritschButland)
+	case NaturalCubic:
+		p.minInterpolator = new(interp.NaturalCubic)
+		p.p1Interpolator = new(interp.NaturalCubic)
+		p.p5Interpolator = new(interp.NaturalCubic)
+		p.p10Interpolator = new(interp.NaturalCubic)
+		p.p25Interpolator = new(interp.NaturalCubic)
+		p.mediansInterpolator = new(interp.NaturalCubic)
+		p.hmeanInterpolator = new(interp.NaturalCubic)
+		p.meanInterpolator = new(interp.NaturalCubic)
+	case NotAKnotCubic:
+		p.minInterpolator = new(interp.NotAKnotCubic)
+		p.p1Interpolator = new(interp.NotAKnotCubic)
+		p.p5Interpolator = new(interp.NotAKnotCubic)
+		p.p10Interpolator = new(interp.NotAKnotCubic)
+		p.p25Interpolator = new(interp.NotAKnotCubic)
+		p.mediansInterpolator = new(interp.NotAKnotCubic)
+		p.hmeanInterpolator = new(interp.NotAKnotCubic)
+		p.meanInterpolator = new(interp.NotAKnotCubic)
+	case PiecewiseConstant:
+		p.minInterpolator = new(interp.PiecewiseConstant)
+		p.p1Interpolator = new(interp.PiecewiseConstant)
+		p.p5Interpolator = new(interp.PiecewiseConstant)
+		p.p10Interpolator = new(interp.PiecewiseConstant)
+		p.p25Interpolator = new(interp.PiecewiseConstant)
+		p.mediansInterpolator = new(interp.PiecewiseConstant)
+		p.hmeanInterpolator = new(interp.PiecewiseConstant)
+		p.meanInterpolator = new(interp.PiecewiseConstant)
+	case PiecewiseLinear:
+		p.minInterpolator = new(interp.PiecewiseLinear)
+		p.p1Interpolator = new(interp.PiecewiseLinear)
+		p.p5Interpolator = new(interp.PiecewiseLinear)
+		p.p10Interpolator = new(interp.PiecewiseLinear)
+		p.p25Interpolator = new(interp.PiecewiseLinear)
+		p.mediansInterpolator = new(interp.PiecewiseLinear)
+		p.hmeanInterpolator = new(interp.PiecewiseLinear)
+		p.meanInterpolator = new(interp.PiecewiseLinear)
+	default:
+		err = fmt.Errorf("Unknown predicator type: %s", predicatorType)
+		return
+	}
 	// Prepare the data sets
 	qps := make([]float64, len(existingResults))
 	mins := make([]float64, len(existingResults))
@@ -46,7 +118,8 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 	// Init with known points
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic encountered: %+v", r)
+			err = fmt.Errorf("panic encountered while initializing %s predicator with %d points: %+v",
+				predicatorType, len(existingResults), r)
 		}
 	}()
 	_ = p.minInterpolator.Fit(qps, mins)
