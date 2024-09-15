@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,9 +121,9 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 
 func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
-	status := fmt.Sprintf("Preparing for GOP %d encoding", GOP)
+	previousQPs := make([]string, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
 	statusLine := liveprogress.AddCustomLine(func() string {
-		return fmt.Sprintf("       GOP | #%d - %s", GOP, status)
+		return fmt.Sprintf("       GOP | #%d - Searching for QP: %s", GOP, strings.Join(previousQPs, ", "))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
 	// Prepare
@@ -158,7 +159,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 		}
 	}()
 	// Compute first point for futur interpolation
-	status = fmt.Sprintf("Warming up QP search with QP %d (1/2)", ffmpegutils.QPMinimum)
+	previousQPs = append(previousQPs, strconv.Itoa(ffmpegutils.QPMinimum))
 	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, ffmpegutils.QPMinimum))
 	report := GOPQPOutput + "_vmaf.json"
 	var vmafStats ffmpegutils.VMAFStats
@@ -176,7 +177,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	results := make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
 	results[ffmpegutils.QPMinimum] = vmafStats
 	// Compute second point for futur interpolation
-	status = fmt.Sprintf("Warming up QP search with QP %d (2/2)", ffmpegutils.QPMaximum)
+	previousQPs = append(previousQPs, strconv.Itoa(ffmpegutils.QPMaximum))
 	GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, ffmpegutils.QPMaximum))
 	report = GOPQPOutput + "_vmaf.json"
 	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, ffmpegutils.QPMaximum, ultraHD, convert10bits); err != nil {
@@ -191,7 +192,6 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	}
 	results[ffmpegutils.QPMaximum] = vmafStats
 	// Start search
-	previousQP := ffmpegutils.QPMaximum
 	var candidateQP int
 	for {
 		// Compute candidate
@@ -268,29 +268,28 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 		} else if *debug {
 			fmt.Fprintf(bypass, "Predicted candidate %d selected for computation\n", candidateQP)
 		}
-		if auditor.Validate(vmafStats) {
-			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", previousQP, candidateQP)
-		} else {
-			status = fmt.Sprintf("QP %d is not good enough, let's try to increase quality with QP %d", previousQP, candidateQP)
-		}
-		// Encode with candidatecandidateQP
+		previousQPs = append(previousQPs, strconv.Itoa(candidateQP))
+		// Encode with candidateQP
 		GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
 		report = GOPQPOutput + "_vmaf.json"
 		if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
-			err = fmt.Errorf("failed to produce QP %d: %w", previousQP, err)
+			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
 		results[candidateQP] = vmafStats
 		nbTries++
-		previousQP = candidateQP
 	}
 }
 
 func FindCandidate(existingResults map[int]ffmpegutils.VMAFStats, auditor VMAFChecker) (candidateQP int, err error) {
+	bypass := liveprogress.Bypass()
 	predicator, err := NewPredicator(existingResults)
 	if err != nil {
 		err = fmt.Errorf("failed to create predicator: %w", err)
 		return
+	}
+	if *debug {
+		fmt.Fprintf(bypass, "Built a interpolation predicator with %d results\n", len(existingResults))
 	}
 	// Range from maximum QP (lower quality) to minimum QP (higher quality) to find the first (theorical or real) candidate that validate
 	var (
@@ -301,11 +300,10 @@ func FindCandidate(existingResults map[int]ffmpegutils.VMAFStats, auditor VMAFCh
 		if candidateResults, exists = existingResults[candidateQP]; !exists {
 			candidateResults = predicator.Predict(candidateQP)
 			// if *debug {
-			// 	fmt.Fprintf(liveprogress.Bypass(), "Predicted candidate %d VMAF expected results:\n%s", candidateQP, candidateResults)
+			// 	fmt.Fprintf(bypass, "Predicted candidate %d VMAF results:\n%s", candidateQP, candidateResults)
 			// }
 		}
 		if auditor.Validate(candidateResults) {
-			// we found a candidate that (potentially) validate, returns it
 			return
 		}
 	}

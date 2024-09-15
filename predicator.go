@@ -58,6 +58,45 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 	_ = p.mediansInterpolator.Fit(qps, medians)
 	_ = p.hmeanInterpolator.Fit(qps, hmeans)
 	_ = p.meanInterpolator.Fit(qps, means)
+	// // Test them
+	// for qp := ffmpegutils.QPMinimum; qp <= ffmpegutils.QPMaximum; qp++ {
+	// 	result, ok := existingResults[qp]
+	// 	if !ok {
+	// 		continue
+	// 	}
+	// 	if p.minInterpolator.Predict(float64(qp)) != result.Minimum {
+	// 		err = fmt.Errorf("minInterpolator.Predict(%d) = %f, want %f", qp, p.minInterpolator.Predict(float64(qp)), result.Minimum)
+	// 		return
+	// 	}
+	// 	if p.p1Interpolator.Predict(float64(qp)) != result.Percentile1 {
+	// 		err = fmt.Errorf("p1Interpolator.Predict(%d) = %f, want %f", qp, p.p1Interpolator.Predict(float64(qp)), result.Percentile1)
+	// 		return
+	// 	}
+	// 	if p.p5Interpolator.Predict(float64(qp)) != result.Percentile5 {
+	// 		err = fmt.Errorf("p5Interpolator.Predict(%d) = %f, want %f", qp, p.p5Interpolator.Predict(float64(qp)), result.Percentile5)
+	// 		return
+	// 	}
+	// 	if p.p10Interpolator.Predict(float64(qp)) != result.Percentile10 {
+	// 		err = fmt.Errorf("p10Interpolator.Predict(%d) = %f, want %f", qp, p.p10Interpolator.Predict(float64(qp)), result.Percentile10)
+	// 		return
+	// 	}
+	// 	if p.p25Interpolator.Predict(float64(qp)) != result.Percentile25 {
+	// 		err = fmt.Errorf("p25Interpolator.Predict(%d) = %f, want %f", qp, p.p25Interpolator.Predict(float64(qp)), result.Percentile25)
+	// 		return
+	// 	}
+	// 	if p.mediansInterpolator.Predict(float64(qp)) != result.Median {
+	// 		err = fmt.Errorf("mediansInterpolator.Predict(%d) = %f, want %f", qp, p.mediansInterpolator.Predict(float64(qp)), result.Median)
+	// 		return
+	// 	}
+	// 	if p.hmeanInterpolator.Predict(float64(qp)) != result.HarmonicMean {
+	// 		err = fmt.Errorf("hmeanInterpolator.Predict(%d) = %f, want %f", qp, p.hmeanInterpolator.Predict(float64(qp)), result.HarmonicMean)
+	// 		return
+	// 	}
+	// 	if p.meanInterpolator.Predict(float64(qp)) != result.Mean {
+	// 		err = fmt.Errorf("meanInterpolator.Predict(%d) = %f, want %f", qp, p.meanInterpolator.Predict(float64(qp)), result.Mean)
+	// 		return
+	// 	}
+	// }
 	return
 }
 
