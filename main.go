@@ -13,7 +13,6 @@ import (
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/liveterm/v2"
-	"github.com/muesli/termenv"
 )
 
 var (
@@ -48,7 +47,6 @@ var (
 	children         Children
 	workingDirectory string
 	interrupted      bool
-	bold             termenv.Style
 )
 
 func main() {
@@ -182,7 +180,6 @@ func main() {
 			}
 		}
 	}()
-	bold = liveprogress.BaseStyle().Bold()
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
 	exitCode = sptenc(vmafAuditor)
