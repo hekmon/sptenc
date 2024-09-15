@@ -11,6 +11,7 @@ require (
 	github.com/hekmon/liveterm/v2 v2.5.0
 	github.com/muesli/termenv v0.15.2
 	github.com/olekukonko/tablewriter v0.0.5
+	gonum.org/v1/gonum v0.15.1
 )
 
 require (
