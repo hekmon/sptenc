@@ -8,11 +8,15 @@ import (
 )
 
 func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic encountered: %+v", r)
-		}
-	}()
+	// Spawn the interpolators
+	p.minInterpolator = new(interp.AkimaSpline)
+	p.p1Interpolator = new(interp.AkimaSpline)
+	p.p5Interpolator = new(interp.AkimaSpline)
+	p.p10Interpolator = new(interp.AkimaSpline)
+	p.p25Interpolator = new(interp.AkimaSpline)
+	p.mediansInterpolator = new(interp.AkimaSpline)
+	p.hmeanInterpolator = new(interp.AkimaSpline)
+	p.meanInterpolator = new(interp.AkimaSpline)
 	// Prepare the data sets
 	qps := make([]float64, len(existingResults))
 	mins := make([]float64, len(existingResults))
@@ -26,30 +30,25 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 	index := 0
 	for qp := ffmpegutils.QPMinimum; qp <= ffmpegutils.QPMaximum; qp++ {
 		result, ok := existingResults[qp]
-		if !ok {
-			continue
+		if ok {
+			qps[index] = float64(qp)
+			mins[index] = result.Minimum
+			p1s[index] = result.Percentile1
+			p5s[index] = result.Percentile5
+			p10s[index] = result.Percentile10
+			p25s[index] = result.Percentile25
+			medians[index] = result.Median
+			hmeans[index] = result.HarmonicMean
+			means[index] = result.Mean
+			index++
 		}
-		qps[index] = float64(qp)
-		mins[index] = result.Minimum
-		p1s[index] = result.Percentile1
-		p5s[index] = result.Percentile5
-		p10s[index] = result.Percentile10
-		p25s[index] = result.Percentile25
-		medians[index] = result.Median
-		hmeans[index] = result.HarmonicMean
-		means[index] = result.Mean
-		index++
 	}
-	// Spawn the interpolators
-	p.minInterpolator = new(interp.PiecewiseLinear)
-	p.p1Interpolator = new(interp.PiecewiseLinear)
-	p.p5Interpolator = new(interp.PiecewiseLinear)
-	p.p10Interpolator = new(interp.PiecewiseLinear)
-	p.p25Interpolator = new(interp.PiecewiseLinear)
-	p.mediansInterpolator = new(interp.PiecewiseLinear)
-	p.hmeanInterpolator = new(interp.PiecewiseLinear)
-	p.meanInterpolator = new(interp.PiecewiseLinear)
 	// Init with known points
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic encountered: %+v", r)
+		}
+	}()
 	_ = p.minInterpolator.Fit(qps, mins)
 	_ = p.p1Interpolator.Fit(qps, p1s)
 	_ = p.p5Interpolator.Fit(qps, p5s)
