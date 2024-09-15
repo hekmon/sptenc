@@ -16,7 +16,6 @@ import (
 	"github.com/hekmon/cunits/v2"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
-	"gonum.org/v1/gonum/interp"
 )
 
 type QPStats struct {
@@ -158,35 +157,51 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 			fmt.Fprintf(bypass, "Final GOP has %d frames, as original GOP.\n", finalGOPTotalFrames)
 		}
 	}()
-	results := make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
 	// Compute first point for futur interpolation
-	status = fmt.Sprintf("Warming up QP search with QP %d (1/2)", ffmpegutils.QPMaximum)
-	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, ffmpegutils.QPMaximum))
+	status = fmt.Sprintf("Warming up QP search with QP %d (1/2)", ffmpegutils.QPMinimum)
+	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, ffmpegutils.QPMinimum))
 	report := GOPQPOutput + "_vmaf.json"
 	var vmafStats ffmpegutils.VMAFStats
-	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, ffmpegutils.QPMaximum, ultraHD, convert10bits); err != nil {
-		err = fmt.Errorf("failed to produce QP %d: %w", ffmpegutils.QPMaximum, err)
-		return
-	}
-	results[ffmpegutils.QPMaximum] = vmafStats
-	nbTries++
-	// Compute second point for futur interpolation
-	status = fmt.Sprintf("Warming up QP search with QP %d (2/2)", ffmpegutils.QPMinimum)
-	GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, ffmpegutils.QPMinimum))
-	report = GOPQPOutput + "_vmaf.json"
 	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, ffmpegutils.QPMinimum, ultraHD, convert10bits); err != nil {
 		err = fmt.Errorf("failed to produce QP %d: %w", ffmpegutils.QPMinimum, err)
 		return
 	}
-	results[ffmpegutils.QPMinimum] = vmafStats
 	nbTries++
-	previousQP := ffmpegutils.QPMinimum
+	if !auditor.Validate(vmafStats) {
+		// we can't increase quality anymore even if invalid, early exit
+		bestEffort = true
+		finalQP = ffmpegutils.QPMinimum
+		return
+	}
+	results := make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	results[ffmpegutils.QPMinimum] = vmafStats
+	// Compute second point for futur interpolation
+	status = fmt.Sprintf("Warming up QP search with QP %d (2/2)", ffmpegutils.QPMaximum)
+	GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, ffmpegutils.QPMaximum))
+	report = GOPQPOutput + "_vmaf.json"
+	if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, ffmpegutils.QPMaximum, ultraHD, convert10bits); err != nil {
+		err = fmt.Errorf("failed to produce QP %d: %w", ffmpegutils.QPMaximum, err)
+		return
+	}
+	nbTries++
+	if auditor.Validate(vmafStats) {
+		// we can not reduce size anymore, early exit
+		finalQP = ffmpegutils.QPMaximum
+		return
+	}
+	results[ffmpegutils.QPMaximum] = vmafStats
+	// Start search
+	previousQP := ffmpegutils.QPMaximum
+	var candidateQP int
 	for {
 		// Compute candidate
-		candidateQP := FindCandidate(results, auditor)
+		if candidateQP, err = FindCandidate(results, auditor); err != nil {
+			err = fmt.Errorf("failed to find candidate: %w", err)
+			return
+		}
 		if candidateResults, found := results[candidateQP]; found {
 			if *debug {
-				fmt.Fprintf(bypass, "Interpolated candidate %d already computed (valid: %t)\n", candidateQP, auditor.Validate(candidateResults))
+				fmt.Fprintf(bypass, "Predicted candidate %d already computed (valid: %t)\n", candidateQP, auditor.Validate(candidateResults))
 			}
 			// we already computed this candidate, let's think this thru
 			if auditor.Validate(candidateResults) {
@@ -251,7 +266,7 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 				}
 			}
 		} else if *debug {
-			fmt.Fprintf(bypass, "Interpolated candidate %d selected for computation\n", candidateQP)
+			fmt.Fprintf(bypass, "Predicted candidate %d selected for computation\n", candidateQP)
 		}
 		if auditor.Validate(vmafStats) {
 			status = fmt.Sprintf("QP %d is good enough, let's try to decrease size with QP %d", previousQP, candidateQP)
@@ -271,65 +286,23 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	}
 }
 
-func FindCandidate(existingResults map[int]ffmpegutils.VMAFStats, auditor VMAFChecker) (candidateQP int) {
-	// Prepare the interpolators
-	qps := make([]float64, len(existingResults))
-	mins := make([]float64, len(existingResults))
-	p1s := make([]float64, len(existingResults))
-	p5s := make([]float64, len(existingResults))
-	p10s := make([]float64, len(existingResults))
-	p25s := make([]float64, len(existingResults))
-	medians := make([]float64, len(existingResults))
-	hmeans := make([]float64, len(existingResults))
-	means := make([]float64, len(existingResults))
-	index := 0
-	for qp, result := range existingResults {
-		qps[index] = float64(qp)
-		mins[index] = result.Minimum
-		p1s[index] = result.Percentile1
-		p5s[index] = result.Percentile5
-		p10s[index] = result.Percentile10
-		p25s[index] = result.Percentile25
-		medians[index] = result.Median
-		hmeans[index] = result.HarmonicMean
-		means[index] = result.Mean
-		index++
+func FindCandidate(existingResults map[int]ffmpegutils.VMAFStats, auditor VMAFChecker) (candidateQP int, err error) {
+	predicator, err := NewPredicator(existingResults)
+	if err != nil {
+		err = fmt.Errorf("failed to create predicator: %w", err)
+		return
 	}
-	minInterpolator := new(interp.PiecewiseLinear)
-	_ = minInterpolator.Fit(qps, mins)
-	p1Interpolator := new(interp.PiecewiseLinear)
-	_ = p1Interpolator.Fit(qps, p1s)
-	p5Interpolator := new(interp.PiecewiseLinear)
-	_ = p5Interpolator.Fit(qps, p5s)
-	p10Interpolator := new(interp.PiecewiseLinear)
-	_ = p10Interpolator.Fit(qps, p10s)
-	p25Interpolator := new(interp.PiecewiseLinear)
-	_ = p25Interpolator.Fit(qps, p25s)
-	mediansInterpolator := new(interp.PiecewiseLinear)
-	_ = mediansInterpolator.Fit(qps, medians)
-	hmeanInterpolator := new(interp.PiecewiseLinear)
-	_ = hmeanInterpolator.Fit(qps, hmeans)
-	meanInterpolator := new(interp.PiecewiseLinear)
-	_ = meanInterpolator.Fit(qps, means)
 	// Range from maximum QP (lower quality) to minimum QP (higher quality) to find the first (theorical or real) candidate that validate
 	var (
 		candidateResults ffmpegutils.VMAFStats
 		exists           bool
-		qpf              float64
 	)
 	for candidateQP = ffmpegutils.QPMaximum; candidateQP > ffmpegutils.QPMinimum; candidateQP-- {
 		if candidateResults, exists = existingResults[candidateQP]; !exists {
-			qpf = float64(candidateQP)
-			candidateResults = ffmpegutils.VMAFStats{
-				Minimum:      minInterpolator.Predict(qpf),
-				Percentile1:  p1Interpolator.Predict(qpf),
-				Percentile5:  p5Interpolator.Predict(qpf),
-				Percentile10: p10Interpolator.Predict(qpf),
-				Percentile25: p25Interpolator.Predict(qpf),
-				Median:       mediansInterpolator.Predict(qpf),
-				HarmonicMean: hmeanInterpolator.Predict(qpf),
-				Mean:         meanInterpolator.Predict(qpf),
-			}
+			candidateResults = predicator.Predict(candidateQP)
+			// if *debug {
+			// 	fmt.Fprintf(liveprogress.Bypass(), "Predicted candidate %d VMAF expected results:\n%s", candidateQP, candidateResults)
+			// }
 		}
 		if auditor.Validate(candidateResults) {
 			// we found a candidate that (potentially) validate, returns it
