@@ -764,24 +764,57 @@ func findGOPQPQuickSearch(dir string, GOP int, auditor VMAFChecker, convert10bit
 		}
 		// New candidate
 		if max-min < 2 {
+			// Regular case (min is valid, max is invalid)
 			if vmafStats, alreadyComputed = results[min]; alreadyComputed && auditor.Validate(vmafStats) {
 				if vmafStats, alreadyComputed = results[max]; alreadyComputed && !auditor.Validate(vmafStats) {
 					finalQP = min
 					return
 				}
 			}
-			var minStatus string
-			if vmafStats, alreadyComputed = results[min]; alreadyComputed {
-				minStatus = fmt.Sprintf("min %d (computed: %t, valid: %t)", min, alreadyComputed, auditor.Validate(vmafStats))
+			// Special cases
+			if max == ffmpegutils.QPMaximum {
+				// first time: min is 50 and valid and max is 51 (upper limit) but might not have been computed yet
+				if _, alreadyComputed = results[max]; alreadyComputed {
+					// second time when 51 has been computed:
+					//   - if 51 did not validate, min and max are 50
+					//   - if 51 validated, min and max are 51
+					if min != max {
+						err = fmt.Errorf("failed to find QP in range [%d, %d]", min, max)
+					} else {
+						finalQP = max
+					}
+					return
+				}
+				// Compute max, and come back here
+				candidateQP = max
+			} else if min == ffmpegutils.QPMinimum {
+				// first time: max is 1 and does not validate, finalQP will be 0, but is it a best effort ?
+				if vmafStats, alreadyComputed = results[min]; alreadyComputed {
+					// second time: min and max are 0, but we can now know if 0 validate or is a best effort
+					finalQP = min
+					if !auditor.Validate(vmafStats) {
+						bestEffort = true
+					}
+					return
+				}
+				// Compute min and come back here
+				candidateQP = min
+			} else {
+				// Should not happen once algo is done, left for fail safe
+				var minStatus string
+				if vmafStats, alreadyComputed = results[min]; alreadyComputed {
+					minStatus = fmt.Sprintf("min %d (computed: %t, valid: %t)", min, alreadyComputed, auditor.Validate(vmafStats))
+				}
+				var maxStatus string
+				if vmafStats, alreadyComputed = results[max]; alreadyComputed {
+					maxStatus = fmt.Sprintf("max %d (computed: %t, valid: %t)", max, alreadyComputed, auditor.Validate(vmafStats))
+				}
+				err = fmt.Errorf("quick search done but invalid: %s | %s", minStatus, maxStatus)
+				return
 			}
-			var maxStatus string
-			if vmafStats, alreadyComputed = results[max]; alreadyComputed {
-				maxStatus = fmt.Sprintf("max %d (computed: %t, valid: %t)", max, alreadyComputed, auditor.Validate(vmafStats))
-			}
-			err = fmt.Errorf("quick search done but invalid: %s | %s", minStatus, maxStatus)
-			return
+		} else {
+			candidateQP = min + ((max - min) / 2)
 		}
-		candidateQP = min + ((max - min) / 2)
 		if _, alreadyComputed = results[candidateQP]; alreadyComputed {
 			err = fmt.Errorf("quick search candidate %d already computed", candidateQP)
 			return
