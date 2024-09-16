@@ -219,18 +219,6 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	// 	methodNbTries[method] += nbTries
 	// 	methodNbFrames[method] += nbTries * GOPFrames
 	// }
-	{
-		pType = PiecewiseLinear
-		method = fmt.Sprintf("full_interpolation_%s", pType)
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPFullInterpolation(dir, GOP, auditor, convert10bits); err != nil {
-			return
-		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
-		}
-	}
 	// Hybrid quick interpolation
 	{
 		pType = AkimaSpline
@@ -289,18 +277,6 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	// 	methodNbTries[method] += nbTries
 	// 	methodNbFrames[method] += nbTries * GOPFrames
 	// }
-	{
-		pType = PiecewiseLinear
-		method = fmt.Sprintf("quick_interpolation_%s", pType)
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickInterpolation(dir, GOP, auditor, convert10bits); err != nil {
-			return
-		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
-		}
-	}
 	// done
 	return
 }

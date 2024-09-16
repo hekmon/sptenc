@@ -10,12 +10,11 @@ import (
 type PredicatorType string
 
 const (
-	AkimaSpline     PredicatorType = "AkimaSpline"
-	ClampedCubic    PredicatorType = "ClampedCubic"
-	FritschButland  PredicatorType = "FritschButland"
-	NaturalCubic    PredicatorType = "NaturalCubic"
-	NotAKnotCubic   PredicatorType = "NotAKnotCubic"
-	PiecewiseLinear PredicatorType = "PiecewiseLinear"
+	AkimaSpline    PredicatorType = "AkimaSpline"
+	ClampedCubic   PredicatorType = "ClampedCubic"
+	FritschButland PredicatorType = "FritschButland"
+	NaturalCubic   PredicatorType = "NaturalCubic"
+	NotAKnotCubic  PredicatorType = "NotAKnotCubic"
 )
 
 func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
@@ -66,15 +65,6 @@ func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpeg
 		p.mediansInterpolator = new(interp.NotAKnotCubic)
 		p.hmeanInterpolator = new(interp.NotAKnotCubic)
 		p.meanInterpolator = new(interp.NotAKnotCubic)
-	case PiecewiseLinear:
-		p.minInterpolator = new(interp.PiecewiseLinear)
-		p.p1Interpolator = new(interp.PiecewiseLinear)
-		p.p5Interpolator = new(interp.PiecewiseLinear)
-		p.p10Interpolator = new(interp.PiecewiseLinear)
-		p.p25Interpolator = new(interp.PiecewiseLinear)
-		p.mediansInterpolator = new(interp.PiecewiseLinear)
-		p.hmeanInterpolator = new(interp.PiecewiseLinear)
-		p.meanInterpolator = new(interp.PiecewiseLinear)
 	default:
 		err = fmt.Errorf("Unknown predicator type: %s", predicatorType)
 		return
