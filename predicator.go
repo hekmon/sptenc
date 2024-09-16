@@ -94,3 +94,48 @@ func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
 	stats.Mean = p.meanInterpolator.Predict(qpf)
 	return
 }
+
+/*
+	Method quick_search: 1313 tries
+	Method full_interpolation_AkimaSpline: 1365 tries
+	Method full_interpolation_ClampedCubic: 1546 tries
+	Method full_interpolation_FritschButland: 1175 tries
+	Method full_interpolation_NaturalCubic: 1345 tries
+	Method quick_interpolation_AkimaSpline: 977 tries
+	Method quick_interpolation_ClampedCubic: 1102 tries
+	Method quick_interpolation_FritschButland: 915 tries
+	Method quick_interpolation_NaturalCubic: 968 tries
+
+	Best method for tries is quick_interpolation_FritschButland with 915 tries.
+
+
+	Method quick_search: 62722 frames
+	Method full_interpolation_AkimaSpline: 66084 frames
+	Method full_interpolation_ClampedCubic: 74843 frames
+	Method full_interpolation_FritschButland: 56807 frames
+	Method full_interpolation_NaturalCubic: 65043 frames
+	Method quick_interpolation_AkimaSpline: 47091 frames
+	Method quick_interpolation_ClampedCubic: 53185 frames
+	Method quick_interpolation_FritschButland: 44103 frames
+	Method quick_interpolation_NaturalCubic: 46607 frames
+
+	Best method for frames is quick_interpolation_FritschButland with 44103 frames.
+
+
+	Manual start QP Ideal QP for lowest tries is 13 with 2223 tries.
+	Manual start QP Ideal QP for lowest frames is 13 with 105695 frames.
+
+
+
+	Method quick_search: 1313 tries
+	Method quick_interpolation_FritschButland: 915 tries
+	Method quick_interpolation_FritschButland-adaptative: 1165 tries
+	Method quick_search: 62722 frames
+	Method quick_interpolation_FritschButland: 44103 frames
+	Method quick_interpolation_FritschButland-adaptative: 55638 frames
+	Best method for tries is quick_interpolation_FritschButland with 915 tries.
+	Best method for frames is quick_interpolation_FritschButland with 44103 frames.
+
+	Manual start QP Ideal QP for lowest tries is 13 with 2223 tries.
+	Manual start QP Ideal QP for lowest frames is 13 with 105695 frames.
+*/

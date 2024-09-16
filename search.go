@@ -1,17 +1,10 @@
 package main
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"math"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
@@ -62,19 +55,19 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	defer liveprogress.RemoveBar(bar)
 	// Go
 	start := time.Now()
-	var batchStartQP int
-	if *smartStartQP {
-		batchStartQP = idealQPs.GetIdealStartQP()
-		fmt.Fprintf(bypass, "Smart start QP set the start QP at %d\n", batchStartQP)
+	var splitQP int
+	if *smartSplit {
+		splitQP = previousMediansQPs.GetIdealSplitQP()
+		fmt.Fprintf(bypass, "Smart start QP set the start QP at %d\n", splitQP)
 	} else {
-		batchStartQP = *startQP
-		fmt.Fprintf(bypass, "Start QP is set to %d\n", batchStartQP)
+		splitQP = (ffmpegutils.QPMaximum - ffmpegutils.QPMinimum + 1) / 2
+		fmt.Fprintf(bypass, "Split QP is set to %d\n", splitQP)
 	}
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, auditor, convert10bits); err != nil {
+		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, splitQP, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -116,14 +109,19 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	return
 }
 
-func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	previousQPs := make([]string, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	defer func() {
+		if *debug {
+			fmt.Fprintf(bypass, "QPs tested: %s\n", strings.Join(previousQPs, ","))
+		}
+	}()
 	statusLine := liveprogress.AddCustomLine(func() string {
 		return fmt.Sprintf("       GOP | #%d - Searching for QP: %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
-	// Prepare
+	// Read input segment
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
 	if err != nil {
@@ -155,9 +153,10 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 			fmt.Fprintf(bypass, "Final GOP has %d frames, as original GOP.\n", GOPFrames)
 		}
 	}()
-	// Compute first point as middle QPs
+	// Prepare compute
 	results := make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
-	candidateQP := (ffmpegutils.QPMaximum - ffmpegutils.QPMinimum + 1) / 2
+	candidateQP := splitQP
+	// Compute first point as middle QPs
 	previousQPs = append(previousQPs, strconv.Itoa(candidateQP))
 	GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
 	report := GOPQPOutput + "_vmaf.json"
@@ -351,184 +350,4 @@ func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, 
 		fmt.Fprintf(liveprogress.Bypass(), "GOP %d: QP %d: VMAF results:\n%s", GOPID, qp, vmafStats)
 	}
 	return
-}
-
-/*
-startqp 10, target 12 (delta 2)
-10 ok, 11 ok, 12 ok, 13ko --> 4 tries (delta +2)
-
-startqp 12, target 12 (delta 0)
-12 ok, 13ko --> 2 tries (delta +2)
-
-startqp 14, target 12 (delta -2)
-14 ko, 13 ko, 12 ok --> 3 tries (-delta +1)
-
-startqp 1, target 0 (delta -1)
-1 ko, 0 ok/ko --> 2 tries (-delta +1)
-
-// special case
-startqp 0, target 0 (delta 0)
-0 ok --> 1 try (delta +1)
-*/
-func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestTries, tries, idealQPLowestFrames, frames int) {
-	// Prepare
-	if len(segmentsQP) != len(segmentsFrames) {
-		panic("segmentsQP and segmentsFrames must have the same length")
-	}
-	allTries := make([]int, ffmpegutils.QPMaximum+1)
-	allFrames := make([]int, ffmpegutils.QPMaximum+1)
-	var workers sync.WaitGroup
-	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
-	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
-		workers.Add(1)
-		go func(evaluatedStartQP int) {
-			var totalTries, totalFrames int
-			for segmentIndex, segmentQP := range segmentsQP {
-				var delta, tries int
-				delta = segmentQP - evaluatedStartQP
-				if delta > 0 {
-					tries = delta + 2
-				} else if delta == 0 {
-					if segmentQP == 0 && evaluatedStartQP == 0 {
-						tries = 1
-					} else {
-						tries = 2
-					}
-				} else {
-					// delta < 0
-					tries = -delta + 1
-				}
-				totalTries += tries
-				totalFrames += tries * segmentsFrames[segmentIndex]
-			}
-			allTries[evaluatedStartQP] = totalTries
-			allFrames[evaluatedStartQP] = totalFrames
-			workers.Done()
-		}(startQP)
-	}
-	workers.Wait()
-	// Print results in debug
-	if *debug {
-		for startQP, tries := range allTries {
-			fmt.Fprintf(liveprogress.Bypass(), "With startQP %d there would have %d tries and %d encoded frames\n", startQP, tries, allFrames[startQP])
-		}
-	}
-	// Find the ideal startQP that encodes the least frames and has the least tries
-	workers.Add(2)
-	go func() {
-		var initOK bool
-		for qp, qpTries := range allTries {
-			if !initOK {
-				idealQPLowestTries = qp
-				tries = qpTries
-				initOK = true
-			} else if qpTries < tries {
-				idealQPLowestTries = qp
-				tries = qpTries
-			}
-		}
-		workers.Done()
-	}()
-	go func() {
-		var initOK bool
-		for qp, qpFrames := range allFrames {
-			if !initOK {
-				idealQPLowestFrames = qp
-				frames = qpFrames
-				initOK = true
-			} else if qpFrames < frames {
-				idealQPLowestFrames = qp
-				frames = qpFrames
-			}
-		}
-		workers.Done()
-	}()
-	workers.Wait()
-	return
-}
-
-/*
-	Smart ideal start QPs
-*/
-
-type idealQPsCollection map[idealQPType]qpList
-
-func (c idealQPsCollection) AddIdealQPs(triesQP, framesQP int) {
-	c[idealTries] = append(c[idealTries], triesQP)
-	c[idealFrames] = append(c[idealFrames], framesQP)
-}
-
-func (c idealQPsCollection) GetIdealStartQP() int {
-	var key idealQPType
-	if *nvenc {
-		key = idealTries
-	} else {
-		key = idealFrames
-	}
-	if len(c[key]) == 0 {
-		return *startQP
-	}
-	return c[key].Average()
-}
-
-type idealQPType string
-
-type qpList []int
-
-func (qps qpList) Average() int {
-	sum := 0
-	for _, qp := range qps {
-		sum += qp
-	}
-	return int(math.Round(float64(sum) / float64(len(qps))))
-}
-
-const (
-	qpstatsFormat             = "smartQP_%s.json"
-	idealFrames   idealQPType = "frames"
-	idealTries    idealQPType = "tries"
-)
-
-var (
-	idealQPs idealQPsCollection
-)
-
-func computeIdealQPFile() string {
-	var builder bytes.Buffer
-	builder.WriteString(strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitP1, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitP5, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitP10, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitP25, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitMedian, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64))
-	return fmt.Sprintf(qpstatsFormat, base64.RawStdEncoding.EncodeToString(builder.Bytes()))
-}
-
-func loadIdealQPs() (err error) {
-	fd, err := os.Open(computeIdealQPFile())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			idealQPs = make(map[idealQPType]qpList)
-			err = nil
-		}
-		return
-	}
-	defer fd.Close()
-	return json.NewDecoder(fd).Decode(&idealQPs)
-}
-
-func saveIdealQPs() error {
-	// Create or truncate file
-	fd, err := os.Create(computeIdealQPFile())
-	if err != nil {
-		return err
-	}
-	defer fd.Close()
-	// Make it human readable
-	enc := json.NewEncoder(fd)
-	enc.SetIndent("", "  ")
-	// Dump data
-	return enc.Encode(idealQPs)
 }
