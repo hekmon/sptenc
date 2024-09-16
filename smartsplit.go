@@ -10,6 +10,8 @@ import (
 	"os"
 	"sort"
 	"strconv"
+
+	"github.com/hekmon/ffmpegutils"
 )
 
 type mediansQPs []int
@@ -26,6 +28,9 @@ func (mqp *mediansQPs) AddIdealQPs(qps []int) {
 }
 
 func (mqp mediansQPs) GetIdealSplitQP() int {
+	if len(mqp) == 0 {
+		return (ffmpegutils.QPMaximum - ffmpegutils.QPMinimum + 1) / 2
+	}
 	sum := 0
 	for _, qp := range mqp {
 		sum += qp
