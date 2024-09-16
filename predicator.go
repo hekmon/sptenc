@@ -4,71 +4,20 @@ import (
 	"fmt"
 
 	"github.com/hekmon/ffmpegutils"
+	"github.com/hekmon/liveprogress/v2"
 	"gonum.org/v1/gonum/interp"
 )
 
-type PredicatorType string
-
-const (
-	AkimaSpline    PredicatorType = "AkimaSpline"
-	ClampedCubic   PredicatorType = "ClampedCubic"
-	FritschButland PredicatorType = "FritschButland"
-	NaturalCubic   PredicatorType = "NaturalCubic"
-	NotAKnotCubic  PredicatorType = "NotAKnotCubic"
-)
-
-func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
+func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
 	// Spawn the interpolators
-	switch predicatorType {
-	case AkimaSpline:
-		p.minInterpolator = new(interp.AkimaSpline)
-		p.p1Interpolator = new(interp.AkimaSpline)
-		p.p5Interpolator = new(interp.AkimaSpline)
-		p.p10Interpolator = new(interp.AkimaSpline)
-		p.p25Interpolator = new(interp.AkimaSpline)
-		p.mediansInterpolator = new(interp.AkimaSpline)
-		p.hmeanInterpolator = new(interp.AkimaSpline)
-		p.meanInterpolator = new(interp.AkimaSpline)
-	case ClampedCubic:
-		p.minInterpolator = new(interp.ClampedCubic)
-		p.p1Interpolator = new(interp.ClampedCubic)
-		p.p5Interpolator = new(interp.ClampedCubic)
-		p.p10Interpolator = new(interp.ClampedCubic)
-		p.p25Interpolator = new(interp.ClampedCubic)
-		p.mediansInterpolator = new(interp.ClampedCubic)
-		p.hmeanInterpolator = new(interp.ClampedCubic)
-		p.meanInterpolator = new(interp.ClampedCubic)
-	case FritschButland:
-		p.minInterpolator = new(interp.FritschButland)
-		p.p1Interpolator = new(interp.FritschButland)
-		p.p5Interpolator = new(interp.FritschButland)
-		p.p10Interpolator = new(interp.FritschButland)
-		p.p25Interpolator = new(interp.FritschButland)
-		p.mediansInterpolator = new(interp.FritschButland)
-		p.hmeanInterpolator = new(interp.FritschButland)
-		p.meanInterpolator = new(interp.FritschButland)
-	case NaturalCubic:
-		p.minInterpolator = new(interp.NaturalCubic)
-		p.p1Interpolator = new(interp.NaturalCubic)
-		p.p5Interpolator = new(interp.NaturalCubic)
-		p.p10Interpolator = new(interp.NaturalCubic)
-		p.p25Interpolator = new(interp.NaturalCubic)
-		p.mediansInterpolator = new(interp.NaturalCubic)
-		p.hmeanInterpolator = new(interp.NaturalCubic)
-		p.meanInterpolator = new(interp.NaturalCubic)
-	case NotAKnotCubic:
-		p.minInterpolator = new(interp.NotAKnotCubic)
-		p.p1Interpolator = new(interp.NotAKnotCubic)
-		p.p5Interpolator = new(interp.NotAKnotCubic)
-		p.p10Interpolator = new(interp.NotAKnotCubic)
-		p.p25Interpolator = new(interp.NotAKnotCubic)
-		p.mediansInterpolator = new(interp.NotAKnotCubic)
-		p.hmeanInterpolator = new(interp.NotAKnotCubic)
-		p.meanInterpolator = new(interp.NotAKnotCubic)
-	default:
-		err = fmt.Errorf("Unknown predicator type: %s", predicatorType)
-		return
-	}
+	p.minInterpolator = new(interp.FritschButland)
+	p.p1Interpolator = new(interp.FritschButland)
+	p.p5Interpolator = new(interp.FritschButland)
+	p.p10Interpolator = new(interp.FritschButland)
+	p.p25Interpolator = new(interp.FritschButland)
+	p.mediansInterpolator = new(interp.FritschButland)
+	p.hmeanInterpolator = new(interp.FritschButland)
+	p.meanInterpolator = new(interp.FritschButland)
 	// Prepare the data sets
 	qps := make([]float64, len(existingResults))
 	mins := make([]float64, len(existingResults))
@@ -95,11 +44,15 @@ func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpeg
 			index++
 		}
 	}
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "Initializing FritschButland predicator with %d points: %+v\n",
+			len(existingResults), qps)
+	}
 	// Init with known points
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic encountered while initializing %s predicator with %d points: %+v",
-				predicatorType, len(existingResults), r)
+			err = fmt.Errorf("panic encountered while initializing predicator with %d points: %+v",
+				len(existingResults), r)
 		}
 	}()
 	_ = p.minInterpolator.Fit(qps, mins)
@@ -110,45 +63,6 @@ func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpeg
 	_ = p.mediansInterpolator.Fit(qps, medians)
 	_ = p.hmeanInterpolator.Fit(qps, hmeans)
 	_ = p.meanInterpolator.Fit(qps, means)
-	// // Test them
-	// for qp := ffmpegutils.QPMinimum; qp <= ffmpegutils.QPMaximum; qp++ {
-	// 	result, ok := existingResults[qp]
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	if p.minInterpolator.Predict(float64(qp)) != result.Minimum {
-	// 		err = fmt.Errorf("minInterpolator.Predict(%d) = %f, want %f", qp, p.minInterpolator.Predict(float64(qp)), result.Minimum)
-	// 		return
-	// 	}
-	// 	if p.p1Interpolator.Predict(float64(qp)) != result.Percentile1 {
-	// 		err = fmt.Errorf("p1Interpolator.Predict(%d) = %f, want %f", qp, p.p1Interpolator.Predict(float64(qp)), result.Percentile1)
-	// 		return
-	// 	}
-	// 	if p.p5Interpolator.Predict(float64(qp)) != result.Percentile5 {
-	// 		err = fmt.Errorf("p5Interpolator.Predict(%d) = %f, want %f", qp, p.p5Interpolator.Predict(float64(qp)), result.Percentile5)
-	// 		return
-	// 	}
-	// 	if p.p10Interpolator.Predict(float64(qp)) != result.Percentile10 {
-	// 		err = fmt.Errorf("p10Interpolator.Predict(%d) = %f, want %f", qp, p.p10Interpolator.Predict(float64(qp)), result.Percentile10)
-	// 		return
-	// 	}
-	// 	if p.p25Interpolator.Predict(float64(qp)) != result.Percentile25 {
-	// 		err = fmt.Errorf("p25Interpolator.Predict(%d) = %f, want %f", qp, p.p25Interpolator.Predict(float64(qp)), result.Percentile25)
-	// 		return
-	// 	}
-	// 	if p.mediansInterpolator.Predict(float64(qp)) != result.Median {
-	// 		err = fmt.Errorf("mediansInterpolator.Predict(%d) = %f, want %f", qp, p.mediansInterpolator.Predict(float64(qp)), result.Median)
-	// 		return
-	// 	}
-	// 	if p.hmeanInterpolator.Predict(float64(qp)) != result.HarmonicMean {
-	// 		err = fmt.Errorf("hmeanInterpolator.Predict(%d) = %f, want %f", qp, p.hmeanInterpolator.Predict(float64(qp)), result.HarmonicMean)
-	// 		return
-	// 	}
-	// 	if p.meanInterpolator.Predict(float64(qp)) != result.Mean {
-	// 		err = fmt.Errorf("meanInterpolator.Predict(%d) = %f, want %f", qp, p.meanInterpolator.Predict(float64(qp)), result.Mean)
-	// 		return
-	// 	}
-	// }
 	return
 }
 
@@ -163,7 +77,12 @@ type Predicator struct {
 	meanInterpolator    interp.FittablePredictor
 }
 
-func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats) {
+func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic encountered: %+v", r)
+		}
+	}()
 	qpf := float64(qp)
 	stats.Minimum = p.minInterpolator.Predict(qpf)
 	stats.Percentile1 = p.p1Interpolator.Predict(qpf)
