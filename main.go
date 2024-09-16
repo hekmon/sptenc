@@ -22,7 +22,6 @@ var (
 	input               *string
 	tmpDir              *string
 	output              *string
-	startQP             *int
 	smartSplit          *bool
 	gpu                 *int
 	heavyMultithreading *bool
@@ -109,11 +108,6 @@ func main() {
 	// Validate common flags
 	if *input == "" {
 		fmt.Fprintln(os.Stderr, "Please set the -input flag")
-		exitCode = 1
-		return
-	}
-	if *startQP < ffmpegutils.QPMinimum || *startQP > ffmpegutils.QPMaximum {
-		fmt.Fprintf(os.Stderr, "Start QP must be between [%d, %d]\n", ffmpegutils.QPMinimum, ffmpegutils.QPMaximum)
 		exitCode = 1
 		return
 	}
