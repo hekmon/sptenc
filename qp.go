@@ -759,7 +759,9 @@ func findGOPQPQuickSearch(dir string, GOP int, auditor VMAFChecker, convert10bit
 		}
 	}()
 	for {
-		fmt.Fprintf(bypass, "Searching for QP in range [%d, %d]\n", min, max)
+		if *debug {
+			fmt.Fprintf(bypass, "Searching for QP in range [%d, %d]\n", min, max)
+		}
 		// New candidate
 		if max-min < 2 {
 			if vmafStats, alreadyComputed = results[min]; alreadyComputed && auditor.Validate(vmafStats) {
