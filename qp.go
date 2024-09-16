@@ -595,7 +595,6 @@ func findGOPQPQuickInterpolation(dir string, GOP int, auditor VMAFChecker, conve
 		previousQPs = append(previousQPs, strconv.Itoa(candidateQP))
 		GOPQPOutput := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
 		report := GOPQPOutput + "_vmaf.json"
-		var vmafStats ffmpegutils.VMAFStats
 		if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
