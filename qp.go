@@ -211,19 +211,6 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	// 	methodNbFrames[method] += nbTries * GOPFrames
 	// }
 	{
-		pType = PiecewiseConstant
-		method = fmt.Sprintf("full_interpolation_%s", pType)
-		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPFullInterpolation(dir, GOP, auditor, convert10bits); err != nil {
-			return
-		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			err = fmt.Errorf("Different QP found %d != %d (%s)", methodQP, finalQP, method)
-			return
-		}
-	}
-	{
 		pType = PiecewiseLinear
 		method = fmt.Sprintf("full_interpolation_%s", pType)
 		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPFullInterpolation(dir, GOP, auditor, convert10bits); err != nil {
@@ -298,19 +285,6 @@ func findGOPQP(dir string, GOP int, auditor VMAFChecker, convert10bits bool) (fi
 	// 	methodNbTries[method] += nbTries
 	// 	methodNbFrames[method] += nbTries * GOPFrames
 	// }
-	{
-		pType = PiecewiseConstant
-		method = fmt.Sprintf("quick_interpolation_%s", pType)
-		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickInterpolation(dir, GOP, auditor, convert10bits); err != nil {
-			return
-		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			err = fmt.Errorf("Different QP found %d != %d (%s)", methodQP, finalQP, method)
-			return
-		}
-	}
 	{
 		pType = PiecewiseLinear
 		method = fmt.Sprintf("quick_interpolation_%s", pType)

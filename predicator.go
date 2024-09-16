@@ -10,13 +10,12 @@ import (
 type PredicatorType string
 
 const (
-	AkimaSpline       PredicatorType = "AkimaSpline"
-	ClampedCubic      PredicatorType = "ClampedCubic"
-	FritschButland    PredicatorType = "FritschButland"
-	NaturalCubic      PredicatorType = "NaturalCubic"
-	NotAKnotCubic     PredicatorType = "NotAKnotCubic"
-	PiecewiseConstant PredicatorType = "PiecewiseConstant"
-	PiecewiseLinear   PredicatorType = "PiecewiseLinear"
+	AkimaSpline     PredicatorType = "AkimaSpline"
+	ClampedCubic    PredicatorType = "ClampedCubic"
+	FritschButland  PredicatorType = "FritschButland"
+	NaturalCubic    PredicatorType = "NaturalCubic"
+	NotAKnotCubic   PredicatorType = "NotAKnotCubic"
+	PiecewiseLinear PredicatorType = "PiecewiseLinear"
 )
 
 func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
@@ -67,15 +66,6 @@ func NewPredicator(predicatorType PredicatorType, existingResults map[int]ffmpeg
 		p.mediansInterpolator = new(interp.NotAKnotCubic)
 		p.hmeanInterpolator = new(interp.NotAKnotCubic)
 		p.meanInterpolator = new(interp.NotAKnotCubic)
-	case PiecewiseConstant:
-		p.minInterpolator = new(interp.PiecewiseConstant)
-		p.p1Interpolator = new(interp.PiecewiseConstant)
-		p.p5Interpolator = new(interp.PiecewiseConstant)
-		p.p10Interpolator = new(interp.PiecewiseConstant)
-		p.p25Interpolator = new(interp.PiecewiseConstant)
-		p.mediansInterpolator = new(interp.PiecewiseConstant)
-		p.hmeanInterpolator = new(interp.PiecewiseConstant)
-		p.meanInterpolator = new(interp.PiecewiseConstant)
 	case PiecewiseLinear:
 		p.minInterpolator = new(interp.PiecewiseLinear)
 		p.p1Interpolator = new(interp.PiecewiseLinear)
