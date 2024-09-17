@@ -193,7 +193,7 @@ func findGOPQPSplitInterpol(dir string, GOP, splitQP int, auditor VMAFChecker, c
 		}
 	}()
 	statusLine := liveprogress.AddCustomLine(func() string {
-		return fmt.Sprintf("       GOP | #%d - Searching for QP: %s", GOP, strings.Join(previousQPs, ","))
+		return fmt.Sprintf("       GOP | #%d - Searching for QP (split interpolation): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
 	// Read input segment

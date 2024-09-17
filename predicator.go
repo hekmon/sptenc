@@ -19,34 +19,34 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 	p.hmeanInterpolator = new(interp.FritschButland)
 	p.meanInterpolator = new(interp.FritschButland)
 	// Prepare the data sets
-	qps := make([]float64, len(existingResults))
-	mins := make([]float64, len(existingResults))
-	p1s := make([]float64, len(existingResults))
-	p5s := make([]float64, len(existingResults))
-	p10s := make([]float64, len(existingResults))
-	p25s := make([]float64, len(existingResults))
-	medians := make([]float64, len(existingResults))
-	hmeans := make([]float64, len(existingResults))
-	means := make([]float64, len(existingResults))
+	p.qps = make([]float64, len(existingResults))
+	p.mins = make([]float64, len(existingResults))
+	p.p1s = make([]float64, len(existingResults))
+	p.p5s = make([]float64, len(existingResults))
+	p.p10s = make([]float64, len(existingResults))
+	p.p25s = make([]float64, len(existingResults))
+	p.medians = make([]float64, len(existingResults))
+	p.hmeans = make([]float64, len(existingResults))
+	p.means = make([]float64, len(existingResults))
 	index := 0
 	for qp := ffmpegutils.QPMinimum; qp <= ffmpegutils.QPMaximum; qp++ {
 		result, ok := existingResults[qp]
 		if ok {
-			qps[index] = float64(qp)
-			mins[index] = result.Minimum
-			p1s[index] = result.Percentile1
-			p5s[index] = result.Percentile5
-			p10s[index] = result.Percentile10
-			p25s[index] = result.Percentile25
-			medians[index] = result.Median
-			hmeans[index] = result.HarmonicMean
-			means[index] = result.Mean
+			p.qps[index] = float64(qp)
+			p.mins[index] = result.Minimum
+			p.p1s[index] = result.Percentile1
+			p.p5s[index] = result.Percentile5
+			p.p10s[index] = result.Percentile10
+			p.p25s[index] = result.Percentile25
+			p.medians[index] = result.Median
+			p.hmeans[index] = result.HarmonicMean
+			p.means[index] = result.Mean
 			index++
 		}
 	}
 	if *debug {
 		fmt.Fprintf(liveprogress.Bypass(), "Initializing FritschButland predicator with %d points: %+v\n",
-			len(existingResults), qps)
+			len(existingResults), p.qps)
 	}
 	// Init with known points
 	defer func() {
@@ -55,25 +55,34 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 				len(existingResults), r)
 		}
 	}()
-	_ = p.minInterpolator.Fit(qps, mins)
-	_ = p.p1Interpolator.Fit(qps, p1s)
-	_ = p.p5Interpolator.Fit(qps, p5s)
-	_ = p.p10Interpolator.Fit(qps, p10s)
-	_ = p.p25Interpolator.Fit(qps, p25s)
-	_ = p.mediansInterpolator.Fit(qps, medians)
-	_ = p.hmeanInterpolator.Fit(qps, hmeans)
-	_ = p.meanInterpolator.Fit(qps, means)
+	_ = p.minInterpolator.Fit(p.qps, p.mins)
+	_ = p.p1Interpolator.Fit(p.qps, p.p1s)
+	_ = p.p5Interpolator.Fit(p.qps, p.p5s)
+	_ = p.p10Interpolator.Fit(p.qps, p.p10s)
+	_ = p.p25Interpolator.Fit(p.qps, p.p25s)
+	_ = p.mediansInterpolator.Fit(p.qps, p.medians)
+	_ = p.hmeanInterpolator.Fit(p.qps, p.hmeans)
+	_ = p.meanInterpolator.Fit(p.qps, p.means)
 	return
 }
 
 type Predicator struct {
+	qps                 []float64
+	mins                []float64
 	minInterpolator     interp.FittablePredictor
+	p1s                 []float64
 	p1Interpolator      interp.FittablePredictor
+	p5s                 []float64
 	p5Interpolator      interp.FittablePredictor
+	p10s                []float64
 	p10Interpolator     interp.FittablePredictor
+	p25s                []float64
 	p25Interpolator     interp.FittablePredictor
+	medians             []float64
 	mediansInterpolator interp.FittablePredictor
+	hmeans              []float64
 	hmeanInterpolator   interp.FittablePredictor
+	means               []float64
 	meanInterpolator    interp.FittablePredictor
 }
 
@@ -92,7 +101,58 @@ func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
 	stats.Median = p.mediansInterpolator.Predict(qpf)
 	stats.HarmonicMean = p.hmeanInterpolator.Predict(qpf)
 	stats.Mean = p.meanInterpolator.Predict(qpf)
+	stats = p.adapt(qp, stats)
 	return
+}
+
+func (p *Predicator) adapt(qp int, stats ffmpegutils.VMAFStats) (adapted ffmpegutils.VMAFStats) {
+	adapted = stats
+	var pre, post int
+	// Find known values indexes sourrounding qp
+	for index, fqp := range p.qps {
+		if fqp == float64(qp) {
+			return
+		}
+		if fqp > float64(qp) {
+			post = index
+			pre = index - 1
+			break
+		}
+	}
+	if pre == post {
+		return
+	}
+	// Adapt values if needed
+	adapted.Minimum = adaptCeilingValues(pre, qp, post, p.mins[pre], stats.Minimum, p.mins[post])
+	adapted.Percentile1 = adaptCeilingValues(pre, qp, post, p.p1s[pre], stats.Percentile1, p.p1s[post])
+	adapted.Percentile5 = adaptCeilingValues(pre, qp, post, p.p5s[pre], stats.Percentile5, p.p5s[post])
+	adapted.Percentile10 = adaptCeilingValues(pre, qp, post, p.p10s[pre], stats.Percentile10, p.p10s[post])
+	adapted.Percentile25 = adaptCeilingValues(pre, qp, post, p.p25s[pre], stats.Percentile25, p.p25s[post])
+	adapted.Median = adaptCeilingValues(pre, qp, post, p.medians[pre], stats.Median, p.medians[post])
+	adapted.HarmonicMean = adaptCeilingValues(pre, qp, post, p.hmeans[pre], stats.HarmonicMean, p.hmeans[post])
+	adapted.Mean = adaptCeilingValues(pre, qp, post, p.means[pre], stats.Mean, p.means[post])
+	return
+}
+
+func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, postValue float64) (adaptedValue float64) {
+	if predicted <= pre || predicted >= post {
+		return predicatedValue
+	}
+	if preValue == 100 && postValue < 100 {
+		if *debug {
+			fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value. preValue: %f, postValue: %f, predicted: %d, pre: %d, post: %d\n", preValue, postValue, predicted, pre, post)
+		}
+		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
+		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one
+		// by one defeating the purpose of interpolation. The idea here is to lower the value only after the second half between pre and post
+		// to force the QP search using the predicator to have a quick search like search and make him compute the middle value between pre
+		// and post by hoping the actual computed value won't be 100.
+		if predicted <= pre+(post-pre)/2 {
+			return preValue
+		}
+		return postValue
+	}
+	return predicatedValue
 }
 
 /*

@@ -104,6 +104,7 @@ func (vc VMAFChecker) Validate(stats ffmpegutils.VMAFStats) bool {
 	}
 	return true
 }
+
 func (vc VMAFChecker) String() string {
 	var tableBuffer strings.Builder
 	table := tablewriter.NewWriter(&tableBuffer)
