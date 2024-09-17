@@ -146,8 +146,10 @@ func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, pos
 	}
 	if preValue == 100 && postValue < 100 {
 		if *debug {
-			fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, postValue: %f\n",
-				pre, predicted, post, preValue, predicatedValue, postValue)
+			defer func() {
+				fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptatedValue: %f, postValue: %f\n",
+					pre, predicted, post, preValue, predicatedValue, adaptedValue, postValue)
+			}()
 		}
 		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
 		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one
