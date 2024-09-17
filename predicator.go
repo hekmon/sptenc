@@ -139,13 +139,15 @@ func (p *Predicator) adapt(qp int, stats ffmpegutils.VMAFStats) (adapted ffmpegu
 func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, postValue float64) (adaptedValue float64) {
 	if predicted <= pre || predicted >= post {
 		if *debug {
-			fmt.Fprintf(liveprogress.Bypass(), "Not adapting predicted value. preValue: %f, postValue: %f, predicted: %d, pre: %d, post: %d\n", preValue, postValue, predicted, pre, post)
+			fmt.Fprintf(liveprogress.Bypass(), "Not adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, postValue: %f\n",
+				pre, predicted, post, preValue, predicatedValue, postValue)
 		}
 		return predicatedValue
 	}
 	if preValue == 100 && postValue < 100 {
 		if *debug {
-			fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value. preValue: %f, postValue: %f, predicted: %d, pre: %d, post: %d\n", preValue, postValue, predicted, pre, post)
+			fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, postValue: %f\n",
+				pre, predicted, post, preValue, predicatedValue, postValue)
 		}
 		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
 		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one

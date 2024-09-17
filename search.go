@@ -147,7 +147,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 	var methodQP int
 	gopQPCache = make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
 	bypass := liveprogress.Bypass()
-	// quick search
+	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "quicksearch"
 		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickSearch(dir, GOP, splitQP, auditor, convert10bits); err != nil {
@@ -157,6 +157,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 		methodNbTries[method] += nbTries
 		methodNbFrames[method] += nbTries * GOPFrames
 	}
+	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "split_interpolation"
 		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPSplitInterpol(dir, GOP, splitQP, auditor, convert10bits); err != nil {
@@ -169,6 +170,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
 		}
 	}
+	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "adaptative"
 		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPAdaptative(dir, GOP, splitQP, auditor, convert10bits); err != nil {
@@ -181,6 +183,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
 		}
 	}
+	fmt.Fprintln(bypass, "---------------8<---------------")
 	return
 }
 
@@ -384,6 +387,11 @@ func findGOPQPSplitInterpol(dir string, GOP, splitQP int, auditor VMAFChecker, c
 func findGOPQPQuickSearch(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	previousQPs := make([]string, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	defer func() {
+		if *debug {
+			fmt.Fprintf(bypass, "QPs tested: %s\n", strings.Join(previousQPs, ","))
+		}
+	}()
 	statusLine := liveprogress.AddCustomLine(func() string {
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (quicksearch): %s", GOP, strings.Join(previousQPs, ","))
 	})
@@ -521,6 +529,11 @@ func findGOPQPQuickSearch(dir string, GOP, splitQP int, auditor VMAFChecker, con
 func findGOPQPAdaptative(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits bool) (finalQP, finalGOPTotalFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	bypass := liveprogress.Bypass()
 	previousQPs := make([]string, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	defer func() {
+		if *debug {
+			fmt.Fprintf(bypass, "QPs tested: %s\n", strings.Join(previousQPs, ","))
+		}
+	}()
 	statusLine := liveprogress.AddCustomLine(func() string {
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (adaptative): %s", GOP, strings.Join(previousQPs, ","))
 	})
@@ -712,7 +725,10 @@ func FindCandidate(min, max int, existingResults map[int]ffmpegutils.VMAFStats, 
 			return
 		}
 	}
-	// we have reached ffmpegutils.QPMinimum, this will be a best effort scenario
+	// return min
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "No candidate found in range %d-%d, returning %d\n", min, max, candidateQP)
+	}
 	return
 }
 
