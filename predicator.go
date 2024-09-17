@@ -107,35 +107,40 @@ func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
 
 func (p *Predicator) adapt(qp int, stats ffmpegutils.VMAFStats) (adapted ffmpegutils.VMAFStats) {
 	adapted = stats
-	var pre, post int
+	var preIndex, postIndex int
 	// Find known values indexes sourrounding qp
 	for index, fqp := range p.qps {
 		if fqp == float64(qp) {
+			// this is not a predicted value, this is a known value
 			return
 		}
 		if fqp > float64(qp) {
-			post = index
-			pre = index - 1
+			postIndex = index
+			preIndex = index - 1
 			break
 		}
 	}
-	if pre == post {
+	if preIndex == postIndex {
+		// search loop unsucessfull
 		return
 	}
 	// Adapt values if needed
-	adapted.Minimum = adaptCeilingValues(pre, qp, post, p.mins[pre], stats.Minimum, p.mins[post])
-	adapted.Percentile1 = adaptCeilingValues(pre, qp, post, p.p1s[pre], stats.Percentile1, p.p1s[post])
-	adapted.Percentile5 = adaptCeilingValues(pre, qp, post, p.p5s[pre], stats.Percentile5, p.p5s[post])
-	adapted.Percentile10 = adaptCeilingValues(pre, qp, post, p.p10s[pre], stats.Percentile10, p.p10s[post])
-	adapted.Percentile25 = adaptCeilingValues(pre, qp, post, p.p25s[pre], stats.Percentile25, p.p25s[post])
-	adapted.Median = adaptCeilingValues(pre, qp, post, p.medians[pre], stats.Median, p.medians[post])
-	adapted.HarmonicMean = adaptCeilingValues(pre, qp, post, p.hmeans[pre], stats.HarmonicMean, p.hmeans[post])
-	adapted.Mean = adaptCeilingValues(pre, qp, post, p.means[pre], stats.Mean, p.means[post])
+	adapted.Minimum = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.mins[preIndex], stats.Minimum, p.mins[postIndex])
+	adapted.Percentile1 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p1s[preIndex], stats.Percentile1, p.p1s[postIndex])
+	adapted.Percentile5 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p5s[preIndex], stats.Percentile5, p.p5s[postIndex])
+	adapted.Percentile10 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p10s[preIndex], stats.Percentile10, p.p10s[postIndex])
+	adapted.Percentile25 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p25s[preIndex], stats.Percentile25, p.p25s[postIndex])
+	adapted.Median = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.medians[preIndex], stats.Median, p.medians[postIndex])
+	adapted.HarmonicMean = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.hmeans[preIndex], stats.HarmonicMean, p.hmeans[postIndex])
+	adapted.Mean = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.means[preIndex], stats.Mean, p.means[postIndex])
 	return
 }
 
 func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, postValue float64) (adaptedValue float64) {
 	if predicted <= pre || predicted >= post {
+		if *debug {
+			fmt.Fprintf(liveprogress.Bypass(), "Not adapting predicted value. preValue: %f, postValue: %f, predicted: %d, pre: %d, post: %d\n", preValue, postValue, predicted, pre, post)
+		}
 		return predicatedValue
 	}
 	if preValue == 100 && postValue < 100 {
