@@ -40,7 +40,7 @@ func (rh *RunHistory) AddRun(qps []int) {
 func (rh *RunHistory) GetMeanStdDev() (mean, stddev int) {
 	// If we do not have stats yet, set data like a quick sort/search
 	if len(*rh) == 0 {
-		mean = ffmpegutils.QPMaximum - ffmpegutils.QPMinimum + 1
+		mean = (ffmpegutils.QPMaximum - ffmpegutils.QPMinimum + 1) / 2
 		stddev = mean / 2
 		return
 	}
