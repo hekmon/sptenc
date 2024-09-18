@@ -125,35 +125,67 @@ func (p *Predicator) adapt(qp int, stats ffmpegutils.VMAFStats) (adapted ffmpegu
 		return
 	}
 	// Adapt values if needed
-	adapted.Minimum = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.mins[preIndex], stats.Minimum, p.mins[postIndex])
-	adapted.Percentile1 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p1s[preIndex], stats.Percentile1, p.p1s[postIndex])
-	adapted.Percentile5 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p5s[preIndex], stats.Percentile5, p.p5s[postIndex])
-	adapted.Percentile10 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p10s[preIndex], stats.Percentile10, p.p10s[postIndex])
-	adapted.Percentile25 = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.p25s[preIndex], stats.Percentile25, p.p25s[postIndex])
-	adapted.Median = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.medians[preIndex], stats.Median, p.medians[postIndex])
-	adapted.HarmonicMean = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.hmeans[preIndex], stats.HarmonicMean, p.hmeans[postIndex])
-	adapted.Mean = adaptCeilingValues(int(p.qps[preIndex]), qp, int(p.qps[postIndex]), p.means[preIndex], stats.Mean, p.means[postIndex])
+	adapted.Minimum = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Minimum, p.mins)
+	adapted.Percentile1 = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Percentile1, p.p1s)
+	adapted.Percentile5 = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Percentile5, p.p5s)
+	adapted.Percentile10 = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Percentile10, p.p10s)
+	adapted.Percentile25 = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Percentile25, p.p25s)
+	adapted.Median = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Median, p.medians)
+	adapted.HarmonicMean = p.adaptCeilingValues(preIndex, postIndex, qp, stats.HarmonicMean, p.hmeans)
+	adapted.Mean = p.adaptCeilingValues(preIndex, postIndex, qp, stats.Mean, p.means)
 	return
 }
 
-func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, postValue float64) (adaptedValue float64) {
-	if predicted <= pre || predicted >= post {
+func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int, predicatedValue float64, ys []float64) (adaptedValue float64) {
+	if predictedForQP <= int(p.qps[preIndex]) || predictedForQP >= int(p.qps[postIndex]) {
+		// safety
 		return predicatedValue
 	}
-	if preValue == 100 && postValue < 100 {
+	if ys[preIndex] == 100 && ys[postIndex] < 100 {
 		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
 		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one
 		// by one defeating the purpose of interpolation. The idea here is to lower the value only after the second half between pre and post
 		// to force the QP search using the predicator to have a quick search like search and make him compute the middle value between pre
 		// and post by hoping the actual computed value won't be 100 for the next interpolation and avoid a one by one search.
-		if predicted <= pre+(post-pre)/2 {
-			return preValue
+		middleQP := int(p.qps[preIndex]) + (int(p.qps[postIndex])-int(p.qps[preIndex]))/2
+		if predictedForQP <= middleQP {
+			// For the first half, we return the pre value (100)
+			adaptedValue = ys[preIndex]
+			if *debug {
+				fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value for first half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f\n",
+					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex])
+			}
+			return
 		}
-		return postValue
-	}
-	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Not adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, postValue: %f\n",
-			pre, predicted, post, preValue, predicatedValue, postValue)
+		// For the second half, redo an interpolation between middle (as 100) and post
+		newqps := make([]float64, 0, len(p.qps)+1)
+		for index, qp := range p.qps {
+			if index == preIndex {
+				newqps = append(newqps, qp)
+				// add the new false data point just after
+				newqps = append(newqps, float64(middleQP))
+			} else {
+				newqps = append(newqps, qp)
+			}
+		}
+		newValues := make([]float64, 0, len(ys)+1)
+		for index, y := range ys {
+			if index == preIndex {
+				newValues = append(newValues, y)
+				// add the new false data point just after
+				newValues = append(newValues, 100)
+			} else {
+				newValues = append(newValues, y)
+			}
+		}
+		predicator := new(interp.FritschButland)
+		_ = predicator.Fit(newqps, newValues)
+		adaptedValue = predicator.Predict(float64(predictedForQP))
+		if *debug {
+			fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f\n",
+				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex])
+		}
+		return
 	}
 	return predicatedValue
 }
@@ -201,4 +233,33 @@ func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, pos
 
 	Manual start QP Ideal QP for lowest tries is 13 with 2223 tries.
 	Manual start QP Ideal QP for lowest frames is 13 with 105695 frames.
+
+	-------------------------------------------------------------------------------
+
+	The Dawn I (with ceilling1)
+
+	Method quicksearch: 530 tries
+	Method quicksearch: 75369 frames
+
+	Method split_interpolation: 605 tries
+	Method split_interpolation: 85914 frames
+
+	Method adaptative: 519 tries
+	Method adaptative: 73779 frames
+
+	Best method for tries is adaptative with 519 tries.
+	Best method for frames is adaptative with 73779 frames.
+	GOP encoding QP search done in 8h15m26s.
+
+	With startQP 20 there would have 559 tries and 77676 encoded frames
+	Manual start QP Ideal QP for lowest tries is 18 with 494 tries.
+	Manual start QP Ideal QP for lowest frames is 18 with 69465 frames.
+
+	-------------------------------------------------------------------------------
+
+	The Dawn II (with ceilling2)
+
+	waiting for results
+
+	-------------------------------------------------------------------------------
 */
