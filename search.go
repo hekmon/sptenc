@@ -63,19 +63,12 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	defer liveprogress.RemoveBar(bar)
 	// Go
 	start := time.Now()
-	var splitQP int
-	if *smartSplit {
-		splitQP = previousMediansQPs.GetIdealSplitQP()
-		fmt.Fprintf(bypass, "Smart start QP set the start QP at %d\n", splitQP)
-	} else {
-		splitQP = (ffmpegutils.QPMaximum - ffmpegutils.QPMinimum + 1) / 2
-		fmt.Fprintf(bypass, "Split QP is set to %d\n", splitQP)
-	}
+	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, splitQP, auditor, convert10bits); err != nil {
+		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -141,7 +134,7 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	return
 }
 
-func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
 	// init
 	var methodQP int
 	gopQPCache = make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
@@ -149,7 +142,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "quicksearch"
-		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickSearch(dir, GOP, splitQP, auditor, convert10bits); err != nil {
+		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickSearch(dir, GOP, meanAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
 			return
 		}
@@ -159,7 +152,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "split_interpolation"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPSplitInterpol(dir, GOP, splitQP, auditor, convert10bits); err != nil {
+		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPSplitInterpol(dir, GOP, meanAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
 			return
 		}
@@ -172,7 +165,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "quick_interpolation"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickInterpol(dir, GOP, splitQP, auditor, convert10bits); err != nil {
+		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickInterpol(dir, GOP, meanAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
 			return
 		}
@@ -185,7 +178,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "stddev_quick"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPStdDevQuick(dir, GOP, splitQP, 0, auditor, convert10bits); err != nil {
+		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPStdDevQuick(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
 			return
 		}
@@ -198,7 +191,7 @@ func findGOPQP(dir string, GOP, splitQP int, auditor VMAFChecker, convert10bits 
 	fmt.Fprintln(bypass, "---------------8<---------------")
 	{
 		method = "stddev_interpolation"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPStdDevInterpol(dir, GOP, splitQP, 0, auditor, convert10bits); err != nil {
+		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPStdDevInterpol(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
 			return
 		}

@@ -79,7 +79,6 @@ func main() {
 	input = flag.String("input", "", "Input file to transcode.")
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
-	smartSplit = flag.Bool("smartsplit", false, "If this flag is set, each encode will happen the median of all the GOP QPs to a state file in the working directory related to the current VMAF config. Search QP first split will use the average of all previous medians from the file to speed up the search QP process.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	heavyMultithreading = flag.Bool("heavymt", false, "Use heavy multithreading for libx265 encoding. Only recommended if you have more than 1 CPU socket and CPU usage is not already saturating the CPU cores. Has no effect if -nvenc is set.")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
