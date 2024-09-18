@@ -85,7 +85,7 @@ func computePreviousRunsStatsFile() string {
 	return fmt.Sprintf(qpstatsFormat, base64.RawStdEncoding.EncodeToString(builder.Bytes()))
 }
 
-func loadIdealQPs() (err error) {
+func loadStats() (err error) {
 	fd, err := os.Open(computePreviousRunsStatsFile())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -98,7 +98,7 @@ func loadIdealQPs() (err error) {
 	return json.NewDecoder(fd).Decode(&previousRuns)
 }
 
-func saveIdealQPs() error {
+func saveStats() error {
 	// Create or truncate file
 	fd, err := os.Create(computePreviousRunsStatsFile())
 	if err != nil {

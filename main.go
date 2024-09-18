@@ -22,7 +22,6 @@ var (
 	input               *string
 	tmpDir              *string
 	output              *string
-	smartSplit          *bool
 	gpu                 *int
 	heavyMultithreading *bool
 	nvdec               *bool
@@ -139,22 +138,20 @@ func main() {
 	}
 	workingDirectory = generateWorkingDirectroryPath(*tmpDir)
 	// Load previous ideal QPs
-	if *smartSplit {
-		if err = loadIdealQPs(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to load previous ideal QPs: %s\n", err)
-			exitCode = 1
+	if err = loadStats(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load previous ideal QPs: %s\n", err)
+		exitCode = 1
+		return
+	}
+	defer func() {
+		if err = saveStats(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to save ideal QPs: %s\n", err)
+			if exitCode == 0 {
+				exitCode = 1
+			}
 			return
 		}
-		defer func() {
-			if err = saveIdealQPs(); err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to save ideal QPs: %s\n", err)
-				if exitCode == 0 {
-					exitCode = 1
-				}
-				return
-			}
-		}()
-	}
+	}()
 	// Properly handle stop
 	runCtx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	go cleanStop(runCtx)
