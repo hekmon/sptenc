@@ -138,28 +138,22 @@ func (p *Predicator) adapt(qp int, stats ffmpegutils.VMAFStats) (adapted ffmpegu
 
 func adaptCeilingValues(pre, predicted, post int, preValue, predicatedValue, postValue float64) (adaptedValue float64) {
 	if predicted <= pre || predicted >= post {
-		if *debug {
-			fmt.Fprintf(liveprogress.Bypass(), "Not adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, postValue: %f\n",
-				pre, predicted, post, preValue, predicatedValue, postValue)
-		}
 		return predicatedValue
 	}
 	if preValue == 100 && postValue < 100 {
-		if *debug {
-			defer func() {
-				fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptatedValue: %f, postValue: %f\n",
-					pre, predicted, post, preValue, predicatedValue, adaptedValue, postValue)
-			}()
-		}
 		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
 		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one
 		// by one defeating the purpose of interpolation. The idea here is to lower the value only after the second half between pre and post
 		// to force the QP search using the predicator to have a quick search like search and make him compute the middle value between pre
-		// and post by hoping the actual computed value won't be 100.
+		// and post by hoping the actual computed value won't be 100 for the next interpolation and avoid a one by one search.
 		if predicted <= pre+(post-pre)/2 {
 			return preValue
 		}
 		return postValue
+	}
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "Not adapting predicted value. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, postValue: %f\n",
+			pre, predicted, post, preValue, predicatedValue, postValue)
 	}
 	return predicatedValue
 }
