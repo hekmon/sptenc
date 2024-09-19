@@ -595,7 +595,7 @@ func findGOPQPStdDevQuick(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFC
 				candidateQP = meanAvg
 			} else if min == ffmpegutils.QPMinimum {
 				// Starting at round 2, if we have still a lowest minimum, use increment of the standard deviation average toward minimum
-				// to maximize the chance to find a better candidate while still keeping the range as low as possible
+				// to maximize the chance to find a better candidate while still keeping the range as small as possible
 				if candidateQP = meanAvg - len(results)*stdDevAvg; candidateQP < ffmpegutils.QPMinimum {
 					candidateQP = ffmpegutils.QPMinimum
 					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
@@ -606,7 +606,7 @@ func findGOPQPStdDevQuick(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFC
 				}
 			} else if max == ffmpegutils.QPMaximum {
 				// Starting at round 2, if we have still a highest maximum, use increment of the standard deviation average toward maximum
-				// to maximize the chance to find a better candidate while still keeping the range as low as possible
+				// to maximize the chance to find a better candidate while still keeping the range as small as possible
 				if candidateQP = meanAvg + len(results)*stdDevAvg; candidateQP > ffmpegutils.QPMaximum {
 					candidateQP = ffmpegutils.QPMaximum
 					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
@@ -765,7 +765,7 @@ func findGOPQPStdDevInterpol(dir string, GOP, meanAvg, stdDevAvg int, auditor VM
 			// Use standard deviation avg to slowy expand range while maximizing our chances to find the best QP
 			if min == ffmpegutils.QPMinimum {
 				// Starting at round 2, if we have still a lowest minimum, use increment of the standard deviation average toward minimum
-				// to maximize the chance to find a better candidate while still keeping the range as low as possible
+				// to maximize the chance to find a better candidate while still keeping the range as small as possible
 				if candidateQP = meanAvg - len(results)*stdDevAvg; candidateQP < ffmpegutils.QPMinimum {
 					candidateQP = ffmpegutils.QPMinimum
 					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
@@ -776,7 +776,7 @@ func findGOPQPStdDevInterpol(dir string, GOP, meanAvg, stdDevAvg int, auditor VM
 				}
 			} else if max == ffmpegutils.QPMaximum {
 				// Starting at round 2, if we have still a highest maximum, use increment of the standard deviation average toward maximum
-				// to maximize the chance to find a better candidate while still keeping the range as low as possible
+				// to maximize the chance to find a better candidate while still keeping the range as small as possible
 				if candidateQP = meanAvg + len(results)*stdDevAvg; candidateQP > ffmpegutils.QPMaximum {
 					candidateQP = ffmpegutils.QPMaximum
 					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
