@@ -17,9 +17,9 @@ import (
 type RunHistory []RunStats
 
 type RunStats struct {
-	Mean   float64
-	StdDev float64
-	Weight int
+	Mean   float64 `json:"mean"`
+	StdDev float64 `json:"stddev"`
+	Weight int     `json:"weight"`
 }
 
 func (rh *RunHistory) AddRun(qps []int) {
@@ -54,8 +54,25 @@ func (rh *RunHistory) GetMeanStdDev() (mean, stddev int) {
 		weights[index] = float64(rs.Weight)
 	}
 	// Compute averages
-	mean = int(math.Round(stat.Mean(means, weights)))
-	stddev = int(math.Ceil(stat.Mean(stddevs, weights)))
+	meanf := stat.Mean(means, weights)
+	stddevf := stat.Mean(stddevs, weights)
+	if *debug {
+		fmt.Printf("Previous runs means average is: %f\n", meanf)
+		fmt.Printf("Previous runs stddev average is: %f\n", stddevf)
+	}
+	// Compute integers limits englobing the real float64 values
+	mean = int(math.Round(meanf))
+	upper := meanf + stddevf
+	lower := meanf - stddevf
+	for stddev = int(math.Ceil(stddevf)); ; stddev++ {
+		if float64(mean-stddev) > lower {
+			continue
+		}
+		if float64(mean+stddev) < upper {
+			continue
+		}
+		break
+	}
 	return
 }
 

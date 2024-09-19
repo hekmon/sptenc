@@ -23,6 +23,7 @@ func findGOPQPQuickSearch(dir string, GOP, splitQP int, auditor VMAFChecker, con
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (quicksearch): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
+	fmt.Fprintf(bypass, "Starting quicksearch with splitQP %d\n", splitQP)
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
@@ -165,6 +166,7 @@ func findGOPQPSplitInterpol(dir string, GOP, splitQP int, auditor VMAFChecker, c
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (split interpolation): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
+	fmt.Fprintf(bypass, "Starting split interpolation with splitQP %d\n", splitQP)
 	// Read input segment
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
@@ -362,6 +364,7 @@ func findGOPQPQuickInterpol(dir string, GOP, splitQP int, auditor VMAFChecker, c
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (QuickInterpol): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
+	fmt.Fprintf(bypass, "Starting quicks interpolation with splitQP %d\n", splitQP)
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
@@ -536,6 +539,7 @@ func findGOPQPStdDevQuick(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFC
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (quicksearch): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
+	fmt.Fprintf(bypass, "Starting std dev quick with meanQP %d and std dev %d\n", meanAvg, stdDevAvg)
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
@@ -704,6 +708,7 @@ func findGOPQPStdDevInterpol(dir string, GOP, meanAvg, stdDevAvg int, auditor VM
 		return fmt.Sprintf("       GOP | #%d - Searching for QP (StdDevInterpolation): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
+	fmt.Fprintf(bypass, "Starting std dev interpolation with meanQP %d and std dev %d\n", meanAvg, stdDevAvg)
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)

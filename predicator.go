@@ -256,10 +256,27 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 	Manual start QP Ideal QP for lowest frames is 18 with 69465 frames.
 
 	-------------------------------------------------------------------------------
+	-------------------------------------------------------------------------------
 
-	The Dawn II (with ceilling2)
+	The Dawn I (with ceilling2)
 
-	waiting for results
+	Method quicksearch: 530 tries
+	Method split_interpolation: 603 tries
+	Method quick_interpolation: 519 tries
+	Method stddev_quick: 459 tries
+	Method stddev_interpolation: 543 tries
+		Best method for tries is stddev_quick with 459 tries.
+		
+	Method quicksearch: 75369 frames
+	Method split_interpolation: 85604 frames
+	Method quick_interpolation: 73779 frames
+	Method stddev_quick: 66344 frames
+	Method stddev_interpolation: 76839 frames
+		Best method for frames is stddev_quick with 66344 frames.
+
+	With startQP 20 there would have 559 tries and 77676 encoded frames
+	Manual start QP Ideal QP for lowest tries is 18 with 494 tries.
+	Manual start QP Ideal QP for lowest frames is 18 with 69465 frames.
 
 	-------------------------------------------------------------------------------
 */

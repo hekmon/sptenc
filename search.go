@@ -131,6 +131,8 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	idealQPLowestTries, tries, idealQPLowestFrames, frames := computeIdealStartQP(results, segmentsFrames)
 	fmt.Fprintf(bypass, "Manual start QP Ideal QP for lowest tries is %d with %d tries.\n", idealQPLowestTries, tries)
 	fmt.Fprintf(bypass, "Manual start QP Ideal QP for lowest frames is %d with %d frames.\n", idealQPLowestFrames, frames)
+	// Save stats for futur runs
+	previousRuns.AddRun(results)
 	return
 }
 
