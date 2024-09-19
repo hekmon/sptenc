@@ -261,7 +261,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	var convertFlac bool
 	if *flac {
 		audioTrack := stats.AudioTrack()
-		if audioTrack != nil && audioTrack.CodecName == ffmpegutils.CodecAudioPCM {
+		if audioTrack != nil && (audioTrack.CodecName == ffmpegutils.CodecAudioPCM || audioTrack.CodecName == ffmpegutils.CodecAudioPCM24b) {
 			convertFlac = true
 			if *debug {
 				fmt.Fprintln(bypass, "Input has PCM audio and -flac flag is on: audio stream will be converted to FLAC")
