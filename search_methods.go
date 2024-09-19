@@ -598,12 +598,21 @@ func findGOPQPStdDevQuick(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFC
 				// to maximize the chance to find a better candidate while still keeping the range as low as possible
 				if candidateQP = meanAvg - len(results)*stdDevAvg; candidateQP < ffmpegutils.QPMinimum {
 					candidateQP = ffmpegutils.QPMinimum
+					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
+						finalQP = candidateQP
+						bestEffort = true
+						return
+					}
 				}
 			} else if max == ffmpegutils.QPMaximum {
 				// Starting at round 2, if we have still a highest maximum, use increment of the standard deviation average toward maximum
 				// to maximize the chance to find a better candidate while still keeping the range as low as possible
 				if candidateQP = meanAvg + len(results)*stdDevAvg; candidateQP > ffmpegutils.QPMaximum {
 					candidateQP = ffmpegutils.QPMaximum
+					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
+						finalQP = candidateQP
+						return
+					}
 				}
 			} else {
 				// Once we have a closed range, switch to quick search with middle position
@@ -759,12 +768,21 @@ func findGOPQPStdDevInterpol(dir string, GOP, meanAvg, stdDevAvg int, auditor VM
 				// to maximize the chance to find a better candidate while still keeping the range as low as possible
 				if candidateQP = meanAvg - len(results)*stdDevAvg; candidateQP < ffmpegutils.QPMinimum {
 					candidateQP = ffmpegutils.QPMinimum
+					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
+						finalQP = candidateQP
+						bestEffort = true
+						return
+					}
 				}
 			} else if max == ffmpegutils.QPMaximum {
 				// Starting at round 2, if we have still a highest maximum, use increment of the standard deviation average toward maximum
 				// to maximize the chance to find a better candidate while still keeping the range as low as possible
 				if candidateQP = meanAvg + len(results)*stdDevAvg; candidateQP > ffmpegutils.QPMaximum {
 					candidateQP = ffmpegutils.QPMaximum
+					if _, alreadyComputed = results[candidateQP]; alreadyComputed {
+						finalQP = candidateQP
+						return
+					}
 				}
 			} else {
 				// should not happen
