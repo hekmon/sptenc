@@ -105,7 +105,7 @@ func computePreviousRunsStatsFile() string {
 	builder.WriteString(strconv.FormatFloat(*vmafLimitMedian, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(*vmafLimitHMean, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(*vmafLimitMean, 'f', -1, 64))
-	return fmt.Sprintf(qpstatsFormat, base64.RawStdEncoding.EncodeToString(builder.Bytes()))
+	return fmt.Sprintf(qpstatsFormat, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 }
 
 func loadStats() (err error) {
