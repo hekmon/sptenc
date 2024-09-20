@@ -2,22 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
-)
-
-var (
-	// TMP for bench
-	method         string
-	gopQPCache     map[int]ffmpegutils.VMAFStats
-	methodNbTries  = make(map[string]int, 10)
-	methodNbFrames = make(map[string]int, 10)
 )
 
 type QPStats struct {
@@ -100,111 +93,236 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	duration := time.Since(start)
 	// Done
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
-	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
-	fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64))
-	if nbBestEfforts > 0 {
-		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n", nbBestEfforts)
-	}
 	// Stats
-	fmt.Fprintf(bypass, "GOP encoding QP search done in %s.\n", duration.Round(time.Second))
-	var (
-		bestNbTriesMethod, bestNbFramesMethod string
-		bestNbTries, bestNbFrames             int
+	gopqpmean, gopqpstddev := previousRuns.AddRun(results)
+	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n",
+		strconv.FormatFloat(gopqpmean, 'f', -1, 64),
+		strconv.FormatFloat(gopqpstddev, 'f', -1, 64),
 	)
-	for nbTriesMethod, nbTries := range methodNbTries {
-		if bestNbTriesMethod == "" || nbTries < bestNbTries {
-			bestNbTries = nbTries
-			bestNbTriesMethod = nbTriesMethod
-		}
-		fmt.Fprintf(bypass, "Method %s: %d tries\n", nbTriesMethod, nbTries)
+	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
+	fmt.Fprintf(bypass, "Weighted global QP is %s.\n",
+		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
+	)
+	if nbBestEfforts > 0 {
+		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
+			nbBestEfforts)
 	}
-	for nbFramesMethod, nbFrames := range methodNbFrames {
-		if bestNbFramesMethod == "" || nbFrames < bestNbFrames {
-			bestNbFrames = nbFrames
-			bestNbFramesMethod = nbFramesMethod
-		}
-		fmt.Fprintf(bypass, "Method %s: %d frames\n", nbFramesMethod, nbFrames)
-	}
-	fmt.Fprintf(bypass, "Best method for tries is %s with %d tries.\n", bestNbTriesMethod, bestNbTries)
-	fmt.Fprintf(bypass, "Best method for frames is %s with %d frames.\n", bestNbFramesMethod, bestNbFrames)
 	fmt.Fprintf(bypass, "GOP encoding QP search done in %s.\n", duration.Round(time.Second))
-	idealQPLowestTries, tries, idealQPLowestFrames, frames := computeIdealStartQP(results, segmentsFrames)
-	fmt.Fprintf(bypass, "Manual start QP Ideal QP for lowest tries is %d with %d tries.\n", idealQPLowestTries, tries)
-	fmt.Fprintf(bypass, "Manual start QP Ideal QP for lowest frames is %d with %d frames.\n", idealQPLowestFrames, frames)
-	// Save stats for futur runs
-	previousRuns.AddRun(results)
 	return
 }
 
 func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
-	// init
-	var methodQP int
-	gopQPCache = make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	// Init
 	bypass := liveprogress.Bypass()
-	fmt.Fprintln(bypass, "---------------8<---------------")
-	{
-		method = "quicksearch"
-		if finalQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickSearch(dir, GOP, meanAvg, auditor, convert10bits); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
+	testedQPs := make([]int, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	defer func() {
+		if *debug {
+			fmt.Fprintf(bypass, "QPs tested: %+v\n", testedQPs)
+		}
+	}()
+	statusLine := liveprogress.AddCustomLine(func() string {
+		testedQPStr := make([]string, len(testedQPs))
+		for i, qp := range testedQPs {
+			testedQPStr[i] = strconv.Itoa(qp)
+		}
+		return fmt.Sprintf("       GOP | #%d - Searching for QP: %s", GOP, strings.Join(testedQPStr, ","))
+	})
+	defer liveprogress.RemoveCustomLine(statusLine)
+	fmt.Fprintf(bypass, "Starting std dev interpolation with meanQP %d and std dev %d\n", meanAvg, stdDevAvg)
+	// Prepare
+	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
+	GOPInfos, err := getStreamsInfosCF(input, false)
+	if err != nil {
+		err = fmt.Errorf("failed to get streams infos: %w", err)
+		return
+	}
+	duration = GOPInfos.Format.Duration
+	videoTrack := GOPInfos.VideoTrack()
+	totalFrames := videoTrack.NbReadFrames
+	frameRate := videoTrack.RFrameRate
+	ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
+	// Verify output files frames count when done
+	defer func() {
+		if err != nil {
+			// if we exit with an error, no need to check that everything is fine
 			return
 		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-	}
-	fmt.Fprintln(bypass, "---------------8<---------------")
-	{
-		method = "split_interpolation"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPSplitInterpol(dir, GOP, meanAvg, auditor, convert10bits); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
+		var finalGOPInfos ffmpegutils.FFProbeStats
+		if finalGOPInfos, err = getStreamsInfosCF(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, finalQP)), false); err != nil {
+			err = fmt.Errorf("failed to get streams infos of final GOP: %w", err)
 			return
 		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
-		}
-	}
-	fmt.Fprintln(bypass, "---------------8<---------------")
-	{
-		method = "quick_interpolation"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPQuickInterpol(dir, GOP, meanAvg, auditor, convert10bits); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
+		GOPFrames = finalGOPInfos.VideoTrack().NbReadFrames
+		if GOPFrames != totalFrames {
+			err = fmt.Errorf("final GOP has %d frames instead of %d", GOPFrames, totalFrames)
 			return
 		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
+		if *debug {
+			fmt.Fprintf(bypass, "Final GOP has %d frames, as original GOP.\n", GOPFrames)
 		}
+	}()
+	// Delete invalid QPs once finished
+	if !*keep {
+		defer func() {
+			for _, testedQP := range testedQPs {
+				if testedQP != finalQP {
+					if err := os.Remove(filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, testedQP))); err != nil {
+						fmt.Fprintf(bypass, "Failed to remove %q: %s\n", filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, testedQP)), err)
+					}
+				}
+			}
+		}()
 	}
-	fmt.Fprintln(bypass, "---------------8<---------------")
-	{
-		method = "stddev_quick"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPStdDevQuick(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
+	// Search
+	var (
+		candidateQP         int
+		alreadyComputed     bool
+		GOPQPOutput, report string
+		vmafStats           ffmpegutils.VMAFStats
+	)
+	results := make(map[int]ffmpegutils.VMAFStats, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	min := ffmpegutils.QPMinimum
+	max := ffmpegutils.QPMaximum
+	defer func() {
+		if finalQP == 0 && !auditor.Validate(results[0]) {
+			bestEffort = true
+		}
+	}()
+	var minComputed, maxComputed, found bool
+	for {
+		_, minComputed = results[min]
+		_, maxComputed = results[max]
+		if len(results) == 0 {
+			// quick search
+			candidateQP = meanAvg
+			if *debug {
+				fmt.Fprintf(bypass, "Searching for QP in range [%d, %d] with candidate %d\n", min, max, candidateQP)
+			}
+		} else if !(minComputed && maxComputed) {
+			// Use standard deviation avg to slowy expand range while maximizing our chances to find the best QP
+			if min == ffmpegutils.QPMinimum {
+				// Starting at round 2, if we have still a lowest minimum, use increment of the standard deviation average toward minimum
+				// to maximize the chance to find a better candidate while still keeping the range as small as possible
+				if candidateQP = meanAvg - len(results)*stdDevAvg; candidateQP < ffmpegutils.QPMinimum {
+					if _, alreadyComputed = results[ffmpegutils.QPMinimum]; alreadyComputed {
+						finalQP = ffmpegutils.QPMinimum
+						bestEffort = true
+						return
+					}
+					candidateQP = ffmpegutils.QPMinimum
+				}
+			} else if max == ffmpegutils.QPMaximum {
+				// Starting at round 2, if we have still a highest maximum, use increment of the standard deviation average toward maximum
+				// to maximize the chance to find a better candidate while still keeping the range as small as possible
+				if candidateQP = meanAvg + len(results)*stdDevAvg; candidateQP > ffmpegutils.QPMaximum {
+					if _, alreadyComputed = results[ffmpegutils.QPMaximum]; alreadyComputed {
+						finalQP = ffmpegutils.QPMaximum
+						return
+					}
+					candidateQP = ffmpegutils.QPMaximum
+				}
+			} else {
+				// should not happen
+				err = fmt.Errorf("invalid devstdinterpol state: minComputed=%t (%d), maxComputed=%t (%d)", minComputed, min, maxComputed, max)
+				return
+			}
+		} else {
+			// switch to interpolation once we have a closed range
+			if candidateQP, err = FindCandidate(min, max, results, auditor); err != nil {
+				err = fmt.Errorf("failed to find candidate: %w", err)
+				return
+			}
+			// Handle predicted candidate
+			if vmafStats, found = results[candidateQP]; found {
+				if *debug {
+					fmt.Fprintf(bypass, "Predicted candidate %d already computed (valid: %t)\n", candidateQP, auditor.Validate(vmafStats))
+				}
+				// we already computed this candidate, let's think this thru
+				if auditor.Validate(vmafStats) {
+					// Are we sure that next higher candidate does not validate ?
+					if candidateQP == ffmpegutils.QPMaximum {
+						finalQP = candidateQP
+						return
+					}
+					for i := candidateQP + 1; i <= ffmpegutils.QPMaximum; i++ {
+						if vmafStats, found = results[i]; found {
+							if i == ffmpegutils.QPMaximum {
+								finalQP = i
+								return
+							}
+							// we already computed this candidate
+							if !auditor.Validate(vmafStats) {
+								// Invalid, previous was the last valid
+								finalQP = i - 1
+								return
+							}
+							// else continue to go up
+							if *debug {
+								fmt.Fprintf(bypass, "Looking up: candidate %d already computed (valid: %t)\n", i, true)
+							}
+						} else {
+							// we found a candidate for smaller size that we did not compute yet
+							candidateQP = i
+							break
+						}
+					}
+				} else {
+					// else, this candidate does not validate
+					if candidateQP == ffmpegutils.QPMinimum {
+						// but we can not make it better
+						finalQP = candidateQP
+						bestEffort = true
+						return
+					}
+					// Let's take a candidate with better quality
+					for i := candidateQP - 1; i >= ffmpegutils.QPMinimum; i-- {
+						if vmafStats, found = results[i]; found {
+							if i == ffmpegutils.QPMinimum {
+								finalQP = i
+								bestEffort = true
+								return
+							}
+							// we already computed this candidate
+							if auditor.Validate(vmafStats) {
+								// So if it is valid, this is the one we need as all previous are invalid
+								finalQP = i
+								return
+							}
+							// else continue to go down
+							if *debug {
+								fmt.Fprintf(bypass, "Looking down: candidate %d already computed (valid: %t)\n", i, false)
+							}
+						} else {
+							// we found a candidate for better quality that we did not compute yet
+							candidateQP = i
+							break
+						}
+					}
+				}
+			} else if *debug {
+				fmt.Fprintf(bypass, "Predicted candidate %d selected for computation\n", candidateQP)
+			}
+		}
+		if _, alreadyComputed = results[candidateQP]; alreadyComputed {
+			err = fmt.Errorf("quick search candidate %d already computed", candidateQP)
 			return
 		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
-		}
-	}
-	fmt.Fprintln(bypass, "---------------8<---------------")
-	{
-		method = "stddev_interpolation"
-		if methodQP, GOPFrames, nbTries, bestEffort, duration, err = findGOPQPStdDevInterpol(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP GOP %d with method %s: %w", GOP, method, err)
+		// Encode with candidateQP
+		testedQPs = append(testedQPs, candidateQP)
+		GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
+		report = GOPQPOutput + "_vmaf.json"
+		if vmafStats, err = GOPQP(input, GOPQPOutput, report, frameRate, totalFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
+			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
-		methodNbTries[method] += nbTries
-		methodNbFrames[method] += nbTries * GOPFrames
-		if methodQP != finalQP {
-			fmt.Fprintf(bypass, "Different QP found %d != %d (%s)\n", methodQP, finalQP, method)
+		nbTries++
+		results[candidateQP] = vmafStats
+		if auditor.Validate(vmafStats) {
+			min = candidateQP
+		} else {
+			max = candidateQP
 		}
 	}
-	fmt.Fprintln(bypass, "---------------8<---------------")
-	return
 }
 
 func FindCandidate(min, max int, existingResults map[int]ffmpegutils.VMAFStats, auditor VMAFChecker) (candidateQP int, err error) {
@@ -240,14 +358,6 @@ func FindCandidate(min, max int, existingResults map[int]ffmpegutils.VMAFStats, 
 }
 
 func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, qp int, ultraHD, convert10bits bool) (vmafStats ffmpegutils.VMAFStats, err error) {
-	// Check cache
-	var found bool
-	if vmafStats, found = gopQPCache[qp]; found {
-		if *debug {
-			fmt.Fprintf(liveprogress.Bypass(), "Found QP %d results in cache\n", qp)
-		}
-		return
-	}
 	// Encode
 	if err = encodeQP(input, output, totalFrames, qp, convert10bits); err != nil {
 		err = fmt.Errorf("failed to encode GOP: %w", err)
@@ -261,83 +371,5 @@ func GOPQP(input, output, vmafReportPath, frameRate string, totalFrames, GOPID, 
 	if *debug {
 		fmt.Fprintf(liveprogress.Bypass(), "GOP %d: QP %d: VMAF results:\n%s", GOPID, qp, vmafStats)
 	}
-	gopQPCache[qp] = vmafStats
-	return
-}
-
-func computeIdealStartQP(segmentsQP []int, segmentsFrames []int) (idealQPLowestTries, tries, idealQPLowestFrames, frames int) {
-	// Prepare
-	if len(segmentsQP) != len(segmentsFrames) {
-		panic("segmentsQP and segmentsFrames must have the same length")
-	}
-	allTries := make([]int, ffmpegutils.QPMaximum+1)
-	allFrames := make([]int, ffmpegutils.QPMaximum+1)
-	var workers sync.WaitGroup
-	// Compute how many frames would be generated for each startQP given the actual segmentsQP results
-	for startQP := ffmpegutils.QPMinimum; startQP <= ffmpegutils.QPMaximum; startQP++ {
-		workers.Add(1)
-		go func(evaluatedStartQP int) {
-			var totalTries, totalFrames int
-			for segmentIndex, segmentQP := range segmentsQP {
-				var delta, tries int
-				delta = segmentQP - evaluatedStartQP
-				if delta > 0 {
-					tries = delta + 2
-				} else if delta == 0 {
-					if segmentQP == 0 && evaluatedStartQP == 0 {
-						tries = 1
-					} else {
-						tries = 2
-					}
-				} else {
-					// delta < 0
-					tries = -delta + 1
-				}
-				totalTries += tries
-				totalFrames += tries * segmentsFrames[segmentIndex]
-			}
-			allTries[evaluatedStartQP] = totalTries
-			allFrames[evaluatedStartQP] = totalFrames
-			workers.Done()
-		}(startQP)
-	}
-	workers.Wait()
-	// Print results in debug
-	if *debug {
-		for startQP, tries := range allTries {
-			fmt.Fprintf(liveprogress.Bypass(), "With startQP %d there would have %d tries and %d encoded frames\n", startQP, tries, allFrames[startQP])
-		}
-	}
-	// Find the ideal startQP that encodes the least frames and has the least tries
-	workers.Add(2)
-	go func() {
-		var initOK bool
-		for qp, qpTries := range allTries {
-			if !initOK {
-				idealQPLowestTries = qp
-				tries = qpTries
-				initOK = true
-			} else if qpTries < tries {
-				idealQPLowestTries = qp
-				tries = qpTries
-			}
-		}
-		workers.Done()
-	}()
-	go func() {
-		var initOK bool
-		for qp, qpFrames := range allFrames {
-			if !initOK {
-				idealQPLowestFrames = qp
-				frames = qpFrames
-				initOK = true
-			} else if qpFrames < frames {
-				idealQPLowestFrames = qp
-				frames = qpFrames
-			}
-		}
-		workers.Done()
-	}()
-	workers.Wait()
 	return
 }

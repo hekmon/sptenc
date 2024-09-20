@@ -22,17 +22,19 @@ type RunStats struct {
 	Weight int     `json:"weight"`
 }
 
-func (rh *RunHistory) AddRun(qps []int) {
+func (rh *RunHistory) AddRun(qps []int) (mean, stddev float64) {
 	// Convert to float64
 	qpf := make([]float64, len(qps))
 	for i, q := range qps {
 		qpf[i] = float64(q)
 	}
-	// Compute mean and stddev
+	// Prepare the stats object
+	mean, stddev = stat.MeanStdDev(qpf, nil)
 	rs := RunStats{
+		Mean:   mean,
+		StdDev: stddev,
 		Weight: len(qps),
 	}
-	rs.Mean, rs.StdDev = stat.MeanStdDev(qpf, nil)
 	// Avoid the encoding done multiple times to impact the stats
 	for _, prs := range *rh {
 		if prs == rs {
@@ -41,6 +43,7 @@ func (rh *RunHistory) AddRun(qps []int) {
 	}
 	// Add it to the list
 	*rh = append(*rh, rs)
+	return
 }
 
 func (rh *RunHistory) GetMeanStdDev() (mean, stddev int) {
