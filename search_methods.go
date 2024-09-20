@@ -536,7 +536,7 @@ func findGOPQPStdDevQuick(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFC
 		}
 	}()
 	statusLine := liveprogress.AddCustomLine(func() string {
-		return fmt.Sprintf("       GOP | #%d - Searching for QP (quicksearch): %s", GOP, strings.Join(previousQPs, ","))
+		return fmt.Sprintf("       GOP | #%d - Searching for QP (StdDev Quick): %s", GOP, strings.Join(previousQPs, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
 	fmt.Fprintf(bypass, "Starting std dev quick with meanQP %d and std dev %d\n", meanAvg, stdDevAvg)
