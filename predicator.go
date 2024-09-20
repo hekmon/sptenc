@@ -266,4 +266,22 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 	-------------------------------------------------------------------------------
 
 	The Dawn III (data from The Dawn I & II for stddev)
+
+	Method quicksearch: 993 tries
+	Method split_interpolation: 1055 tries
+	Method quick_interpolation: 913 tries
+	Method stddev_quick: 893 tries
+	Method stddev_interpolation: 839 tries
+		Best method for tries is stddev_interpolation with 839 tries.
+
+
+	Method quicksearch: 89403 frames
+	Method split_interpolation: 94104 frames
+	Method quick_interpolation: 81303 frames
+	Method stddev_quick: 79029 frames
+	Method stddev_interpolation: 75060 frames
+		Best method for frames is stddev_interpolation with 75060 frames.
+
+	Manual start QP Ideal QP for lowest tries is 22 with 1096 tries.
+	Manual start QP Ideal QP for lowest frames is 20 with 97403 frames.
 */
