@@ -220,45 +220,10 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 	Manual start QP Ideal QP for lowest tries is 13 with 2223 tries.
 	Manual start QP Ideal QP for lowest frames is 13 with 105695 frames.
 
-
-
-	Method quick_search: 1313 tries
-	Method quick_interpolation_FritschButland: 915 tries
-	Method quick_interpolation_FritschButland-adaptative: 1165 tries
-	Method quick_search: 62722 frames
-	Method quick_interpolation_FritschButland: 44103 frames
-	Method quick_interpolation_FritschButland-adaptative: 55638 frames
-	Best method for tries is quick_interpolation_FritschButland with 915 tries.
-	Best method for frames is quick_interpolation_FritschButland with 44103 frames.
-
-	Manual start QP Ideal QP for lowest tries is 13 with 2223 tries.
-	Manual start QP Ideal QP for lowest frames is 13 with 105695 frames.
-
-	-------------------------------------------------------------------------------
-
-	The Dawn I (with ceilling1)
-
-	Method quicksearch: 530 tries
-	Method quicksearch: 75369 frames
-
-	Method split_interpolation: 605 tries
-	Method split_interpolation: 85914 frames
-
-	Method adaptative: 519 tries
-	Method adaptative: 73779 frames
-
-	Best method for tries is adaptative with 519 tries.
-	Best method for frames is adaptative with 73779 frames.
-	GOP encoding QP search done in 8h15m26s.
-
-	With startQP 20 there would have 559 tries and 77676 encoded frames
-	Manual start QP Ideal QP for lowest tries is 18 with 494 tries.
-	Manual start QP Ideal QP for lowest frames is 18 with 69465 frames.
-
 	-------------------------------------------------------------------------------
 	-------------------------------------------------------------------------------
 
-	The Dawn I (with ceilling2)
+	The Dawn I (no data for stddev)
 
 	Method quicksearch: 530 tries
 	Method split_interpolation: 603 tries
@@ -279,7 +244,7 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 
 	-------------------------------------------------------------------------------
 
-	The Dawn II (with ceilling2)
+	The Dawn II (data from The Dawn I for stddev)
 
 	Method quicksearch: 568 tries
 	Method split_interpolation: 630 tries
@@ -297,4 +262,8 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 
 	Manual start QP Ideal QP for lowest tries is 21 with 583 tries.
 	Manual start QP Ideal QP for lowest frames is 21 with 63732 frames.
+
+	-------------------------------------------------------------------------------
+
+	The Dawn III (data from The Dawn I & II for stddev)
 */
