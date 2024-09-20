@@ -218,7 +218,8 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
 	// Step 2 - Encode GOP
 	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
-	fmt.Fprintf(bypass, "Searching the right QP for each GOP using %f as starting QP and %d as standard deviation range increment...\n")
+	fmt.Fprintf(bypass, "Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
+		meanAvg, stdDevAvg)
 	var (
 		GOPQP   []int
 		statsQP QPStats
