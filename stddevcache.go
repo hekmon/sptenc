@@ -33,6 +33,12 @@ func (rh *RunHistory) AddRun(qps []int) {
 		Weight: len(qps),
 	}
 	rs.Mean, rs.StdDev = stat.MeanStdDev(qpf, nil)
+	// Avoid the encoding done multiple times to impact the stats
+	for _, prs := range *rh {
+		if prs == rs {
+			return
+		}
+	}
 	// Add it to the list
 	*rh = append(*rh, rs)
 }
@@ -77,7 +83,7 @@ func (rh *RunHistory) GetMeanStdDev() (mean, stddev int) {
 }
 
 const (
-	qpstatsFormat = "stpenc_qp_history_%s.json"
+	qpstatsFormat = "sptenc_qp_history_%s.json"
 )
 
 var (
