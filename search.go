@@ -127,7 +127,6 @@ func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, con
 		return fmt.Sprintf("       GOP | #%d - Searching for QP: %s", GOP, strings.Join(testedQPStr, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
-	fmt.Fprintf(bypass, "Starting std dev interpolation with meanQP %d and std dev %d\n", meanAvg, stdDevAvg)
 	// Prepare
 	input := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 	GOPInfos, err := getStreamsInfosCF(input, false)
