@@ -19,7 +19,7 @@ type QPStats struct {
 	GlobalWeighted float64
 }
 
-func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor VMAFChecker, convert10bits bool) (results []int, stats QPStats, err error) {
+func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time.Duration, auditor VMAFChecker, convert10bits bool) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
 		GOPDuration               time.Duration
@@ -56,7 +56,6 @@ func findAllGOPQP(dir string, nbGOP int, globalDuration time.Duration, auditor V
 	defer liveprogress.RemoveBar(bar)
 	// Go
 	start := time.Now()
-	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
 	for GOP := 0; GOP < nbGOP; GOP++ {
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)

@@ -217,7 +217,8 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 	}
 	fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
 	// Step 2 - Encode GOP
-	fmt.Fprintf(bypass, "Searching the right QP for each GOP...\n")
+	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
+	fmt.Fprintf(bypass, "Searching the right QP for each GOP using %f as starting QP and %d as standard deviation range increment...\n")
 	var (
 		GOPQP   []int
 		statsQP QPStats
@@ -228,7 +229,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
 		}
 	}
-	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, stats.Format.Duration, auditor, *force10bits); err != nil {
+	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, *force10bits); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
