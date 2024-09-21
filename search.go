@@ -22,18 +22,17 @@ type QPStats struct {
 func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time.Duration, auditor VMAFChecker, convert10bits bool) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
-		GOPDuration               time.Duration
-		GOPFrames, totalGOPFrames int
-		GOPQP, QPWeights          int
-		GOPSize, allGOPSize       cunits.Bits
-		totalNbTries, GOPNbTries  int
-		bestEffort                bool
-		nbBestEfforts             int
+		GOPDuration                                   time.Duration
+		GOPFrames, totalGOPFrames, totalEncodedFrames int
+		GOPQP, QPWeights                              int
+		GOPSize, allGOPSize                           cunits.Bits
+		totalNbTries, GOPNbTries                      int
+		bestEffort                                    bool
+		nbBestEfforts                                 int
 	)
 	stats.Minimum = ffmpegutils.QPMaximum + 1
 	stats.Maximum = ffmpegutils.QPMinimum - 1
 	results = make([]int, nbGOP)
-	segmentsFrames := make([]int, nbGOP)
 	bypass := liveprogress.Bypass()
 	// Live progress
 	var GOPDone int
@@ -65,8 +64,8 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 			return
 		}
 		results[GOP] = GOPQP
-		segmentsFrames[GOP] = GOPFrames
 		totalGOPFrames += GOPFrames
+		totalEncodedFrames += GOPFrames * GOPNbTries
 		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d tries)\n", GOP, GOPQP, GOPFrames, GOPNbTries)
 		// Compute stats
 		if GOPQP < stats.Minimum {
@@ -92,6 +91,8 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 	duration := time.Since(start)
 	// Done
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
+	fmt.Fprintf(bypass, "For this encode, %d GOP were encoding with %d tries, for a total of %d encoded frames (on %d original frames).\n",
+		nbGOP, totalNbTries, totalEncodedFrames, totalGOPFrames)
 	// Stats
 	gopqpmean, gopqpstddev := previousRuns.AddRun(results)
 	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n",
