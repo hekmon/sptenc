@@ -91,8 +91,8 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 	duration := time.Since(start)
 	// Done
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
-	fmt.Fprintf(bypass, "%d GOP were encoded with %d encoding attempts, for a total of %d encoded frames (on %d original frames).\n",
-		nbGOP, totalNbTries, totalEncodedFrames, totalGOPFrames)
+	fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d GOP (containing %d frames) to their optimal QP.\n",
+		totalNbTries, totalEncodedFrames, nbGOP, totalGOPFrames)
 	// Stats
 	gopqpmean, gopqpstddev := previousRuns.AddRun(results)
 	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n",
