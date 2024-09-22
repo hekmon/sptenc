@@ -89,16 +89,14 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		GOPDone++
 	}
 	duration := time.Since(start)
-	// Done
+	// Done, print and save stats
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
 	fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d GOP (containing %d frames) to their optimal QP.\n",
 		totalNbTries, totalEncodedFrames, nbGOP, totalGOPFrames)
-	// Stats
+	fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(totalNbTries)/float64(nbGOP))
+	fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(totalEncodedFrames)/float64(totalGOPFrames))
 	gopqpmean, gopqpstddev := previousRuns.AddRun(results)
-	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n",
-		strconv.FormatFloat(gopqpmean, 'f', -1, 64),
-		strconv.FormatFloat(gopqpstddev, 'f', -1, 64),
-	)
+	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n", strconv.FormatFloat(gopqpmean, 'f', -1, 64), strconv.FormatFloat(gopqpstddev, 'f', -1, 64))
 	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n",
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
