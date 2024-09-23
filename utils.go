@@ -139,7 +139,7 @@ func MoveProgress(old, new string) (err error) {
 	//// Then create the progress bar for the copy
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(size)),
-		liveprogress.WithLineFillRunes(),
+		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " Moving | "

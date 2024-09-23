@@ -44,7 +44,7 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 	if timeStats {
 		bar = liveprogress.AddBar(
 			liveprogress.WithTotal(uint64(fileInfos.Size())),
-			liveprogress.WithLineFillRunes(),
+			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "   Analyze | "
@@ -61,7 +61,7 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 	} else {
 		bar = liveprogress.AddBar(
 			liveprogress.WithTotal(uint64(fileInfos.Size())),
-			liveprogress.WithLineFillRunes(),
+			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "   Analyze | "
@@ -97,7 +97,7 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
-		liveprogress.WithLineFillRunes(),
+		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " Splitting | "
@@ -150,7 +150,7 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalFrames)),
-		liveprogress.WithLineFillRunes(),
+		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "    Encode | "
@@ -212,7 +212,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	if timeStats {
 		bar = liveprogress.AddBar(
 			liveprogress.WithTotal(uint64(totalFrames)),
-			liveprogress.WithLineFillRunes(),
+			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "      VMAF | "
@@ -229,7 +229,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	} else {
 		bar = liveprogress.AddBar(
 			liveprogress.WithTotal(uint64(totalFrames)),
-			liveprogress.WithLineFillRunes(),
+			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "      VMAF | "
@@ -298,7 +298,7 @@ func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(expectedDuration)),
-		liveprogress.WithLineFillRunes(),
+		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  Merging | "
@@ -346,7 +346,7 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(expectedDuration)),
-		liveprogress.WithLineFillRunes(),
+		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  Remuxing | "
@@ -397,7 +397,7 @@ func regenerateMKVStats(path string) (err error) {
 	// live progress
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(100)),
-		liveprogress.WithLineFillRunes(),
+		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " MKV Stats | "
