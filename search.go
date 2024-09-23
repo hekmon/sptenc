@@ -26,7 +26,7 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		GOPFrames, totalGOPFrames, totalEncodedFrames int
 		GOPQP, QPWeights                              int
 		GOPSize, allGOPSize                           cunits.Bits
-		totalNbTries, GOPNbTries                      int
+		totalNbattempts, GOPNbattempts                int
 		bestEffort                                    bool
 		nbBestEfforts                                 int
 	)
@@ -59,14 +59,14 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		if GOPQP, GOPFrames, GOPNbTries, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
+		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, meanAvg, stdDevAvg, auditor, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
 		results[GOP] = GOPQP
 		totalGOPFrames += GOPFrames
-		totalEncodedFrames += GOPFrames * GOPNbTries
-		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d tries)\n", GOP, GOPQP, GOPFrames, GOPNbTries)
+		totalEncodedFrames += GOPFrames * GOPNbattempts
+		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d attempts)\n", GOP, GOPQP, GOPFrames, GOPNbattempts)
 		// Compute stats
 		if GOPQP < stats.Minimum {
 			stats.Minimum = GOPQP
@@ -80,7 +80,7 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 			return
 		}
 		allGOPSize += GOPSize
-		totalNbTries += GOPNbTries
+		totalNbattempts += GOPNbattempts
 		if bestEffort {
 			nbBestEfforts++
 		}
@@ -92,8 +92,8 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 	// Done, print and save stats
 	fmt.Fprintf(bypass, "GOP QPs: %+v\n", results)
 	fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d GOP (containing %d frames) to their optimal QP.\n",
-		totalNbTries, totalEncodedFrames, nbGOP, totalGOPFrames)
-	fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(totalNbTries)/float64(nbGOP))
+		totalNbattempts, totalEncodedFrames, nbGOP, totalGOPFrames)
+	fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(totalNbattempts)/float64(nbGOP))
 	fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(totalEncodedFrames)/float64(totalGOPFrames))
 	gopqpmean, gopqpstddev := previousRuns.AddRun(results)
 	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n", strconv.FormatFloat(gopqpmean, 'f', -1, 64), strconv.FormatFloat(gopqpstddev, 'f', -1, 64))
@@ -109,7 +109,7 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 	return
 }
 
-func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbTries int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbattempts int, bestEffort bool, duration time.Duration, err error) {
 	// Init
 	bypass := liveprogress.Bypass()
 	testedQPs := make([]int, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
@@ -313,7 +313,7 @@ func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, con
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
-		nbTries++
+		nbattempts++
 		results[candidateQP] = vmafStats
 		if auditor.Validate(vmafStats) {
 			min = candidateQP
