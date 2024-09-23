@@ -183,6 +183,7 @@ func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor VMAFChecker, con
 	defer func() {
 		if finalQP == 0 && !auditor.Validate(results[0]) {
 			bestEffort = true
+			fmt.Fprintf(bypass, "WARNING: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway:\n%s", results[0])
 		}
 	}()
 	var minComputed, maxComputed, found bool
