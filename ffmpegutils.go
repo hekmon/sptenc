@@ -46,6 +46,8 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 			liveprogress.WithTotal(uint64(fileInfos.Size())),
 			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithSameAutoSize(),
+			liveprogress.WithSameAutoSizeInternalPadding(true, false),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "   Analyze | "
 			}),
@@ -63,6 +65,8 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 			liveprogress.WithTotal(uint64(fileInfos.Size())),
 			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithSameAutoSize(),
+			liveprogress.WithSameAutoSizeInternalPadding(true, false),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "   Analyze | "
 			}),
@@ -99,6 +103,8 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 		liveprogress.WithTotal(uint64(totalDuration)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSize(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " Splitting | "
 		}),
@@ -152,6 +158,8 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 		liveprogress.WithTotal(uint64(totalFrames)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSize(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "    Encode | "
 		}),
@@ -214,6 +222,8 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 			liveprogress.WithTotal(uint64(totalFrames)),
 			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithSameAutoSize(),
+			liveprogress.WithSameAutoSizeInternalPadding(true, false),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "      VMAF | "
 			}),
@@ -231,6 +241,8 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 			liveprogress.WithTotal(uint64(totalFrames)),
 			liveprogress.WithMultiplyRunes(),
 			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithSameAutoSize(),
+			liveprogress.WithSameAutoSizeInternalPadding(true, false),
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "      VMAF | "
 			}),
@@ -300,6 +312,8 @@ func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (
 		liveprogress.WithTotal(uint64(expectedDuration)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSize(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  Merging | "
 		}),
@@ -348,6 +362,8 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 		liveprogress.WithTotal(uint64(expectedDuration)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSize(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  Remuxing | "
 		}),
@@ -399,6 +415,8 @@ func regenerateMKVStats(path string) (err error) {
 		liveprogress.WithTotal(uint64(100)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSize(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " MKV Stats | "
 		}),
