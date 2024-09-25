@@ -100,7 +100,7 @@ func main() {
 	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
 	flag.Parse()
 	if *version {
-		fmt.Printf("%s %s\n", liveterm.Hyperlink(sptencURLTagValue, "Sp(li)tEnc(oder)"), Version)
+		fmt.Printf("%s %s\n", liveterm.Hyperlink(sptencURLTagValue, "SplitEncoder"), Version)
 		return
 	}
 	// Validate common flags
