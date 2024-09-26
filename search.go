@@ -40,7 +40,6 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		liveprogress.WithTotal(uint64(globalDuration)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSize(),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "    Global | "

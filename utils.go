@@ -141,7 +141,6 @@ func MoveProgress(old, new string) (err error) {
 		liveprogress.WithTotal(uint64(size)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSize(),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return " Moving | "
