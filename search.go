@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
@@ -187,16 +188,19 @@ func searchGOPQP(input, dir string, GOP, meanAvg, stdDevAvg int, auditor *VMAFCh
 	convert10bits bool, results map[int]ffmpegutils.VMAFStats) (finalQP int, nbattempts int, bestEffort bool, err error) {
 	bypass := liveprogress.Bypass()
 	testedQPs := make([]int, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
+	var testedQPsAccess sync.Mutex
 	defer func() {
 		if *debug {
 			fmt.Fprintf(bypass, "QPs tested: %+v\n", testedQPs)
 		}
 	}()
 	statusLine := liveprogress.AddCustomLine(func() string {
+		testedQPsAccess.Lock()
 		testedQPStr := make([]string, len(testedQPs))
 		for i, qp := range testedQPs {
 			testedQPStr[i] = strconv.Itoa(qp)
 		}
+		testedQPsAccess.Unlock()
 		return fmt.Sprintf("       GOP | #%d - Searching for QP: %s", GOP, strings.Join(testedQPStr, ","))
 	})
 	defer liveprogress.RemoveCustomLine(statusLine)
@@ -329,7 +333,9 @@ func searchGOPQP(input, dir string, GOP, meanAvg, stdDevAvg int, auditor *VMAFCh
 			}
 		}
 		// Test candidate
+		testedQPsAccess.Lock()
 		testedQPs = append(testedQPs, candidateQP)
+		testedQPsAccess.Unlock()
 		if vmafStats, alreadyComputed = results[candidateQP]; !alreadyComputed {
 			// Encode with candidateQP
 			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
