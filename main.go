@@ -90,13 +90,13 @@ func main() {
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
-	vmafLimitMinAlt = flag.Float64("vmafminalt", -1, "VMAF alternate acceptable score for the worst frame. Sometimes (especialy when setting high VMAF config such as 100 in a percentil) even with QP 0 a scene won't match its VMAF config (indicated by best effort in the logs). This can dramatically increase increase output file size. This parameter setup an alternate VMAF validator that only force a minimum value to let the distribution of frames do what it can be that is used if a GOP has reached best effort. Advanced feature, you should start without and consider it if you encounter a lot of best effort GOP results. If -1, this alternate VMAF validator is not used.")
+	vmafLimitMinAlt = flag.Float64("vmafminalt", VMAFOffValue, "VMAF alternate acceptable score for the worst frame. Sometimes (especialy when setting high VMAF config such as 100 in a percentil) even with QP 0 a scene won't match its VMAF config (indicated by best effort in the logs). This can dramatically increase increase output file size. This parameter setup an alternate VMAF validator that only force a minimum value to let the distribution of frames do what it can be that is used if a GOP has reached best effort. Advanced feature, you should start without and consider it if you encounter a lot of best effort GOP results. If -1, this alternate VMAF validator is not used.")
 	vmafLimitMin = flag.Float64("vmafmin", 95, "VMAF acceptable score for the worst frame. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitP5 = flag.Float64("vmafp5", -1, "VMAF acceptable score for percentil 5. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitP10 = flag.Float64("vmafp10", -1, "VMAF acceptable score for percentil 10. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitP25 = flag.Float64("vmafp25", -1, "VMAF acceptable score for percentil 25. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	vmafLimitMedian = flag.Float64("vmafmedian", -1, "VMAF acceptable score for median (percentil 50). If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP5 = flag.Float64("vmafp5", VMAFOffValue, "VMAF acceptable score for percentil 5. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP10 = flag.Float64("vmafp10", VMAFOffValue, "VMAF acceptable score for percentil 10. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitP25 = flag.Float64("vmafp25", VMAFOffValue, "VMAF acceptable score for percentil 25. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
+	vmafLimitMedian = flag.Float64("vmafmedian", VMAFOffValue, "VMAF acceptable score for median (percentil 50). If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitMean = flag.Float64("vmafmean", 99, "VMAF acceptable score for mean. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
@@ -123,11 +123,14 @@ func main() {
 		return
 	}
 	var vmafAuditorAlt *VMAFChecker
-	if *vmafLimitMinAlt != -1 {
-		if vmafAuditorAlt, err = NewVMAFChecker(*vmafLimitMinAlt, -1, -1, -1, -1, -1, -1, -1); err != nil {
+	if *vmafLimitMinAlt != VMAFOffValue {
+		if vmafAuditorAlt, err = NewVMAFChecker(*vmafLimitMinAlt, VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to create VMAF alt auditor: %s\n", err)
 			exitCode = 1
 			return
+		}
+		if *vmafLimitMinAlt <= *vmafLimitMin {
+			fmt.Fprintln(os.Stdout, "WARNING: VMAF alt minimum limit is lower than the VMAF minimum limit (weird)")
 		}
 	}
 	// Switch to full paths
@@ -212,6 +215,9 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 	}
 	//// Allow user to visually check its VMAF configuration
 	fmt.Fprintf(bypass, "Each GOP encoding will have to reach theses VMAF scores:\n%s", auditor)
+	if auditorAlt != nil {
+		fmt.Fprintf(bypass, "Alternative VMAF configuration for GOP reaching QP 0 as best effort:\n%s", auditorAlt)
+	}
 	// Step 1 - Split file by GOP
 	fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
 	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
