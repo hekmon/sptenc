@@ -33,6 +33,7 @@ var (
 	//// vmaf
 	vmafcuda        *bool
 	vmafNEG         *bool
+	vmafLimitMinAlt *float64
 	vmafLimitMin    *float64
 	vmafLimitP1     *float64
 	vmafLimitP5     *float64
@@ -89,6 +90,7 @@ func main() {
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
+	vmafLimitMinAlt = flag.Float64("vmafminalt", -1, "VMAF alternate acceptable score for the worst frame. Sometimes (especialy when setting high VMAF config such as 100 in the percentils) even with QP 0 a scene won't match its VMAF config (indicated by best effort in the logs). This can dramatically increase increase outptu file size. This parameter setup an alternate VMAF validator only used if a GOP has reached best effort. If -1, this alternate VMAF validator is not used.")
 	vmafLimitMin = flag.Float64("vmafmin", 95, "VMAF acceptable score for the worst frame. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitP5 = flag.Float64("vmafp5", -1, "VMAF acceptable score for percentil 5. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
@@ -119,6 +121,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to create VMAF auditor: %s\n", err)
 		exitCode = 1
 		return
+	}
+	var vmafAuditorAlt *VMAFChecker
+	if *vmafLimitMinAlt != -1 {
+		if vmafAuditorAlt, err = NewVMAFChecker(*vmafLimitMinAlt, -1, -1, -1, -1, -1, -1, -1); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create VMAF alt auditor: %s\n", err)
+			exitCode = 1
+			return
+		}
 	}
 	// Switch to full paths
 	currentWorkingDirectory, err := os.Getwd()
@@ -171,14 +181,14 @@ func main() {
 	}()
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
-	exitCode = sptenc(vmafAuditor)
+	exitCode = sptenc(vmafAuditor, vmafAuditorAlt)
 	if interrupted {
 		// Freeze
 		<-make(chan struct{})
 	}
 }
 
-func sptenc(auditor VMAFChecker) (exitCode int) {
+func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 	var err error
 	bypass := liveprogress.Bypass()
 	start := time.Now()
@@ -230,7 +240,7 @@ func sptenc(auditor VMAFChecker) (exitCode int) {
 			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
 		}
 	}
-	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, *force10bits); err != nil {
+	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, auditorAlt, *force10bits); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
