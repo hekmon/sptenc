@@ -22,7 +22,7 @@ type RunStats struct {
 	Weight int     `json:"weight"`
 }
 
-func (rh *RunHistory) AddRun(qps []int) (mean, stddev float64) {
+func (rh *RunHistory) AddRun(qps []int) (mean, stddev float64, err error) {
 	// Convert to float64
 	qpf := make([]float64, len(qps))
 	for i, q := range qps {
@@ -41,8 +41,18 @@ func (rh *RunHistory) AddRun(qps []int) (mean, stddev float64) {
 			return
 		}
 	}
+	// Just in case there is multiples instances of sptenc running, reload before adding
+	if err = loadStats(); err != nil {
+		err = fmt.Errorf("failed to reload file: %w", err)
+		return
+	}
 	// Add it to the list
 	*rh = append(*rh, rs)
+	// Save file
+	if err = saveStats(); err != nil {
+		err = fmt.Errorf("failed to save file: %w", err)
+		return
+	}
 	return
 }
 

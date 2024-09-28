@@ -96,7 +96,11 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		totalNbattempts, totalEncodedFrames, nbGOP, totalGOPFrames)
 	fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(totalNbattempts)/float64(nbGOP))
 	fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(totalEncodedFrames)/float64(totalGOPFrames))
-	gopqpmean, gopqpstddev := previousRuns.AddRun(results)
+	gopqpmean, gopqpstddev, err := previousRuns.AddRun(results)
+	if err != nil {
+		fmt.Fprintf(bypass, "failed to save mean and stddev of QPs for next run: %s\n", err)
+		err = nil // do not return, not critical
+	}
 	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n", strconv.FormatFloat(gopqpmean, 'f', -1, 64), strconv.FormatFloat(gopqpstddev, 'f', -1, 64))
 	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n",

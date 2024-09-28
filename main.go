@@ -156,15 +156,6 @@ func main() {
 		exitCode = 1
 		return
 	}
-	defer func() {
-		if err = saveStats(); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to save ideal QPs: %s\n", err)
-			if exitCode == 0 {
-				exitCode = 1
-			}
-			return
-		}
-	}()
 	// Properly handle stop
 	runCtx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	go cleanStop(runCtx)
