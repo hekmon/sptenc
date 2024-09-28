@@ -21,6 +21,7 @@ const (
 	// VMAF Infos
 	sptencVMAFModelTagKey = "sptenc_vmaf_model"
 	// VMAF Conf
+	sptencVMAFConfMinAltTagKey = "sptenc_vmaf_conf_min_alt"
 	sptencVMAFConfMinTagKey    = "sptenc_vmaf_conf_min"
 	sptencVMAFConfP1TagKey     = "sptenc_vmaf_conf_p1"
 	sptencVMAFConfP5TagKey     = "sptenc_vmaf_conf_p5"
@@ -69,6 +70,9 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	// VMAF
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, ffmpegutils.VMAFModel(ultraHD, *vmafNEG)))
 	//// VMAF conf
+	if *vmafLimitMinAlt != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMinAltTagKey, strconv.FormatFloat(*vmafLimitMinAlt, 'f', -1, 64)))
+	}
 	if *vmafLimitMin != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMinTagKey, strconv.FormatFloat(*vmafLimitMin, 'f', -1, 64)))
 	}
