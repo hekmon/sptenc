@@ -169,6 +169,9 @@ func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor, auditorAlt *VMA
 				err = fmt.Errorf("failed to search GOP QP with alternate validator: %w", err)
 				return
 			}
+			if bestEffort {
+				fmt.Fprintf(bypass, "WARNING: Still impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway:\n%s", results[ffmpegutils.QPMinimum])
+			}
 			nbAttempts += nbAttemptsAlt
 		} else {
 			fmt.Fprintf(bypass, "WARNING: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway:\n%s", results[ffmpegutils.QPMinimum])
