@@ -324,21 +324,20 @@ func searchGOPQP(input, dir string, GOP, meanAvg, stdDevAvg int, auditor *VMAFCh
 				fmt.Fprintf(bypass, "Predicted candidate %d selected for computation\n", candidateQP)
 			}
 		}
-		if _, alreadyComputed = results[candidateQP]; alreadyComputed {
-			err = fmt.Errorf("quick search candidate %d already computed", candidateQP)
-			return
-		}
-		// Encode with candidateQP
+		// Test candidate
 		testedQPs = append(testedQPs, candidateQP)
-		GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
-		report = GOPQPOutput + "_vmaf.json"
-		ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
-		if vmafStats, err = GOPQP(input, GOPQPOutput, report, videoTrack.RFrameRate, videoTrack.NbReadFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
-			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
-			return
-		}
-		nbattempts++
-		results[candidateQP] = vmafStats
+		if vmafStats, alreadyComputed = results[candidateQP]; !alreadyComputed {
+			// Encode with candidateQP
+			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
+			report = GOPQPOutput + "_vmaf.json"
+			ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
+			if vmafStats, err = GOPQP(input, GOPQPOutput, report, videoTrack.RFrameRate, videoTrack.NbReadFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
+				err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
+				return
+			}
+			nbattempts++
+			results[candidateQP] = vmafStats
+		} // else we might be within the second pass with the alternate auditor and have encountered an already encoded candidate during the first pass
 		if auditor.Validate(vmafStats) {
 			min = candidateQP
 		} else {
