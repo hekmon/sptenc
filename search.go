@@ -28,8 +28,8 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		GOPQP, QPWeights                              int
 		GOPSize, allGOPSize                           cunits.Bits
 		totalNbattempts, GOPNbattempts                int
-		bestEffort                                    bool
-		nbBestEfforts                                 int
+		bestEffort, alternateVMAF                     bool
+		nbBestEfforts, nbAlternateVMAF                int
 	)
 	stats.Minimum = ffmpegutils.QPMaximum + 1
 	stats.Maximum = ffmpegutils.QPMinimum - 1
@@ -61,7 +61,7 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, GOPDuration, err = findGOPQP(dir, GOP, meanAvg, stdDevAvg, auditor, auditorAlt, convert10bits); err != nil {
+		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, alternateVMAF, GOPDuration, err = findGOPQP(dir, GOP, meanAvg, stdDevAvg, auditor, auditorAlt, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -85,6 +85,9 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		totalNbattempts += GOPNbattempts
 		if bestEffort {
 			nbBestEfforts++
+		}
+		if alternateVMAF {
+			nbAlternateVMAF++
 		}
 		// Update live progress
 		bar.CurrentAdd(uint64(GOPDuration))
@@ -111,11 +114,15 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
 			nbBestEfforts)
 	}
+	if nbAlternateVMAF > 0 {
+		fmt.Fprintf(bypass, "INFO: %d GOP were encoded with alternate VMAF config, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
+			nbAlternateVMAF)
+	}
 	fmt.Fprintf(bypass, "GOP encoding QP search done in %s.\n", duration.Round(time.Second))
 	return
 }
 
-func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor, auditorAlt *VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
+func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor, auditorAlt *VMAFChecker, convert10bits bool) (finalQP, GOPFrames, nbAttempts int, bestEffort, alternateVMAF bool, duration time.Duration, err error) {
 	// Init
 	bypass := liveprogress.Bypass()
 	// Prepare
@@ -177,6 +184,7 @@ func findGOPQP(dir string, GOP, meanAvg, stdDevAvg int, auditor, auditorAlt *VMA
 				fmt.Fprintf(bypass, "WARNING: Still impossible to validate with alternate VMAF config, keeping the lowest possible QP (highest quality) anyway.\n")
 			} else {
 				fmt.Fprintf(bypass, "SUCCESS: Validated VMAF alternate config:\n%s", results[finalQP])
+				alternateVMAF = true
 			}
 			nbAttempts += nbAttemptsAlt
 		} else {
