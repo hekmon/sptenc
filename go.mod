@@ -2,15 +2,12 @@ module github.com/hekmon/sptenc
 
 go 1.22.5
 
-replace (
-	github.com/hekmon/ffmpegutils => ../ffmpegutils
-	github.com/hekmon/liveprogress/v2 => ../liveprogress
-)
+replace github.com/hekmon/ffmpegutils => ../ffmpegutils
 
 require (
 	github.com/hekmon/cunits/v2 v2.1.0
 	github.com/hekmon/ffmpegutils v1.0.0
-	github.com/hekmon/liveprogress/v2 v2.0.4
+	github.com/hekmon/liveprogress/v2 v2.1.0
 	github.com/hekmon/liveterm/v2 v2.5.0
 	github.com/olekukonko/tablewriter v0.0.5
 	gonum.org/v1/gonum v0.15.1
