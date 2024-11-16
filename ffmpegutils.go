@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/hekmon/cunits/v2"
@@ -150,7 +149,6 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 		preset = ffmpegutils.Libx265PresetSlow
 	}
 	// live progress
-	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalFrames)),
 		liveprogress.WithMultiplyRunes(),
@@ -163,16 +161,11 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			var build strings.Builder
-			build.WriteString(fmt.Sprintf(" | %d/%d frames (%0.0f fps, speed: %0.2fx)",
-				currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
-			))
-			return build.String()
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
 	progress := func(stats ffmpegutils.ProgressStats) {
-		currentStats = stats
 		bar.CurrentSet(uint64(stats.CurrentFrame))
 	}
 	// Execute
@@ -209,10 +202,7 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 
 func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (vmaf ffmpegutils.VMAFStats, err error) {
 	// live progress
-	var (
-		currentStats ffmpegutils.ProgressStats
-		bar          *liveprogress.Bar
-	)
+	var bar *liveprogress.Bar
 	if timeStats {
 		bar = liveprogress.AddBar(
 			liveprogress.WithTotal(uint64(totalFrames)),
@@ -226,9 +216,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 			liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-				return fmt.Sprintf(" left | %d/%d frames (%0.0f fps, speed: %0.2fx)",
-					currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
-				)
+				return fmt.Sprintf(" left | %d/%d frames", bar.Current(), bar.Total())
 			}),
 		)
 	} else {
@@ -244,15 +232,12 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 			// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-				return fmt.Sprintf(" | %d/%d frames (%0.0f fps, speed: %0.2fx)",
-					currentStats.CurrentFrame, totalFrames, currentStats.FPS, currentStats.Speed,
-				)
+				return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
 			}),
 		)
 	}
 	defer liveprogress.RemoveBar(bar)
 	progress := func(stats ffmpegutils.ProgressStats) {
-		currentStats = stats
 		bar.CurrentSet(uint64(stats.CurrentFrame))
 	}
 	// Execute
