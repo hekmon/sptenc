@@ -11,6 +11,11 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
+const (
+	nvencProfile = ffmpegutils.NVENCPresetP7
+	x265Profile  = ffmpegutils.Libx265PresetSlow
+)
+
 func debugPrint(s string) {
 	if *debug {
 		fmt.Fprintf(liveprogress.Bypass(), "%s\n", s)
@@ -142,9 +147,9 @@ func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, co
 	// Prepare
 	var preset ffmpegutils.EncodingPreset
 	if *nvenc {
-		preset = ffmpegutils.NVENCPresetP5
+		preset = nvencProfile
 	} else {
-		preset = ffmpegutils.Libx265PresetSlow
+		preset = x265Profile
 	}
 	// live progress
 	bar := liveprogress.AddBar(
