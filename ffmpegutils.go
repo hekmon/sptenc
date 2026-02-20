@@ -178,10 +178,9 @@ func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, co
 		Tags:            nil,
 		OutputFilePath:  output,
 		// Hardware Acceleration
-		Libx265HeavyMultiThreading: *heavyMultithreading,
-		NVDEC:                      *nvdec,
-		NVENC:                      *nvenc,
-		GPUID:                      gpu,
+		NVDEC: *nvdec,
+		NVENC: *nvenc,
+		GPUID: gpu,
 		// Reporting
 		Debug:             debugPrint,
 		RuntimeError:      runtimeError,

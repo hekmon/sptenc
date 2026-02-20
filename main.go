@@ -19,17 +19,16 @@ var (
 	//  overrided during compilation
 	Version = "dev"
 	// Flags
-	input               *string
-	tmpDir              *string
-	output              *string
-	gpu                 *int
-	heavyMultithreading *bool
-	nvdec               *bool
-	nvenc               *bool
-	force10bits         *bool
-	flac                *bool
-	debug               *bool
-	keep                *bool
+	input       *string
+	tmpDir      *string
+	output      *string
+	gpu         *int
+	nvdec       *bool
+	nvenc       *bool
+	force10bits *bool
+	flac        *bool
+	debug       *bool
+	keep        *bool
 	//// vmaf
 	vmafcuda        *bool
 	vmafNEG         *bool
@@ -79,7 +78,6 @@ func main() {
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
-	heavyMultithreading = flag.Bool("heavymt", false, "Use heavy multithreading for libx265 encoding. Only recommended if you have more than 1 CPU socket and CPU usage is not already saturating the CPU cores. Has no effect if -nvenc is set.")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality.")
 	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This is normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
