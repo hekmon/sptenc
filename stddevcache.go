@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 
 	"github.com/hekmon/ffmpegutils"
@@ -36,10 +37,8 @@ func (rh *RunHistory) AddRun(qps []int) (mean, stddev float64, err error) {
 		Weight: len(qps),
 	}
 	// Avoid the encoding done multiple times to impact the stats
-	for _, prs := range *rh {
-		if prs == rs {
-			return
-		}
+	if slices.Contains(*rh, rs) {
+		return
 	}
 	// Just in case there is multiples instances of sptenc running, reload before adding
 	if err = loadStats(); err != nil {

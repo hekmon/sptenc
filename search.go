@@ -57,7 +57,7 @@ func findAllGOPQP(dir string, nbGOP, meanAvg, stdDevAvg int, globalDuration time
 	defer liveprogress.RemoveBar(bar)
 	// Go
 	start := time.Now()
-	for GOP := 0; GOP < nbGOP; GOP++ {
+	for GOP := range nbGOP {
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
