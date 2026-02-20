@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -20,18 +21,17 @@ func runtimeError(err error) {
 	fmt.Fprintf(liveprogress.Bypass(), "%s\n", err)
 }
 
-func getStreamsInfos(path string) (stats ffmpegutils.FFProbeStats, err error) {
-	return ffmpegutils.GetStreamsInfos(ffmpegutils.GetStreamsInfosConfig{
+func getStreamsInfos(ctx context.Context, path string) (stats ffmpegutils.FFProbeStats, err error) {
+	return ffmpegutils.GetStreamsInfos(ctx, ffmpegutils.GetStreamsInfosConfig{
 		// Input
 		Path: path,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
+		Debug:        debugPrint,
+		RuntimeError: runtimeError,
 	})
 }
 
-func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeStats, err error) {
+func getStreamsInfosCF(ctx context.Context, path string, timeStats bool) (stats ffmpegutils.FFProbeStats, err error) {
 	// Prepare
 	fileInfos, err := os.Stat(path)
 	if err != nil {
@@ -80,20 +80,19 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 		bar.CurrentAdd(uint64(n))
 	}
 	// Execute
-	return ffmpegutils.GetStreamsInfosCF(ffmpegutils.GetStreamsInfosCFConfig{
+	return ffmpegutils.GetStreamsInfosCF(ctx, ffmpegutils.GetStreamsInfosCFConfig{
 		GetStreamsInfosConfig: ffmpegutils.GetStreamsInfosConfig{
 			// Input
 			Path: path,
 			// Reporting
-			Debug:               debugPrint,
-			RuntimeError:        runtimeError,
-			ProcessRegistration: children.ProcessRegistration,
+			Debug:        debugPrint,
+			RuntimeError: runtimeError,
 		},
 		ReadBytesReport: progress,
 	})
 }
 
-func splitFile(path, outputDir string, totalDuration time.Duration) (err error) {
+func splitFile(ctx context.Context, path, outputDir string, totalDuration time.Duration) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -120,17 +119,16 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.Segment(ffmpegutils.SegmentConfig{
+	if err = ffmpegutils.Segment(ctx, ffmpegutils.SegmentConfig{
 		// Input
 		Input: path,
 		// Output
 		OutputDir:       outputDir,
 		ResetTimestamps: true,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   progress,
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
 	}); err != nil {
 		return
 	}
@@ -140,7 +138,7 @@ func splitFile(path, outputDir string, totalDuration time.Duration) (err error) 
 	return
 }
 
-func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (err error) {
+func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, convert10bits bool) (err error) {
 	// Prepare
 	var preset ffmpegutils.EncodingPreset
 	if *nvenc {
@@ -170,7 +168,7 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.AnimeEncode(ffmpegutils.AnimeEncodeConfig{
+	if err = ffmpegutils.AnimeEncode(ctx, ffmpegutils.AnimeEncodeConfig{
 		// Input
 		Input: input,
 		// Output
@@ -185,10 +183,9 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 		NVENC:                      *nvenc,
 		GPUID:                      gpu,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   progress,
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
 	}); err != nil {
 		return
 	}
@@ -200,7 +197,7 @@ func encodeQP(input, output string, totalFrames, qp int, convert10bits bool) (er
 	return
 }
 
-func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (vmaf ffmpegutils.VMAFStats, err error) {
+func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (vmaf ffmpegutils.VMAFStats, err error) {
 	// live progress
 	var bar *liveprogress.Bar
 	if timeStats {
@@ -242,7 +239,7 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 	}
 	// Execute
 	start := time.Now()
-	report, err := ffmpegutils.VMAFCompute(ffmpegutils.VMAFComputeConfig{
+	report, err := ffmpegutils.VMAFCompute(ctx, ffmpegutils.VMAFComputeConfig{
 		// Input
 		ReferencePath:  reference,
 		InputFrameRate: frameRate,
@@ -255,10 +252,9 @@ func computeVMAF(distorted, reference, reportPath, frameRate string, totalFrames
 		VMAFCuda:          *vmafcuda,
 		GPUID:             gpu,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   progress,
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
 	})
 	if err != nil {
 		return
@@ -284,7 +280,7 @@ func generateConcatScript(segmentsDir string, qps []int) (concatScriptPath strin
 	return
 }
 
-func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (err error) {
+func GOPMerge(ctx context.Context, concatScript, outputPath string, expectedDuration time.Duration) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -311,15 +307,14 @@ func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.Concat(ffmpegutils.ConcatConfig{
+	if err = ffmpegutils.Concat(ctx, ffmpegutils.ConcatConfig{
 		// Input
 		ConcatScriptPath: concatScript,
 		OutputPath:       outputPath,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   progress,
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
 	}); err != nil {
 		return
 	}
@@ -333,7 +328,7 @@ func GOPMerge(concatScript, outputPath string, expectedDuration time.Duration) (
 	return
 }
 
-func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expectedDuration time.Duration, convertFlac bool) (err error) {
+func Remux(ctx context.Context, originalFile, newVideo, outputPath string, tagsFlags []string, expectedDuration time.Duration, convertFlac bool) (err error) {
 	// live progress
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
@@ -360,7 +355,7 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.Remux(ffmpegutils.RemuxConfig{
+	if err = ffmpegutils.Remux(ctx, ffmpegutils.RemuxConfig{
 		// Input
 		OriginalFile: originalFile,
 		NewVideoFile: newVideo,
@@ -369,10 +364,9 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 		Tags:           tagsFlags,
 		FLAC:           convertFlac,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
-		FFMPEGStatsReport:   progress,
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
 	}); err != nil {
 		return
 	}
@@ -386,7 +380,7 @@ func Remux(originalFile, newVideo, outputPath string, tagsFlags []string, expect
 	return
 }
 
-func regenerateMKVStats(path string) (err error) {
+func regenerateMKVStats(ctx context.Context, path string) (err error) {
 	// live progress
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(100)),
@@ -409,14 +403,13 @@ func regenerateMKVStats(path string) (err error) {
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.GenerateMKVStats(ffmpegutils.GenerateMKVStatsConfig{
+	if err = ffmpegutils.GenerateMKVStats(ctx, ffmpegutils.GenerateMKVStatsConfig{
 		// Input
 		Path: path,
 		// Reporting
-		Debug:               debugPrint,
-		RuntimeError:        runtimeError,
-		ProcessRegistration: children.ProcessRegistration,
-		ProgressReport:      progress,
+		Debug:          debugPrint,
+		RuntimeError:   runtimeError,
+		ProgressReport: progress,
 	}); err != nil {
 		return
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -60,12 +61,12 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 	return
 }
 
-func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err error) {
+func filesCheck(ctx context.Context, original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err error) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Get original file stats
 	cl := liveprogress.AddCustomLine(func() string { return "           | Checking original file..." })
-	originalStats, err := getStreamsInfosCF(original, true)
+	originalStats, err := getStreamsInfosCF(ctx, original, true)
 	if err != nil {
 		liveprogress.RemoveCustomLine(cl)
 		err = fmt.Errorf("failed to get original file stats: %w", err)
@@ -74,7 +75,7 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	liveprogress.RemoveCustomLine(cl)
 	// Get reencoded file stats
 	cl = liveprogress.AddCustomLine(func() string { return "           | Checking encoded file..." })
-	encodedStats, err := getStreamsInfosCF(encoded, true)
+	encodedStats, err := getStreamsInfosCF(ctx, encoded, true)
 	if err != nil {
 		liveprogress.RemoveCustomLine(cl)
 		err = fmt.Errorf("failed to get reencoded file stats: %w", err)
@@ -94,7 +95,7 @@ func filesCheck(original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err
 	// Now compute their VMAF together
 	encodedVideoTrack := encodedStats.VideoTrack()
 	start = time.Now()
-	vmaf, err := computeVMAF(encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, encodedVideoTrack.NbReadFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight, true)
+	vmaf, err := computeVMAF(ctx, encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, encodedVideoTrack.NbReadFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight, true)
 	if err != nil {
 		err = fmt.Errorf("failed to compute VMAF: %w", err)
 		return

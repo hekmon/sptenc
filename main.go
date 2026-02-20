@@ -43,7 +43,6 @@ var (
 	vmafLimitHMean  *float64
 	vmafLimitMean   *float64
 	// Run
-	children         Children
 	workingDirectory string
 	interrupted      bool
 )
@@ -158,7 +157,6 @@ func main() {
 	}
 	// Properly handle stop
 	runCtx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	go cleanStop(runCtx)
 	// Prepare live output
 	if err = liveprogress.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start liveprogress: %s\n", err)
@@ -166,7 +164,7 @@ func main() {
 		return
 	}
 	defer func() {
-		if err = liveprogress.Stop(true); err != nil {
+		if err = liveprogress.Stop(exitCode == 0); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to stop liveprogress: %s\n", err)
 			if exitCode == 0 {
 				exitCode = 3
@@ -175,14 +173,10 @@ func main() {
 	}()
 	// Ready, start processing
 	liveprogress.AddCustomLine(func() string { return "" }) // separate logs and progress
-	exitCode = sptenc(vmafAuditor, vmafAuditorAlt)
-	if interrupted {
-		// Freeze
-		<-make(chan struct{})
-	}
+	exitCode = sptenc(runCtx, vmafAuditor, vmafAuditorAlt)
 }
 
-func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
+func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int) {
 	var err error
 	bypass := liveprogress.Bypass()
 	start := time.Now()
@@ -198,7 +192,7 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 		fmt.Fprintf(bypass, "Working directory: %s\n", workingDirectory)
 	}
 	//// Input file container infos
-	stats, err := getStreamsInfos(*input)
+	stats, err := getStreamsInfos(ctx, *input)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
 		exitCode = 2
@@ -211,7 +205,7 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 	}
 	// Step 1 - Split file by GOP
 	fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
-	if err = splitFile(*input, workingDirectory, stats.Format.Duration); err != nil {
+	if err = splitFile(ctx, *input, workingDirectory, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
 		exitCode = 2
 		return
@@ -237,7 +231,7 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
 		}
 	}
-	if GOPQP, statsQP, err = findAllGOPQP(workingDirectory, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, auditorAlt, *force10bits); err != nil {
+	if GOPQP, statsQP, err = findAllGOPQP(ctx, workingDirectory, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, auditorAlt, *force10bits); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
@@ -251,14 +245,14 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 		return
 	}
 	concatVideoPath := filepath.Join(workingDirectory, "concat.mkv")
-	if err = GOPMerge(concatScriptPath, concatVideoPath, stats.Format.Duration); err != nil {
+	if err = GOPMerge(ctx, concatScriptPath, concatVideoPath, stats.Format.Duration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge encoded GOP: %s\n", err)
 		exitCode = 2
 		return
 	}
 	fmt.Fprintf(bypass, "Checking result...\n")
 	var vmafStats *ffmpegutils.VMAFStats
-	if vmafStats, err = filesCheck(*input, concatVideoPath); err != nil {
+	if vmafStats, err = filesCheck(ctx, *input, concatVideoPath); err != nil {
 		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
 		exitCode = 2
 		return
@@ -277,7 +271,7 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 			}
 		}
 	}
-	if err = Remux(*input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration, convertFlac); err != nil {
+	if err = Remux(ctx, *input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration, convertFlac); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
 		return
@@ -291,7 +285,7 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 	fmt.Fprintf(bypass, "Final file %q size: %s\n", filepath.Base(finalFilePath), finalFileSize)
 	// Step 5 - Recompute MKV stats if necessary
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
-	if err = regenerateMKVStats(finalFilePath); err != nil {
+	if err = regenerateMKVStats(ctx, finalFilePath); err != nil {
 		fmt.Fprintf(bypass, "Failed to regenerate MKV stats: %s\n", err)
 		exitCode = 2
 		return
@@ -309,22 +303,4 @@ func sptenc(auditor, auditorAlt *VMAFChecker) (exitCode int) {
 	duration := time.Since(start)
 	fmt.Fprintf(bypass, "Complete process took %s\n", duration.Round(time.Second))
 	return
-}
-
-func cleanStop(ctx context.Context) {
-	var err error
-	<-ctx.Done()
-	interrupted = true
-	fmt.Fprintf(liveprogress.Bypass(), "Stop signal catched, stopping...\n")
-	// Stop subprocess if any
-	if err = children.StopAndWait(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to stop and wait for current child process(es): %s\n", err)
-	}
-	// Cleanup
-	cleanUpTMPFiles(workingDirectory)
-	// Stop UI
-	if err = liveprogress.Stop(false); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to stop liveprogress properly: %s\n", err)
-	}
-	os.Exit(3)
 }
