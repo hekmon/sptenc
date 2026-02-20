@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/hekmon/cunits/v2"
+	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -54,7 +54,7 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 			liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 				return fmt.Sprintf(" left | %s/%s",
-					cunits.ImportInByte(float64(bar.Current())), cunits.ImportInByte(float64(bar.Total())),
+					cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
 				)
 			}),
 		)
@@ -70,7 +70,7 @@ func getStreamsInfosCF(path string, timeStats bool) (stats ffmpegutils.FFProbeSt
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 				return fmt.Sprintf(" | %s/%s",
-					cunits.ImportInByte(float64(bar.Current())), cunits.ImportInByte(float64(bar.Total())),
+					cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
 				)
 			}),
 		)

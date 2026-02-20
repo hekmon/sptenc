@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/hekmon/cunits/v2"
+	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
@@ -56,7 +56,7 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 		err = fmt.Errorf("failed to stat path: %w", err)
 		return
 	}
-	size = cunits.ImportInByte(float64(info.Size()))
+	size = cunits.ImportInBytes(float64(info.Size()))
 	return
 }
 
@@ -150,8 +150,8 @@ func MoveProgress(old, new string) (err error) {
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			return fmt.Sprintf(" left | %s/%s copied",
-				cunits.ImportInByte(float64(bar.Current())),
-				cunits.ImportInByte(float64(bar.Total())),
+				cunits.ImportInBytes(float64(bar.Current())),
+				cunits.ImportInBytes(float64(bar.Total())),
 			)
 		}),
 	)

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hekmon/cunits/v2"
+	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 )
