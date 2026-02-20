@@ -8,6 +8,8 @@ import (
 
 	"github.com/hekmon/ffmpegutils"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
 const (
@@ -108,7 +110,52 @@ func (vc VMAFChecker) Validate(stats ffmpegutils.VMAFStats) bool {
 
 func (vc VMAFChecker) String() string {
 	var tableBuffer strings.Builder
-	table := tablewriter.NewWriter(&tableBuffer)
+	// Prepare alignment config for all columns
+	alignments := make([]tw.Align, 0, 9)
+	if vc.min != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.p1 != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.p5 != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.p10 != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.p25 != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.median != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.hmean != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	if vc.mean != VMAFOffValue {
+		alignments = append(alignments, tw.AlignCenter)
+	}
+	// Create table with custom symbols and alignment
+	symbols := tw.NewSymbolCustom("custom").
+		WithCenter("┼").
+		WithRow("─").
+		WithColumn("│")
+	table := tablewriter.NewTable(&tableBuffer,
+		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
+			Borders:  tw.BorderNone,
+			Symbols:  symbols,
+			Settings: tw.Settings{Separators: tw.Separators{BetweenColumns: tw.On}},
+		})),
+		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Alignment: tw.CellAlignment{PerColumn: alignments},
+			},
+			Row: tw.CellConfig{
+				Alignment: tw.CellAlignment{PerColumn: alignments},
+			},
+		}),
+	)
 	// headers
 	headers := make([]string, 0, 9)
 	if vc.min != VMAFOffValue {
@@ -135,7 +182,7 @@ func (vc VMAFChecker) String() string {
 	if vc.mean != VMAFOffValue {
 		headers = append(headers, "Mean")
 	}
-	table.SetHeader(headers)
+	table.Header(headers)
 	// body
 	body := make([]string, 0, 9)
 	if vc.min != VMAFOffValue {
@@ -163,22 +210,6 @@ func (vc VMAFChecker) String() string {
 		body = append(body, strconv.FormatFloat(vc.mean, 'f', -1, 64))
 	}
 	table.Append(body)
-	// Style
-	table.SetColumnAlignment([]int{
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-		tablewriter.ALIGN_CENTER,
-	})
-	table.SetCenterSeparator("┼")
-	table.SetRowSeparator("─")
-	table.SetColumnSeparator("│")
-	table.SetBorder(false)
 	// Build table
 	table.Render()
 	return tableBuffer.String()
