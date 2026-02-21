@@ -21,7 +21,10 @@ type QPStats struct {
 	GlobalWeighted float64
 }
 
-func findAllGOPQP(ctx context.Context, dir string, segmentPaths []string, nbGOP, meanAvg, stdDevAvg int, globalDuration time.Duration, auditor, auditorAlt *VMAFChecker, convert10bits bool) (results []int, stats QPStats, aggregatedVMAF *ffmpegutils.VMAFStats, err error) {
+func findAllGOPQP(
+	ctx context.Context, dir string, segmentPaths []string, nbGOP, meanAvg, stdDevAvg int,
+	globalDuration time.Duration, auditor, auditorAlt *VMAFChecker, convert10bits bool,
+) (results []int, stats QPStats, aggregatedVMAF *ffmpegutils.VMAFStats, err error) {
 	// Prepare
 	var (
 		GOPDuration                                   time.Duration
@@ -79,7 +82,8 @@ func findAllGOPQP(ctx context.Context, dir string, segmentPaths []string, nbGOP,
 		if segmentPaths != nil && GOP < len(segmentPaths) {
 			inputPath = segmentPaths[GOP]
 		}
-		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, alternateVMAF, GOPDuration, gopVMAF, err = findGOPQP(ctx, dir, inputPath, GOP, meanAvg, stdDevAvg, auditor, auditorAlt, convert10bits); err != nil {
+		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, alternateVMAF, GOPDuration, gopVMAF, err = findGOPQP(
+			ctx, dir, inputPath, GOP, meanAvg, stdDevAvg, auditor, auditorAlt, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
 		}
@@ -103,7 +107,9 @@ func findAllGOPQP(ctx context.Context, dir string, segmentPaths []string, nbGOP,
 		results[GOP] = GOPQP
 		totalGOPFrames += GOPFrames
 		totalEncodedFrames += GOPFrames * GOPNbattempts
-		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d attempts)\n", GOP, GOPQP, GOPFrames, GOPNbattempts)
+		fmt.Fprintf(bypass, "GOP %d: QP %d selected for this GOP of %d frames (%d attempts)\n",
+			GOP, GOPQP, GOPFrames, GOPNbattempts,
+		)
 		// Compute stats
 		if GOPQP < stats.Minimum {
 			stats.Minimum = GOPQP
@@ -140,7 +146,9 @@ func findAllGOPQP(ctx context.Context, dir string, segmentPaths []string, nbGOP,
 		fmt.Fprintf(bypass, "failed to save mean and stddev of QPs for next run: %s\n", err)
 		err = nil // do not return, not critical
 	}
-	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n", strconv.FormatFloat(gopqpmean, 'f', -1, 64), strconv.FormatFloat(gopqpstddev, 'f', -1, 64))
+	fmt.Fprintf(bypass, "GOP QP mean is %s with a standard deviation of %s.\n",
+		strconv.FormatFloat(gopqpmean, 'f', -1, 64), strconv.FormatFloat(gopqpstddev, 'f', -1, 64),
+	)
 	stats.GlobalWeighted = float64(QPWeights) / float64(totalGOPFrames)
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n",
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),

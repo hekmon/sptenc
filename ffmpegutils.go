@@ -201,7 +201,10 @@ func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, co
 	return
 }
 
-func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (vmaf ffmpegutils.VMAFStats, err error) {
+func computeVMAF(
+	ctx context.Context, distorted, reference, reportPath, frameRate string,
+	totalFrames int, ultraHD, timeStats bool,
+) (vmaf ffmpegutils.VMAFStats, err error) {
 	// live progress
 	var bar *liveprogress.Bar
 	if timeStats {

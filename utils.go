@@ -65,9 +65,9 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 
 // getSegmentsTotalDuration calculates the total duration of all segment files
 func getSegmentsTotalDuration(ctx context.Context, segmentPaths []string) (totalDuration time.Duration, err error) {
+	var stats ffmpegutils.FFProbeStats
 	for _, path := range segmentPaths {
-		var stats ffmpegutils.FFProbeStats
-		if 	stats, err = getStreamsInfos(ctx, path); err != nil {
+		if stats, err = getStreamsInfos(ctx, path); err != nil {
 			err = fmt.Errorf("failed to get stream info for segment %s: %w", path, err)
 			return
 		}
