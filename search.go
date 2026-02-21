@@ -166,9 +166,7 @@ func findAllGOPQP(
 			HarmonicMean: weightedHMean / float64(totalVMAFFrames),
 			Mean:         weightedMean / float64(totalVMAFFrames),
 		}
-		fmt.Fprintf(bypass, "Aggregated VMAF stats (weighted by frame count):\n")
-		fmt.Fprintf(bypass, "  Min: %.4f, Max: %.4f, Mean: %.4f, HMean: %.4f\n",
-			aggregatedVMAF.Minimum, aggregatedVMAF.Maximum, aggregatedVMAF.Mean, aggregatedVMAF.HarmonicMean)
+		fmt.Fprintf(bypass, "Aggregated VMAF stats (weighted by frame count):\n%s\n", aggregatedVMAF.String())
 	}
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
