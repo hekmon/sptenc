@@ -229,8 +229,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		} else {
 			// Use first segment for stream info when no source is provided
 			var segments []string
-			segments, err = getSegmentsFromDir(*input)
-			if err != nil {
+			if segments, err = getSegmentsFromDir(*input); err != nil {
 				fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
 				exitCode = 2
 				return
@@ -242,15 +241,13 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			}
 			sourcePath = segments[0]
 		}
-		stats, err = getStreamsInfos(ctx, sourcePath)
-		if err != nil {
+		if stats, err = getStreamsInfos(ctx, sourcePath); err != nil {
 			fmt.Fprintf(bypass, "Failed to probe source file: %s\n", err)
 			exitCode = 2
 			return
 		}
 	} else {
-		stats, err = getStreamsInfos(ctx, *input)
-		if err != nil {
+		if stats, err = getStreamsInfos(ctx, *input); err != nil {
 			fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
 			exitCode = 2
 			return
@@ -262,23 +259,23 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		fmt.Fprintf(bypass, "Alternative VMAF configuration for GOP reaching QP 0 as best effort:\n%s", auditorAlt)
 	}
 	// Step 1 - Split file by GOP (or use existing segments from directory)
-	var GOP int
-	var segmentPaths []string
-	var totalDuration time.Duration
+	var (
+		nbGOP         int
+		segmentPaths  []string
+		totalDuration time.Duration
+	)
 	if inputIsDir {
 		fmt.Fprintln(bypass, "Using pre-segmented GOP files from input directory...")
-		segmentPaths, err = getSegmentsFromDir(*input)
-		if err != nil {
+		if segmentPaths, err = getSegmentsFromDir(*input); err != nil {
 			fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
 			exitCode = 2
 			return
 		}
-		GOP = len(segmentPaths)
-		fmt.Fprintf(bypass, "Found %d GOP segments in directory\n", GOP)
+		nbGOP = len(segmentPaths)
+		fmt.Fprintf(bypass, "Found %d GOP segments in directory\n", nbGOP)
 		// Calculate total duration of all segments for accurate progress bar
 		fmt.Fprintln(bypass, "Calculating total duration of segments...")
-		totalDuration, err = getSegmentsTotalDuration(ctx, segmentPaths)
-		if err != nil {
+		if totalDuration, err = getSegmentsTotalDuration(ctx, segmentPaths); err != nil {
 			fmt.Fprintf(bypass, "Failed to calculate total duration: %s\n", err)
 			exitCode = 2
 			return
@@ -291,19 +288,20 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			exitCode = 2
 			return
 		}
-		GOP, err = getDirFilesNumber(workingDirectory)
-		if err != nil {
+		if nbGOP, err = getDirFilesNumber(workingDirectory); err != nil {
 			fmt.Fprintf(bypass, "Failed to get number of splitted GOPs: %s\n", err)
 			exitCode = 2
 			return
 		}
-		fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
+		fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", nbGOP)
 		totalDuration = stats.Format.Duration
 	}
-	// Step 2 - Encode GOP
+	// Step 2 - Encode GOPs
 	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
-	fmt.Fprintf(bypass, "Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
-		meanAvg, stdDevAvg)
+	fmt.Fprintf(bypass,
+		"Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
+		meanAvg, stdDevAvg,
+	)
 	var (
 		GOPQP          []int
 		statsQP        QPStats
@@ -315,7 +313,10 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
 		}
 	}
-	if GOPQP, statsQP, aggregatedVMAF, err = findAllGOPQP(ctx, workingDirectory, segmentPaths, GOP, meanAvg, stdDevAvg, totalDuration, auditor, auditorAlt, *force10bits); err != nil {
+	if GOPQP, statsQP, aggregatedVMAF, err = findAllGOPQP(
+		ctx, workingDirectory, segmentPaths, nbGOP, meanAvg,
+		stdDevAvg, totalDuration, auditor, auditorAlt, *force10bits,
+	); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
@@ -334,10 +335,6 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		exitCode = 2
 		return
 	}
-	fmt.Fprintf(bypass, "Checking result...\n")
-	// Use aggregated VMAF stats from per-GOP encoding (already computed during findAllGOPQP)
-	vmafStats := aggregatedVMAF
-	fmt.Fprintf(bypass, "Using aggregated VMAF stats from per-GOP encoding\n")
 	// Step 4 - Remux original file with new video
 	fmt.Fprintln(bypass, "Remuxing to final file...")
 	// Determine the source for remux (use -source flag if input is directory)
@@ -351,11 +348,12 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		}
 	}
 	finalFilePath := computeNewDirFilePath(remuxSource, workingDirectory, true)
-	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
+	tagsFlags := generateTags(*stats.Format, statsQP, aggregatedVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
 	var convertFlac bool
 	if *flac {
 		audioTrack := stats.AudioTrack()
-		if audioTrack != nil && (audioTrack.CodecName == ffmpegutils.CodecAudioPCM || audioTrack.CodecName == ffmpegutils.CodecAudioPCM24b) {
+		if audioTrack != nil &&
+			(audioTrack.CodecName == ffmpegutils.CodecAudioPCM || audioTrack.CodecName == ffmpegutils.CodecAudioPCM24b) {
 			convertFlac = true
 			if *debug {
 				fmt.Fprintln(bypass, "Input has PCM audio and -flac flag is on: audio stream will be converted to FLAC")
