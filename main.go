@@ -335,9 +335,10 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		exitCode = 2
 		return
 	}
-	// Step 4 - Remux original file with new video
+	// Step 4 - Remux new video to final file
+	tagsFlags := generateTags(*stats.Format, statsQP, aggregatedVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
 	var finalFilePath string
-	if !inputIsDir || *source != "" {
+	if !inputIsDir || (inputIsDir && *source != "") {
 		fmt.Fprintln(bypass, "Remuxing to final file...")
 		var remuxSource string
 		if inputIsDir {
@@ -345,8 +346,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		} else {
 			remuxSource = *input
 		}
-		finalFilePath = computeNewDirFilePath(*source, workingDirectory, true)
-		tagsFlags := generateTags(*stats.Format, statsQP, aggregatedVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
+		finalFilePath = computeNewDirFilePath(remuxSource, workingDirectory, true)
 		var convertFlac bool
 		if *flac {
 			audioTrack := stats.AudioTrack()
@@ -358,14 +358,19 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 				}
 			}
 		}
-		if err = Remux(ctx, remuxSource, concatVideoPath, finalFilePath, tagsFlags, totalDuration, convertFlac); err != nil {
+		if err = RemuxDual(ctx, remuxSource, concatVideoPath, finalFilePath, tagsFlags, totalDuration, convertFlac); err != nil {
 			fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 			exitCode = 2
 			return
 		}
 	} else {
-		// source is dir but we do not have a source file, so the concat file is the final file
-		finalFilePath = concatVideoPath
+		// source is dir but we do not have a source file
+		finalFilePath = computeNewDirFilePath(filepath.Join(*input, "segments.mkv"), workingDirectory, true)
+		if err = Remux(ctx, concatVideoPath, finalFilePath, tagsFlags, totalDuration); err != nil {
+			fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
+			exitCode = 2
+			return
+		}
 	}
 	finalFileSize, err := getFileSize(finalFilePath)
 	if err != nil {
