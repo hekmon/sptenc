@@ -173,13 +173,14 @@ func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, co
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.AnimeEncode(ctx, ffmpegutils.AnimeEncodeConfig{
+	if err = ffmpegutils.HEVCEncode(ctx, ffmpegutils.HEVCEncodeConfig{
 		// Input
 		Input: input,
 		// Output
-		Quantization:    qp,
 		ConvertTo10bits: convert10bits,
+		Quantization:    qp,
 		Preset:          preset,
+		AnimationTuning: *animeTuning,
 		Tags:            nil,
 		OutputFilePath:  output,
 		// Hardware Acceleration

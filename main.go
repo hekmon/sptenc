@@ -23,6 +23,7 @@ var (
 	source      *string
 	tmpDir      *string
 	output      *string
+	animeTuning *bool
 	gpu         *int
 	nvdec       *bool
 	nvenc       *bool
@@ -79,6 +80,7 @@ func main() {
 	source = flag.String("source", "", "Original source file with audio for remux (optional, used when -input is a directory).")
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
+	animeTuning = flag.Bool("anime", false, "Use anime tuning parameters. Only for libx265 encoder, ignored for NVENC.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
 	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality.")
