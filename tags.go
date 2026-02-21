@@ -17,7 +17,7 @@ const (
 	// Encoding QP stats
 	sptencStatsMinQP      = "sptenc_stats_min_qp"
 	sptencStatsMaxQP      = "sptenc_stats_max_qp"
-	sptencStatsWeightedQP = "sptenc_stats_global_weighted_qp"
+	sptencStatsWeightedQP = "sptenc_stats_weighted_qp"
 	// VMAF Infos
 	sptencVMAFModelTagKey = "sptenc_vmaf_model"
 	// VMAF Conf

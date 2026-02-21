@@ -83,7 +83,7 @@ func main() {
 	animeTuning = flag.Bool("anime", false, "Use anime tuning parameters. Only for libx265 encoder, ignored for NVENC.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
 	nvdec = flag.Bool("nvdec", false, "Use NVIDIA CUDA acceleration for video decoding (NVDEC).")
-	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality.")
+	nvenc = flag.Bool("nvenc", false, "Use NVIDIA CUDA acceleration for video encoding (NVENC). While faster, NVENC tends to produce more than 2x bigger files than libx265 for the same perceived quality. Recommended to quickly find a visually acceptable VMAF profile before switching to libx265 for a smaller file size.")
 	force10bits = flag.Bool("force10bits", false, "Force 10 bits encoding. This is normaly not necessary as all regular 8 bits input files (with yup420p pixel format) will be automaticaly converted to 10bits (with p010le pixel format). Use this flag to force the conversion not matter the input file's pixel format.")
 	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase if the input audio is in PCM.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
