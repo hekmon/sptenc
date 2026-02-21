@@ -221,9 +221,24 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	var stats ffmpegutils.FFProbeStats
 	if inputIsDir {
 		// For directory input, we need a source file for stream info
-		sourcePath := *input
+		var sourcePath string
 		if *source != "" {
 			sourcePath = *source
+		} else {
+			// Use first segment for stream info when no source is provided
+			var segments []string
+			segments, err = getSegmentsFromDir(*input)
+			if err != nil {
+				fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
+				exitCode = 2
+				return
+			}
+			if len(segments) == 0 {
+				fmt.Fprintln(bypass, "No segment files found in input directory")
+				exitCode = 2
+				return
+			}
+			sourcePath = segments[0]
 		}
 		stats, err = getStreamsInfos(ctx, sourcePath)
 		if err != nil {
