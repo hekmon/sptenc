@@ -16,7 +16,7 @@ const (
 	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
 	// Encoding QP stats
 	sptencStatsMinQP      = "sptenc_stats_min_qp"
-	sptencStatsWaxQP      = "sptenc_stats_max_qp"
+	sptencStatsMaxQP      = "sptenc_stats_max_qp"
 	sptencStatsWeightedQP = "sptenc_stats_global_weighted_qp"
 	// VMAF Infos
 	sptencVMAFModelTagKey = "sptenc_vmaf_model"
@@ -64,7 +64,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	// QP Stats
 	flags = append(flags,
 		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsMinQP, statsQP.Minimum),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsWaxQP, statsQP.Maximum),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencStatsMaxQP, statsQP.Maximum),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeighted, 'f', -1, 64)),
 	)
 	// VMAF

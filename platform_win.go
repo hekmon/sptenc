@@ -90,6 +90,10 @@ func sameFileSystem(path1, path2 string) (same bool, err error) {
 	// Get the volume informations
 	// https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-getvolumeinformationw
 	drive1VolName, drive1Serial, err := getDriveInfos(drive1)
+	if err != nil {
+		err = fmt.Errorf("failed to get drive infos for %q: %w", drive1, err)
+		return
+	}
 	if *debug {
 		fmt.Fprintf(bypass, "Drive %s is named '%s' (SN: %d)\n", drive1, drive1VolName, drive1Serial)
 	}

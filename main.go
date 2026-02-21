@@ -20,6 +20,7 @@ var (
 	Version = "dev"
 	// Flags
 	input       *string
+	source      *string
 	tmpDir      *string
 	output      *string
 	gpu         *int
@@ -74,7 +75,8 @@ func main() {
 		os.Exit(exitCode)
 	}()
 	// Flags
-	input = flag.String("input", "", "Input file to transcode.")
+	input = flag.String("input", "", "Input file to transcode or directory containing pre-segmented GOP files.")
+	source = flag.String("source", "", "Original source file with audio for remux (optional, used when -input is a directory).")
 	tmpDir = flag.String("tmp", os.TempDir(), "Where to create the working directory to store reencoded GOP and VMAF reports.")
 	output = flag.String("output", "", "Output directory for the reencoded file. If empty, directory of input file will be used.")
 	gpu = flag.Int("gpu", 0, "GPU to use for hardware acceleration")
@@ -86,8 +88,8 @@ func main() {
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
-	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Can be useful when the original file has a different encoder. Beware that it can dramatically lower VMAF scoring.")
-	vmafLimitMinAlt = flag.Float64("vmafminalt", VMAFOffValue, "VMAF alternate acceptable score for the worst frame. Sometimes (especialy when setting high VMAF config such as 100 in a percentil) even with QP 0 a scene won't match its VMAF config (indicated by best effort in the logs). This can dramatically increase increase output file size. This parameter setup an alternate VMAF validator that only force a minimum value to let the distribution of frames do what it can be that is used if a GOP has reached best effort. Advanced feature, you should start without and consider it if you encounter a lot of best effort GOP results. If -1, this alternate VMAF validator is not used.")
+	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Recommended when either source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains. Expect lower scores compared to standard VMAF models.")
+	vmafLimitMinAlt = flag.Float64("vmafminalt", VMAFOffValue, "VMAF alternate acceptable score for the worst frame. Sometimes (especialy when setting high VMAF config such as 100 in a percentil) even with QP 0 a scene won't match its VMAF config (indicated by best effort in the logs). This can dramatically increase output file size. This parameter setup an alternate VMAF validator that only force a minimum value to let the distribution of frames do what it can be that is used if a GOP has reached best effort. Advanced feature, you should start without and consider it if you encounter a lot of best effort GOP results. If -1, this alternate VMAF validator is not used.")
 	vmafLimitMin = flag.Float64("vmafmin", 95, "VMAF acceptable score for the worst frame. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitP1 = flag.Float64("vmafp1", 98, "VMAF acceptable score for percentil 1. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitP5 = flag.Float64("vmafp5", VMAFOffValue, "VMAF acceptable score for percentil 5. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
@@ -108,6 +110,7 @@ func main() {
 		exitCode = 1
 		return
 	}
+
 	if *gpu < 0 {
 		fmt.Fprintln(os.Stderr, "GPU must be >= 0")
 		exitCode = 1
@@ -146,7 +149,24 @@ func main() {
 	if !filepath.IsAbs(*tmpDir) {
 		*tmpDir = filepath.Join(currentWorkingDirectory, *tmpDir)
 	}
-	workingDirectory = generateWorkingDirectroryPath(*tmpDir)
+	// If source is provided, convert to absolute path and validate
+	if *source != "" {
+		if !filepath.IsAbs(*source) {
+			*source = filepath.Join(currentWorkingDirectory, *source)
+		}
+		sourceInfo, err := os.Stat(*source)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to access source file: %s\n", err)
+			exitCode = 1
+			return
+		}
+		if sourceInfo.IsDir() {
+			fmt.Fprintln(os.Stderr, "Source must be a file, not a directory")
+			exitCode = 1
+			return
+		}
+	}
+	workingDirectory = generateWorkingDirectoryPath(*tmpDir)
 	// Load previous ideal QPs
 	if err = loadStats(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load previous ideal QPs: %s\n", err)
@@ -179,7 +199,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Prepare
-	fmt.Fprintf(bypass, "Input file: %q\n", filepath.Base(*input))
+	fmt.Fprintf(bypass, "Input: %q\n", filepath.Base(*input))
 	//// Working directory
 	if err = os.MkdirAll(workingDirectory, 0755); err != nil {
 		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
@@ -189,39 +209,77 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	if *debug {
 		fmt.Fprintf(bypass, "Working directory: %s\n", workingDirectory)
 	}
-	//// Input file container infos
-	stats, err := getStreamsInfos(ctx, *input)
+	// Check if input is a directory
+	inputInfo, err := os.Stat(*input)
 	if err != nil {
-		fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
+		fmt.Fprintf(bypass, "Failed to access input: %s\n", err)
 		exitCode = 2
 		return
+	}
+	inputIsDir := inputInfo.IsDir()
+	//// Input file container infos
+	var stats ffmpegutils.FFProbeStats
+	if inputIsDir {
+		// For directory input, we need a source file for stream info
+		sourcePath := *input
+		if *source != "" {
+			sourcePath = *source
+		}
+		stats, err = getStreamsInfos(ctx, sourcePath)
+		if err != nil {
+			fmt.Fprintf(bypass, "Failed to probe source file: %s\n", err)
+			exitCode = 2
+			return
+		}
+	} else {
+		stats, err = getStreamsInfos(ctx, *input)
+		if err != nil {
+			fmt.Fprintf(bypass, "Failed to probe input file: %s\n", err)
+			exitCode = 2
+			return
+		}
 	}
 	//// Allow user to visually check its VMAF configuration
 	fmt.Fprintf(bypass, "Each GOP encoding will have to reach theses VMAF scores:\n%s", auditor)
 	if auditorAlt != nil {
 		fmt.Fprintf(bypass, "Alternative VMAF configuration for GOP reaching QP 0 as best effort:\n%s", auditorAlt)
 	}
-	// Step 1 - Split file by GOP
-	fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
-	if err = splitFile(ctx, *input, workingDirectory, stats.Format.Duration); err != nil {
-		fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
-		exitCode = 2
-		return
+	// Step 1 - Split file by GOP (or use existing segments from directory)
+	var GOP int
+	var segmentPaths []string
+	if inputIsDir {
+		fmt.Fprintln(bypass, "Using pre-segmented GOP files from input directory...")
+		segmentPaths, err = getSegmentsFromDir(*input)
+		if err != nil {
+			fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
+			exitCode = 2
+			return
+		}
+		GOP = len(segmentPaths)
+		fmt.Fprintf(bypass, "Found %d GOP segments in directory\n", GOP)
+	} else {
+		fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
+		if err = splitFile(ctx, *input, workingDirectory, stats.Format.Duration); err != nil {
+			fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
+			exitCode = 2
+			return
+		}
+		GOP, err = getDirFilesNumber(workingDirectory)
+		if err != nil {
+			fmt.Fprintf(bypass, "Failed to get number of splitted GOPs: %s\n", err)
+			exitCode = 2
+			return
+		}
+		fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
 	}
-	GOP, err := getDirFilesNumber(workingDirectory)
-	if err != nil {
-		fmt.Fprintf(bypass, "Failed to get number of splitted GOPs: %s\n", err)
-		exitCode = 2
-		return
-	}
-	fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
 	// Step 2 - Encode GOP
 	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
 	fmt.Fprintf(bypass, "Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
 		meanAvg, stdDevAvg)
 	var (
-		GOPQP   []int
-		statsQP QPStats
+		GOPQP          []int
+		statsQP        QPStats
+		aggregatedVMAF *ffmpegutils.VMAFStats
 	)
 	if !*force10bits && stats.VideoTrack().PixFmt == "yuv420p" {
 		*force10bits = true
@@ -229,7 +287,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
 		}
 	}
-	if GOPQP, statsQP, err = findAllGOPQP(ctx, workingDirectory, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, auditorAlt, *force10bits); err != nil {
+	if GOPQP, statsQP, aggregatedVMAF, err = findAllGOPQP(ctx, workingDirectory, segmentPaths, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, auditorAlt, *force10bits); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
@@ -249,15 +307,22 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		return
 	}
 	fmt.Fprintf(bypass, "Checking result...\n")
-	var vmafStats *ffmpegutils.VMAFStats
-	if vmafStats, err = filesCheck(ctx, *input, concatVideoPath); err != nil {
-		fmt.Fprintf(bypass, "Failed to compare frames count between original and reencoded files: %s\n", err)
-		exitCode = 2
-		return
-	}
+	// Use aggregated VMAF stats from per-GOP encoding (already computed during findAllGOPQP)
+	vmafStats := aggregatedVMAF
+	fmt.Fprintf(bypass, "Using aggregated VMAF stats from per-GOP encoding\n")
 	// Step 4 - Remux original file with new video
 	fmt.Fprintln(bypass, "Remuxing to final file...")
-	finalFilePath := computeNewDirFilePath(*input, workingDirectory, true)
+	// Determine the source for remux (use -source flag if input is directory)
+	remuxSource := *input
+	if inputIsDir {
+		if *source != "" {
+			remuxSource = *source
+		} else {
+			// No source for directory input means video-only output
+			remuxSource = ""
+		}
+	}
+	finalFilePath := computeNewDirFilePath(remuxSource, workingDirectory, true)
 	tagsFlags := generateTags(*stats.Format, statsQP, vmafStats, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
 	var convertFlac bool
 	if *flac {
@@ -269,7 +334,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			}
 		}
 	}
-	if err = Remux(ctx, *input, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration, convertFlac); err != nil {
+	if err = Remux(ctx, remuxSource, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration, convertFlac); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
 		exitCode = 2
 		return

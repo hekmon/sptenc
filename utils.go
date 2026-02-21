@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hekmon/cunits/v3"
@@ -13,7 +14,7 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-func generateWorkingDirectroryPath(basePath string) string {
+func generateWorkingDirectoryPath(basePath string) string {
 	return filepath.Join(basePath, fmt.Sprintf("sptenc-%d", time.Now().Unix()))
 }
 
@@ -24,6 +25,41 @@ func getDirFilesNumber(dir string) (num int, err error) {
 		return
 	}
 	num = len(files)
+	return
+}
+
+// getSegmentsFromDir returns sorted list of video file paths from inputDir.
+// Files are sorted alphabetically and returned as full paths.
+func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		err = fmt.Errorf("failed to read input directory: %w", err)
+		return
+	}
+	// Filter video files
+	var files []os.DirEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext == ".mkv" || ext == ".mp4" {
+			files = append(files, entry)
+		}
+	}
+	// Sort by name to ensure consistent ordering
+	for i := 0; i < len(files); i++ {
+		for j := i + 1; j < len(files); j++ {
+			if files[i].Name() > files[j].Name() {
+				files[i], files[j] = files[j], files[i]
+			}
+		}
+	}
+	// Build full paths
+	filePaths = make([]string, len(files))
+	for i, file := range files {
+		filePaths[i] = filepath.Join(inputDir, file.Name())
+	}
 	return
 }
 
