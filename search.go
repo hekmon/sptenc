@@ -188,10 +188,14 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 	duration = GOPInfos.Format.Duration
 	videoTrack := GOPInfos.VideoTrack()
 	// Abort if frame count is 0 or negative
-	if videoTrack.NbReadFrames <= 0 {
-		err = fmt.Errorf("GOP %d: frame count is 0 or negative (NbReadFrames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
-			GOP, videoTrack.NbReadFrames, duration, videoTrack.RFrameRate)
-		return
+	totalFrames := videoTrack.NbReadFrames
+	if totalFrames <= 0 {
+		totalFrames = videoTrack.NbFrames
+		if totalFrames <= 0 {
+			err = fmt.Errorf("GOP %d: frame count is 0 or negative (Nb(Read)Frames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
+				GOP, totalFrames, duration, videoTrack.RFrameRate)
+			return
+		}
 	}
 	// Verify output files frames count when done
 	defer func() {
@@ -205,8 +209,8 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 			return
 		}
 		GOPFrames = finalGOPInfos.VideoTrack().NbReadFrames
-		if GOPFrames != videoTrack.NbReadFrames {
-			err = fmt.Errorf("final GOP has %d frames instead of %d", GOPFrames, videoTrack.NbReadFrames)
+		if GOPFrames != totalFrames {
+			err = fmt.Errorf("final GOP has %d frames instead of %d", GOPFrames, totalFrames)
 			return
 		}
 		if *debug {
@@ -227,7 +231,7 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 			}
 		}()
 	}
-	if finalQP, nbAttempts, bestEffort, err = searchGOPQP(ctx, input, dir, GOP, meanAvg, stdDevAvg, auditor, videoTrack, convert10bits, results); err != nil {
+	if finalQP, nbAttempts, bestEffort, err = searchGOPQP(ctx, input, dir, GOP, totalFrames, meanAvg, stdDevAvg, auditor, videoTrack, convert10bits, results); err != nil {
 		err = fmt.Errorf("failed to search GOP QP: %w", err)
 		return
 	}
@@ -235,7 +239,7 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 		if auditorAlt != nil {
 			fmt.Fprintf(bypass, "WARNING: Impossible to validate VMAF config with lowest possible QP (highest quality), will switch to alternate validator:\n%s", results[ffmpegutils.QPMinimum])
 			var nbAttemptsAlt int
-			if finalQP, nbAttemptsAlt, bestEffort, err = searchGOPQP(ctx, input, dir, GOP, meanAvg, stdDevAvg, auditorAlt, videoTrack, convert10bits, results); err != nil {
+			if finalQP, nbAttemptsAlt, bestEffort, err = searchGOPQP(ctx, input, dir, GOP, totalFrames, meanAvg, stdDevAvg, auditorAlt, videoTrack, convert10bits, results); err != nil {
 				err = fmt.Errorf("failed to search GOP QP with alternate validator: %w", err)
 				return
 			}
@@ -256,7 +260,7 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 	return
 }
 
-func searchGOPQP(ctx context.Context, input, dir string, GOP, meanAvg, stdDevAvg int, auditor *VMAFChecker, videoTrack *ffmpegutils.FFProbeBinaryStream,
+func searchGOPQP(ctx context.Context, input, dir string, GOP, totalFrames, meanAvg, stdDevAvg int, auditor *VMAFChecker, videoTrack *ffmpegutils.FFProbeBinaryStream,
 	convert10bits bool, results map[int]ffmpegutils.VMAFStats) (finalQP int, nbattempts int, bestEffort bool, err error) {
 	bypass := liveprogress.Bypass()
 	testedQPs := make([]int, 0, ffmpegutils.QPMaximum-ffmpegutils.QPMinimum+1)
@@ -413,7 +417,7 @@ func searchGOPQP(ctx context.Context, input, dir string, GOP, meanAvg, stdDevAvg
 			GOPQPOutput = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegEncodedOutputFormat, GOP, candidateQP))
 			report = GOPQPOutput + "_vmaf.json"
 			ultraHD := videoTrack.Height >= ffmpegutils.UltraHDHeight
-			if vmafStats, err = GOPQP(ctx, input, GOPQPOutput, report, videoTrack.RFrameRate, videoTrack.NbReadFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
+			if vmafStats, err = GOPQP(ctx, input, GOPQPOutput, report, videoTrack.RFrameRate, totalFrames, GOP, candidateQP, ultraHD, convert10bits); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 				return
 			}
