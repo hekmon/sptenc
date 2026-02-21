@@ -262,6 +262,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	// Step 1 - Split file by GOP (or use existing segments from directory)
 	var GOP int
 	var segmentPaths []string
+	var totalDuration time.Duration
 	if inputIsDir {
 		fmt.Fprintln(bypass, "Using pre-segmented GOP files from input directory...")
 		segmentPaths, err = getSegmentsFromDir(*input)
@@ -272,6 +273,15 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		}
 		GOP = len(segmentPaths)
 		fmt.Fprintf(bypass, "Found %d GOP segments in directory\n", GOP)
+		// Calculate total duration of all segments for accurate progress bar
+		fmt.Fprintln(bypass, "Calculating total duration of segments...")
+		totalDuration, err = getSegmentsTotalDuration(ctx, segmentPaths)
+		if err != nil {
+			fmt.Fprintf(bypass, "Failed to calculate total duration: %s\n", err)
+			exitCode = 2
+			return
+		}
+		fmt.Fprintf(bypass, "Total duration of segments: %s\n", totalDuration)
 	} else {
 		fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
 		if err = splitFile(ctx, *input, workingDirectory, stats.Format.Duration); err != nil {
@@ -286,6 +296,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			return
 		}
 		fmt.Fprintf(bypass, "Splitting managed to separate the file in %d GOP\n", GOP)
+		totalDuration = stats.Format.Duration
 	}
 	// Step 2 - Encode GOP
 	meanAvg, stdDevAvg := previousRuns.GetMeanStdDev()
@@ -302,7 +313,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
 		}
 	}
-	if GOPQP, statsQP, aggregatedVMAF, err = findAllGOPQP(ctx, workingDirectory, segmentPaths, GOP, meanAvg, stdDevAvg, stats.Format.Duration, auditor, auditorAlt, *force10bits); err != nil {
+	if GOPQP, statsQP, aggregatedVMAF, err = findAllGOPQP(ctx, workingDirectory, segmentPaths, GOP, meanAvg, stdDevAvg, totalDuration, auditor, auditorAlt, *force10bits); err != nil {
 		fmt.Fprintf(bypass, "Failed to encode GOP: %s\n", err)
 		exitCode = 2
 		return
