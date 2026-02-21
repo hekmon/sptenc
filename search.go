@@ -187,6 +187,12 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 	}
 	duration = GOPInfos.Format.Duration
 	videoTrack := GOPInfos.VideoTrack()
+	// Abort if frame count is 0 or negative
+	if videoTrack.NbReadFrames <= 0 {
+		err = fmt.Errorf("GOP %d: frame count is 0 or negative (NbReadFrames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
+			GOP, videoTrack.NbReadFrames, duration, videoTrack.RFrameRate)
+		return
+	}
 	// Verify output files frames count when done
 	defer func() {
 		if err != nil {
