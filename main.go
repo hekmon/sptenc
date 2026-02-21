@@ -330,40 +330,42 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		return
 	}
 	concatVideoPath := filepath.Join(workingDirectory, "concat.mkv")
-	if err = GOPMerge(ctx, concatScriptPath, concatVideoPath, stats.Format.Duration); err != nil {
+	if err = GOPMerge(ctx, concatScriptPath, concatVideoPath, totalDuration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge encoded GOP: %s\n", err)
 		exitCode = 2
 		return
 	}
 	// Step 4 - Remux original file with new video
-	fmt.Fprintln(bypass, "Remuxing to final file...")
-	// Determine the source for remux (use -source flag if input is directory)
-	remuxSource := *input
-	if inputIsDir {
-		if *source != "" {
+	var finalFilePath string
+	if !inputIsDir || *source != "" {
+		fmt.Fprintln(bypass, "Remuxing to final file...")
+		var remuxSource string
+		if inputIsDir {
 			remuxSource = *source
 		} else {
-			// No source for directory input means video-only output
-			remuxSource = ""
+			remuxSource = *input
 		}
-	}
-	finalFilePath := computeNewDirFilePath(remuxSource, workingDirectory, true)
-	tagsFlags := generateTags(*stats.Format, statsQP, aggregatedVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
-	var convertFlac bool
-	if *flac {
-		audioTrack := stats.AudioTrack()
-		if audioTrack != nil &&
-			(audioTrack.CodecName == ffmpegutils.CodecAudioPCM || audioTrack.CodecName == ffmpegutils.CodecAudioPCM24b) {
-			convertFlac = true
-			if *debug {
-				fmt.Fprintln(bypass, "Input has PCM audio and -flac flag is on: audio stream will be converted to FLAC")
+		finalFilePath = computeNewDirFilePath(*source, workingDirectory, true)
+		tagsFlags := generateTags(*stats.Format, statsQP, aggregatedVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
+		var convertFlac bool
+		if *flac {
+			audioTrack := stats.AudioTrack()
+			if audioTrack != nil &&
+				(audioTrack.CodecName == ffmpegutils.CodecAudioPCM || audioTrack.CodecName == ffmpegutils.CodecAudioPCM24b) {
+				convertFlac = true
+				if *debug {
+					fmt.Fprintln(bypass, "Input has PCM audio and -flac flag is on: audio stream will be converted to FLAC")
+				}
 			}
 		}
-	}
-	if err = Remux(ctx, remuxSource, concatVideoPath, finalFilePath, tagsFlags, stats.Format.Duration, convertFlac); err != nil {
-		fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
-		exitCode = 2
-		return
+		if err = Remux(ctx, remuxSource, concatVideoPath, finalFilePath, tagsFlags, totalDuration, convertFlac); err != nil {
+			fmt.Fprintf(bypass, "Failed to merge GOP: %s\n", err)
+			exitCode = 2
+			return
+		}
+	} else {
+		// source is dir but we do not have a source file, so the concat file is the final file
+		finalFilePath = concatVideoPath
 	}
 	finalFileSize, err := getFileSize(finalFilePath)
 	if err != nil {
