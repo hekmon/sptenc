@@ -62,7 +62,7 @@ func main() {
 			} else {
 				fmt.Fprintf(os.Stdout, "Cleaning working directory...")
 				if err := os.RemoveAll(workingDirectory); err != nil {
-					fmt.Fprintf(os.Stderr, "Failed to clean working directory: %s\n", err)
+					fmt.Fprintf(os.Stderr, "\nFailed to clean working directory: %s\n", err)
 					exitCode = 3
 				}
 				fmt.Fprintf(os.Stdout, " Done.\n")

@@ -48,6 +48,7 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	flags = append(flags,
 		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencURLTagKey, sptencURLTagValue),
+		"-metadata:s:v:0", "vendor_id=\"\"", // prevent ffmpeg from inserting VENDOR_ID : [0][0][0][0]
 	)
 	// Encoding
 	if *nvenc {
