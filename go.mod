@@ -5,6 +5,7 @@ go 1.24.0
 replace github.com/hekmon/ffmpegutils => ../ffmpegutils
 
 require (
+	al.essio.dev/pkg/shellescape v1.6.0
 	github.com/hekmon/cunits/v3 v3.0.0
 	github.com/hekmon/ffmpegutils v1.0.0
 	github.com/hekmon/liveprogress/v2 v2.2.1
@@ -14,7 +15,6 @@ require (
 )
 
 require (
-	al.essio.dev/pkg/shellescape v1.6.0 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/displaywidth v0.10.0 // indirect

@@ -24,7 +24,7 @@ type QPStats struct {
 func findAllGOPQP(
 	ctx context.Context, dir string, segmentPaths []string, nbGOP, meanAvg, stdDevAvg int,
 	globalDuration time.Duration, auditor, auditorAlt *VMAFChecker, convert10bits bool,
-) (results []int, stats QPStats, aggregatedVMAF *ffmpegutils.VMAFStats, err error) {
+) (results []int, stats QPStats, err error) {
 	// Prepare
 	var (
 		GOPDuration                                   time.Duration
@@ -35,17 +35,6 @@ func findAllGOPQP(
 		bestEffort, alternateVMAF                     bool
 		nbBestEfforts, nbAlternateVMAF                int
 	)
-	// Variables for VMAF aggregation
-	var (
-		totalVMAFFrames               int
-		vmafMin, vmafMax              float64
-		weightedP1, weightedP5        float64
-		weightedP10, weightedP25      float64
-		weightedMedian, weightedHMean float64
-		weightedMean                  float64
-	)
-	vmafMin = 100.0
-	vmafMax = 0.0
 	stats.Minimum = ffmpegutils.QPMaximum + 1
 	stats.Maximum = ffmpegutils.QPMinimum - 1
 	results = make([]int, nbGOP)
@@ -76,33 +65,17 @@ func findAllGOPQP(
 		if *debug {
 			fmt.Fprintf(bypass, "GOP %d: Search for the right QP\n", GOP)
 		}
-		var gopVMAF *ffmpegutils.VMAFStats
+		var inputPath string
 		// Use segment path if provided (directory input), otherwise construct from dir (file input)
-		inputPath := filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 		if segmentPaths != nil && GOP < len(segmentPaths) {
 			inputPath = segmentPaths[GOP]
+		} else {
+			inputPath = filepath.Join(dir, fmt.Sprintf(ffmpegutils.SegOutputFormat, GOP))
 		}
-		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, alternateVMAF, GOPDuration, gopVMAF, err = findGOPQP(
+		if GOPQP, GOPFrames, GOPNbattempts, bestEffort, alternateVMAF, GOPDuration, err = findGOPQP(
 			ctx, dir, inputPath, GOP, meanAvg, stdDevAvg, auditor, auditorAlt, convert10bits); err != nil {
 			err = fmt.Errorf("failed to find the right encoding QP GOP %d: %w", GOP, err)
 			return
-		}
-		// Aggregate VMAF stats weighted by frame count
-		if gopVMAF != nil {
-			totalVMAFFrames += GOPFrames
-			if gopVMAF.Minimum < vmafMin {
-				vmafMin = gopVMAF.Minimum
-			}
-			if gopVMAF.Maximum > vmafMax {
-				vmafMax = gopVMAF.Maximum
-			}
-			weightedP1 += gopVMAF.Percentile1 * float64(GOPFrames)
-			weightedP5 += gopVMAF.Percentile5 * float64(GOPFrames)
-			weightedP10 += gopVMAF.Percentile10 * float64(GOPFrames)
-			weightedP25 += gopVMAF.Percentile25 * float64(GOPFrames)
-			weightedMedian += gopVMAF.Median * float64(GOPFrames)
-			weightedHMean += gopVMAF.HarmonicMean * float64(GOPFrames)
-			weightedMean += gopVMAF.Mean * float64(GOPFrames)
 		}
 		results[GOP] = GOPQP
 		totalGOPFrames += GOPFrames
@@ -153,21 +126,6 @@ func findAllGOPQP(
 	fmt.Fprintf(bypass, "Weighted global QP is %s.\n",
 		strconv.FormatFloat(stats.GlobalWeighted, 'f', -1, 64),
 	)
-	// Compute aggregated VMAF stats
-	if totalVMAFFrames > 0 {
-		aggregatedVMAF = &ffmpegutils.VMAFStats{
-			Minimum:      vmafMin,
-			Maximum:      vmafMax,
-			Percentile1:  weightedP1 / float64(totalVMAFFrames),
-			Percentile5:  weightedP5 / float64(totalVMAFFrames),
-			Percentile10: weightedP10 / float64(totalVMAFFrames),
-			Percentile25: weightedP25 / float64(totalVMAFFrames),
-			Median:       weightedMedian / float64(totalVMAFFrames),
-			HarmonicMean: weightedHMean / float64(totalVMAFFrames),
-			Mean:         weightedMean / float64(totalVMAFFrames),
-		}
-		fmt.Fprintf(bypass, "Aggregated VMAF stats (weighted by frame count):\n%s", aggregatedVMAF.String())
-	}
 	if nbBestEfforts > 0 {
 		fmt.Fprintf(bypass, "WARNING: %d GOP were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
 			nbBestEfforts)
@@ -181,7 +139,7 @@ func findAllGOPQP(
 }
 
 func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, stdDevAvg int, auditor, auditorAlt *VMAFChecker, convert10bits bool) (
-	finalQP, GOPFrames, nbAttempts int, bestEffort, alternateVMAF bool, duration time.Duration, vmafStats *ffmpegutils.VMAFStats, err error) {
+	finalQP, GOPFrames, nbAttempts int, bestEffort, alternateVMAF bool, duration time.Duration, err error) {
 	// Init
 	bypass := liveprogress.Bypass()
 	// Prepare
@@ -260,9 +218,6 @@ func findGOPQP(ctx context.Context, dir string, inputPath string, GOP, meanAvg, 
 			fmt.Fprintf(bypass, "WARNING: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway:\n%s", results[ffmpegutils.QPMinimum])
 		}
 	}
-	// Return VMAF stats for the selected QP
-	stats := results[finalQP]
-	vmafStats = &stats
 	return
 }
 

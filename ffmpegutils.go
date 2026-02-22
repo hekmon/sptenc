@@ -233,9 +233,7 @@ func computeVMAF(
 			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 				return "      VMAF | "
 			}),
-			// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-			// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 				return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
 			}),
@@ -271,7 +269,7 @@ func computeVMAF(
 	// Done
 	vmaf = report.GetStats()
 	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "GOP VMAF computed in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "VMAF computed in %s\n", duration.Round(time.Second))
 	}
 	return
 }
@@ -332,6 +330,55 @@ func GOPMerge(ctx context.Context, concatScript, outputPath string, expectedDura
 		fmt.Fprintf(liveprogress.Bypass(), "GOP merged within %q in %s\n", outputPath, duration.Round(time.Second))
 	} else {
 		fmt.Fprintf(liveprogress.Bypass(), "GOP merged in %s\n", duration.Round(time.Second))
+	}
+	return
+}
+
+func SourceMerge(ctx context.Context, concatScript, outputPath string, expectedDuration time.Duration) (err error) {
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(expectedDuration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "  Merging | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.Concat(ctx, ffmpegutils.ConcatConfig{
+		// Input
+		ConcatScriptPath: concatScript,
+		ConcatUnsafe:     true,
+		OutputPath:       outputPath,
+		// Reporting
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
+	}); err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "Source segments merged within %q in %s\n", outputPath, duration.Round(time.Second))
+	} else {
+		fmt.Fprintf(liveprogress.Bypass(), "Source segment in %s\n", duration.Round(time.Second))
 	}
 	return
 }

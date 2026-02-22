@@ -110,7 +110,7 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 	return
 }
 
-func filesCheck(ctx context.Context, original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err error) {
+func finalVMAFCheck(ctx context.Context, original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err error) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Get original file stats

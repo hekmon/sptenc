@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/liveterm/v2"
@@ -55,21 +56,25 @@ func main() {
 		case 0:
 			// all good
 			if *keep {
-				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n", workingDirectory)
+				fmt.Fprintf(os.Stdout, "You can find kept temporary files here: %s\n",
+					shellescape.Quote(workingDirectory),
+				)
 			} else {
 				fmt.Fprintf(os.Stdout, "Cleaning working directory...")
 				if err := os.RemoveAll(workingDirectory); err != nil {
 					fmt.Fprintf(os.Stderr, "Failed to clean working directory: %s\n", err)
 					exitCode = 3
 				}
-				fmt.Fprintf(os.Stdout, "Done.\n")
+				fmt.Fprintf(os.Stdout, " Done.\n")
 			}
 		case 1:
 			// warmup / config issue
 			// no tmp files to delete
 		case 2:
 			// runtime error, keep tmp files even if no -keep flag
-			fmt.Fprintf(os.Stderr, "Temporary work directory has been kept for inspection: %s\n", workingDirectory)
+			fmt.Fprintf(os.Stderr, "Temporary work directory has been kept for inspection: %s\n",
+				shellescape.Quote(workingDirectory),
+			)
 		case 3:
 			// exit error
 		}
@@ -303,17 +308,16 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		meanAvg, stdDevAvg,
 	)
 	var (
-		GOPQP          []int
-		statsQP        QPStats
-		aggregatedVMAF *ffmpegutils.VMAFStats
+		GOPQP   []int
+		statsQP QPStats
 	)
 	if !*force10bits && stats.VideoTrack().PixFmt == "yuv420p" {
 		*force10bits = true
 		if *debug {
-			fmt.Fprintf(bypass, "Activating 10bits encoding conversion because input is 8bits.\n")
+			fmt.Fprintln(bypass, "Activating 10bits encoding conversion because input is 8bits.")
 		}
 	}
-	if GOPQP, statsQP, aggregatedVMAF, err = findAllGOPQP(
+	if GOPQP, statsQP, err = findAllGOPQP(
 		ctx, workingDirectory, segmentPaths, nbGOP, meanAvg,
 		stdDevAvg, totalDuration, auditor, auditorAlt, *force10bits,
 	); err != nil {
@@ -321,22 +325,48 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		exitCode = 2
 		return
 	}
-	// Step 3 - Merge segments and check them
-	fmt.Fprintf(bypass, "Merging encoded GOP into one video stream...\n")
+	// Step 3 - Merging
+	fmt.Fprintln(bypass, "Merging encoded GOP into one video stream...")
 	concatScriptPath, err := generateConcatScript(workingDirectory, GOPQP)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to generate concat script: %s\n", err)
 		exitCode = 2
 		return
 	}
-	concatVideoPath := filepath.Join(workingDirectory, "concat.mkv")
+	concatVideoPath := filepath.Join(workingDirectory, "encoded_concat.mkv")
 	if err = GOPMerge(ctx, concatScriptPath, concatVideoPath, totalDuration); err != nil {
 		fmt.Fprintf(bypass, "Failed to merge encoded GOP: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 4 - Remux new video to final file
-	tagsFlags := generateTags(*stats.Format, statsQP, aggregatedVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
+	var vmafSource string
+	if inputIsDir {
+		fmt.Fprintln(bypass, "Merging input segments into one video stream for final VMAF check...")
+		if concatScriptPath, err = ffmpegutils.GenerateConcatScript(workingDirectory, segmentPaths); err != nil {
+			fmt.Fprintf(bypass, "Failed to create the input segments concat script file: %s\n", err)
+			exitCode = 2
+			return
+		}
+		concatVideoPath := filepath.Join(workingDirectory, "input_concat.mkv")
+		if err = SourceMerge(ctx, concatScriptPath, concatVideoPath, totalDuration); err != nil {
+			fmt.Fprintf(bypass, "Failed to merge input segments: %s\n", err)
+			exitCode = 2
+			return
+		}
+		vmafSource = concatVideoPath
+	} else {
+		vmafSource = *input
+	}
+	// Step 4 - Final VMAF check
+	fmt.Fprintln(bypass, "Computing final VMAF score...")
+	finalVMAF, err := finalVMAFCheck(ctx, vmafSource, concatVideoPath)
+	if err != nil {
+		fmt.Fprintf(bypass, "Failed to compute final VMAF score: %s\n", err)
+		exitCode = 2
+		return
+	}
+	// Step 5 - Remux new video to final file
+	tagsFlags := generateTags(*stats.Format, statsQP, finalVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
 	var finalFilePath string
 	if !inputIsDir || (inputIsDir && *source != "") {
 		fmt.Fprintln(bypass, "Remuxing to final file...")
@@ -379,14 +409,14 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		return
 	}
 	fmt.Fprintf(bypass, "Final file %q size: %s\n", filepath.Base(finalFilePath), finalFileSize)
-	// Step 5 - Recompute MKV stats if necessary
+	// Step 6 - Recompute MKV stats
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
 	if err = regenerateMKVStats(ctx, finalFilePath); err != nil {
 		fmt.Fprintf(bypass, "Failed to regenerate MKV stats: %s\n", err)
 		exitCode = 2
 		return
 	}
-	// Step 6 - Move final file to output directory
+	// Step 7 - Move final file to output directory
 	fmt.Fprintf(bypass, "Moving final file to output directory...\n")
 	finalOutputPath := computeNewDirFilePath(finalFilePath, *output, false)
 	if err = MoveProgress(finalFilePath, finalOutputPath); err != nil {
