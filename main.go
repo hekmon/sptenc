@@ -51,7 +51,11 @@ var (
 
 func main() {
 	var exitCode int
+	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
 	defer func() {
+		if *version {
+			os.Exit(exitCode)
+		}
 		switch exitCode {
 		case 0:
 			// all good
@@ -105,7 +109,6 @@ func main() {
 	vmafLimitMedian = flag.Float64("vmafmedian", VMAFOffValue, "VMAF acceptable score for median (percentil 50). If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitHMean = flag.Float64("vmafhmean", VMAFOffValue, "VMAF acceptable score for harmonic mean. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
 	vmafLimitMean = flag.Float64("vmafmean", 93, "VMAF acceptable score for mean. If the VMAF score for a GOP encoding is below this value, the encoding will be considered as invalid and a new encode will be done. If -1, this VMAF minimum score is not used.")
-	version := flag.Bool("version", false, "Show the current version of the GOP Encoder.")
 	flag.Parse()
 	if *version {
 		fmt.Printf("%s %s\n", liveterm.Hyperlink(sptencURLTagValue, "SplitEncoder"), Version)

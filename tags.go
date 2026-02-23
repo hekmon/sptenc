@@ -12,6 +12,7 @@ const (
 	titleTagValue             = "SptEncoded"
 	sptencURLTagKey           = "sptenc_url"
 	sptencURLTagValue         = "https://github.com/hekmon/sptenc"
+	sptencVersionTagKey       = "sptenc_version"
 	sptencEncoderTagKey       = "sptenc_encoder"
 	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
 	// Encoding QP stats
@@ -48,7 +49,8 @@ func generateTags(format ffmpegutils.FFProbeFormat, statsQP QPStats, vmaf *ffmpe
 	flags = append(flags,
 		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencURLTagKey, sptencURLTagValue),
-		"-metadata:s:v:0", "vendor_id=\"\"", // prevent ffmpeg from inserting VENDOR_ID : [0][0][0][0]
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVersionTagKey, Version),
+		"-metadata:s:v:0", "vendor_id=", // prevent ffmpeg from inserting VENDOR_ID : [0][0][0][0]
 	)
 	// Encoding
 	if *nvenc {
