@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/liveterm/v2"
@@ -402,6 +403,18 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		return
 	}
 	fmt.Fprintf(bypass, "Final file %q size: %s\n", filepath.Base(finalFilePath), finalFileSize)
+	// Display compression ratio using the VMAF source file (concat for dir, original for single file)
+	var originalSize cunits.Bits
+	if originalSize, err = getFileSize(vmafSource); err != nil {
+		fmt.Fprintf(bypass, "Failed to get original file size: %s\n", err)
+		exitCode = 2
+		return
+	}
+	fmt.Fprintf(bypass, "Original file size: %s\n", originalSize)
+	sizeReduction := originalSize - finalFileSize
+	compressionRatio := float64(sizeReduction) / float64(originalSize) * 100
+	fmt.Fprintf(bypass, "Compression: %s -> %s (%.1f%% reduction, %s saved)\n",
+		originalSize, finalFileSize, compressionRatio, sizeReduction)
 	// Step 6 - Recompute MKV stats
 	fmt.Fprintf(bypass, "Regenerating MKV stats...\n")
 	if err = regenerateMKVStats(ctx, finalFilePath); err != nil {
