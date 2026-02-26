@@ -110,7 +110,7 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 	return
 }
 
-func finalVMAFCheck(ctx context.Context, original, encoded string) (vmafStats *ffmpegutils.VMAFStats, err error) {
+func finalVMAFCheck(ctx context.Context, original, encoded string) (vmafStats *ffmpegutils.VMAFStats, ultraHD bool, err error) {
 	bypass := liveprogress.Bypass()
 	start := time.Now()
 	// Get original file stats
@@ -143,8 +143,9 @@ func finalVMAFCheck(ctx context.Context, original, encoded string) (vmafStats *f
 	fmt.Fprintf(bypass, "Files frames check took %s\n", duration.Round(time.Second))
 	// Now compute their VMAF together
 	encodedVideoTrack := encodedStats.VideoTrack()
+	ultraHD = encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight
 	start = time.Now()
-	vmaf, err := computeVMAF(ctx, encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, encodedVideoTrack.NbReadFrames, encodedVideoTrack.Height >= ffmpegutils.UltraHDHeight, true)
+	vmaf, err := computeVMAF(ctx, encoded, original, encoded+"_vmaf.json", encodedVideoTrack.RFrameRate, encodedVideoTrack.NbReadFrames, ultraHD, true)
 	if err != nil {
 		err = fmt.Errorf("failed to compute VMAF: %w", err)
 		return

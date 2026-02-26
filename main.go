@@ -228,29 +228,25 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	}
 	inputIsDir := inputInfo.IsDir()
 	//// Input file container infos
-	var stats ffmpegutils.FFProbeStats
+	// For directory input, probe first segment for video properties (handles upscaling correctly)
+	// For single file input, probe the input file directly
+	var (
+		stats        ffmpegutils.FFProbeStats
+		segmentPaths []string
+	)
 	if inputIsDir {
-		// For directory input, we need a source file for stream info
-		var sourcePath string
-		if *source != "" {
-			sourcePath = *source
-		} else {
-			// Use first segment for stream info when no source is provided
-			var segments []string
-			if segments, err = getSegmentsFromDir(*input); err != nil {
-				fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
-				exitCode = 2
-				return
-			}
-			if len(segments) == 0 {
-				fmt.Fprintln(bypass, "No segment files found in input directory")
-				exitCode = 2
-				return
-			}
-			sourcePath = segments[0]
+		if segmentPaths, err = getSegmentsFromDir(*input); err != nil {
+			fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
+			exitCode = 2
+			return
 		}
-		if stats, err = getStreamsInfos(ctx, sourcePath); err != nil {
-			fmt.Fprintf(bypass, "Failed to probe source file: %s\n", err)
+		if len(segmentPaths) == 0 {
+			fmt.Fprintln(bypass, "No segment files found in input directory")
+			exitCode = 2
+			return
+		}
+		if stats, err = getStreamsInfos(ctx, segmentPaths[0]); err != nil {
+			fmt.Fprintf(bypass, "Failed to probe segment file: %s\n", err)
 			exitCode = 2
 			return
 		}
@@ -269,16 +265,10 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	// Step 1 - Split file by GOP (or use existing segments from directory)
 	var (
 		nbGOP         int
-		segmentPaths  []string
 		totalDuration time.Duration
 	)
 	if inputIsDir {
 		fmt.Fprintln(bypass, "Using pre-segmented GOP files from input directory...")
-		if segmentPaths, err = getSegmentsFromDir(*input); err != nil {
-			fmt.Fprintf(bypass, "Failed to get segments from directory: %s\n", err)
-			exitCode = 2
-			return
-		}
 		nbGOP = len(segmentPaths)
 		fmt.Fprintf(bypass, "Found %d GOP segments in directory\n", nbGOP)
 		// Calculate total duration of all segments for accurate progress bar
@@ -362,14 +352,14 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	}
 	// Step 4 - Final VMAF check
 	fmt.Fprintln(bypass, "Computing final VMAF score...")
-	finalVMAF, err := finalVMAFCheck(ctx, vmafSource, concatVideoPath)
+	finalVMAF, ultraHD, err := finalVMAFCheck(ctx, vmafSource, concatVideoPath)
 	if err != nil {
 		fmt.Fprintf(bypass, "Failed to compute final VMAF score: %s\n", err)
 		exitCode = 2
 		return
 	}
 	// Step 5 - Remux new video to final file
-	tagsFlags := generateTags(*stats.Format, statsQP, finalVMAF, stats.VideoTrack().Height >= ffmpegutils.UltraHDHeight)
+	tagsFlags := generateTags(*stats.Format, statsQP, finalVMAF, ultraHD)
 	var finalFilePath string
 	if !inputIsDir || (inputIsDir && *source != "") {
 		fmt.Fprintln(bypass, "Remuxing to final file...")
