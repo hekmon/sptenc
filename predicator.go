@@ -101,6 +101,15 @@ func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
 	stats.Median = p.mediansInterpolator.Predict(qpf)
 	stats.HarmonicMean = p.hmeanInterpolator.Predict(qpf)
 	stats.Mean = p.meanInterpolator.Predict(qpf)
+	// Clamp all values to valid VMAF range [0, 100]
+	stats.Minimum = clampVMAF(stats.Minimum)
+	stats.Percentile1 = clampVMAF(stats.Percentile1)
+	stats.Percentile5 = clampVMAF(stats.Percentile5)
+	stats.Percentile10 = clampVMAF(stats.Percentile10)
+	stats.Percentile25 = clampVMAF(stats.Percentile25)
+	stats.Median = clampVMAF(stats.Median)
+	stats.HarmonicMean = clampVMAF(stats.HarmonicMean)
+	stats.Mean = clampVMAF(stats.Mean)
 	stats = p.adapt(qp, stats)
 	return
 }
@@ -188,6 +197,17 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 		return
 	}
 	return predicatedValue
+}
+
+// clamp restricts a value to the VAMF value range
+func clampVMAF(value float64) float64 {
+	if value < VMAFMinValue {
+		return VMAFMinValue
+	}
+	if value > VMAFMaxValue {
+		return VMAFMaxValue
+	}
+	return value
 }
 
 /*
