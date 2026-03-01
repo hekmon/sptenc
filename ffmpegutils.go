@@ -378,7 +378,7 @@ func SourceMerge(ctx context.Context, concatScript, outputPath string, expectedD
 	if *debug {
 		fmt.Fprintf(liveprogress.Bypass(), "Source segments merged within %q in %s\n", outputPath, duration.Round(time.Second))
 	} else {
-		fmt.Fprintf(liveprogress.Bypass(), "Source segment in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(liveprogress.Bypass(), "Source segment merged in %s\n", duration.Round(time.Second))
 	}
 	return
 }
