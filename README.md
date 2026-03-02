@@ -37,7 +37,7 @@ This approach produces the smallest possible file without compromising the targe
 
 ### Closed GOP Structure
 **sptenc requires all input files to have a closed GOP (Group of Pictures) structure.** This means each GOP must be self-contained and not reference frames from previous or subsequent GOPs. This is essential because:
-- When slicing an open GOP video, frames referencing other GOPs become undecodable and are dropped
+- When slicing an open GOP video, frames referencing other GOPs become undecodable and are dropped at decoding
 - Accumulated dropped frames shorten the video duration, causing audio/video desynchronization
 - VMAF comparison requires frame-exact alignment between source and encoded segments
 
