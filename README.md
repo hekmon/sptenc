@@ -8,16 +8,9 @@ A final, complete VMAF comparison between the encoded output and original source
 
 This approach produces the smallest possible file without compromising the target quality defined by the VMAF profile.
 
+> **Trade-off:** This quality optimization comes at a cost: encoding time will be significantly longer than standard single-pass encoding, as multiple QP values are tested on each segment until all VMAF thresholds are met.
+
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding.
-
-## How It Works
-
-1. **Scene detection** — The input is split at scene change boundaries (FFmpeg `scdet`), producing semantically coherent segments for consistent per-segment VMAF scoring. Alternatively, scene detection can be disabled to split at every I-frame instead.
-2. **Per-segment encoding** — Each segment is encoded independently with `libx265` or `NVENC`.
-3. **VMAF validation (post-encode)** — After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
-4. **Adaptive QP search** — sptenc maintains a QP statistics database per VMAF profile across runs (see below). This significantly accelerates convergence.
-5. **Best effort** — If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
-6. **Muxing & tagging** — Segments are merged into a single output file. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags.
 
 ## Key Features
 
@@ -27,9 +20,18 @@ This approach produces the smallest possible file without compromising the targe
 - 🔍 **4 VMAF models, auto-selected** — Automatically uses 1080p or 4K model based on input resolution; add `-vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
 - 📋 **VMAF report embedded in output** — Final VMAF comparison results stored in the output file's metadata tags for full traceability
 - 🧠 **Adaptive QP search with persistent stats** — Learns from previous encodes to dramatically reduce QP search iterations (see below)
-- ⚡ **NVENC support** — GPU encoding for fast VMAF profile prototyping before the final `libx265` encode (which produces significantly smaller files)
+- ⚡ **NVENC support** — GPU encoding for fast VMAF profile prototyping before the final `libx265` encode (which produces significantly smaller files at the cost of longer encoding times)
 - 🌸 **Anime tuning** — `-anime` flag for `libx265` parameters optimized for animation
 - 🖥️ **VMAF-CUDA** — Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `-vmafcuda` flag. See the building guide below.
+
+## How It Works
+
+1. **Scene detection** — The input is split at scene change boundaries (FFmpeg `scdet`), producing semantically coherent segments for consistent per-segment VMAF scoring. Alternatively, scene detection can be disabled to split at every I-frame instead.
+2. **Per-segment encoding** — Each segment is encoded independently with `libx265` or `NVENC`.
+3. **VMAF validation (post-encode)** — After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
+4. **Adaptive QP search** — sptenc maintains a QP statistics database per VMAF profile across runs (see below). This significantly accelerates convergence on subsequent runs.
+5. **Best effort** — If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs. An alternative VMAF minimum can be set/used for such cases to avoid the large output of QP 0 encodes.
+6. **Muxing & tagging** — Segments are merged into a single output file. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags.
 
 ## Input Requirements
 
@@ -53,7 +55,7 @@ When using a pre-segmented directory, you can also use `-source` to specify the 
 
 ## Adaptive QP Search
 
-One of sptenc's core performance features. After each complete encode job finishes (all segments processed), sptenc stores QP statistics **per VMAF profile** (i.e. the combination of enabled metrics and their target values), weighted by the number of GOPs in each segment.
+One of sptenc's core performance features. After each complete encode job finishes (all segments processed), sptenc stores QP statistics **per VMAF profile** (i.e. the combination of enabled metrics and their target values), weighted by the number of GOPs/segments.
 
 ### Persistent Stats from Previous Runs
 
@@ -62,9 +64,9 @@ QP statistics are persisted across runs and used to accelerate future encodes wi
 - **Mean QP** — used as the starting point for the QP search on the next encode, avoiding blind starts from an arbitrary default
 - **Standard deviation** — used as the search increment when exploring QP values outside the already-observed range
 
-### Interpolation Within Already Computed Range
+### Interpolation Within Already Observed Range
 
-When the next QP to test falls **inside the already-observed range** (e.g., QP 19 and QP 23 have been computed and QP 19 is ok but QP 23 is not, the next candidate is between them), sptenc uses **Fritsch-Butland monotone cubic interpolation** on N dimensions (one per active VMAF metric) to predict the next QP candidate, rather than probing blindly.
+When the next QP to test falls **inside the already-observed range** (e.g., QP 19 and QP 23 have been computed and QP 19 is ok but QP 23 is not, the next candidate will be somewhere between them), sptenc uses **Fritsch-Butland monotone cubic interpolation** on N dimensions (one per active VMAF metric) to predict the next QP candidate, rather than probing blindly.
 
 ### Results
 
