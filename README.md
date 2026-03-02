@@ -46,6 +46,8 @@ If your source is not closed GOP, convert it first:
 # TODO
 ```
 
+> **Note:** Bluray remuxes are typically closed GOP, but often use a fixed length GOPs (e.g. 10s). This will lower the QP variation range and may result in lower efficiency. Even for Bluray remuxes with closed GOP, it's recommended to run the above command to use the encoder heuristics to recreate variable GOP length.
+
 ### Pre-segmented Input (Optional)
 Instead of letting sptenc split the input automatically, you can provide an already-split directory of closed GOP segments:
 ```bash
