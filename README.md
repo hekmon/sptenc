@@ -102,9 +102,7 @@ This results in significantly fewer encode iterations and improved encode time. 
 | Small episode | ~7h30 | ~4h |
 | Film | ~85h | ~60h |
 
-The stats files are **profile-specific**: changing any VMAF threshold value will change the file name and starts a fresh learning curve for this new profile.
-
-Checkout the sub sections to understand what stats are stored and how they are used.
+The stats files are **profile-specific**: changing any VMAF threshold value will change the file name and start a fresh learning curve for this new profile.
 
 ### Persistent Stats from Previous Runs
 
@@ -141,8 +139,6 @@ The model is **automatically selected** based on input resolution. Use `-vmafneg
 | **60–70** | Noticeable degradation | Low resolution or heavy compression |
 | **40–60** | Poor quality | Aggressive encoding |
 | **< 40** | Very poor quality | Very low resolutions (180p–240p) |
-
-> ⚠️ **Calibration note:** VMAF 100 was calibrated against a 1080p CRF 22 encode, and VMAF 20 against a 240p CRF 28 encode. Scores below 50 are rarely encountered with 1080p sources regardless of encoding quality.
 
 **Sources:** [StreamingLearningCenter](https://streaminglearningcenter.com/learning/mapping-ssim-vmaf-scores-subjective-ratings.html) · [StreamingMedia](https://www.streamingmedia.com/Articles/Columns/The-Producers-View/Comparing-Quality-Metrics-Up-and-Down-the-Encoding-Ladder-121764.aspx)
 
