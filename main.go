@@ -21,18 +21,19 @@ var (
 	//  overrided during compilation
 	Version = "dev"
 	// Flags
-	input       *string
-	source      *string
-	tmpDir      *string
-	output      *string
-	animeTuning *bool
-	gpu         *int
-	nvdec       *bool
-	nvenc       *bool
-	force10bits *bool
-	flac        *bool
-	debug       *bool
-	keep        *bool
+	input                *string
+	source               *string
+	tmpDir               *string
+	output               *string
+	animeTuning          *bool
+	gpu                  *int
+	nvdec                *bool
+	nvenc                *bool
+	force10bits          *bool
+	flac                 *bool
+	debug                *bool
+	keep                 *bool
+	sceneDetectThreshold *float64
 	//// vmaf
 	vmafcuda        *bool
 	vmafNEG         *bool
@@ -98,6 +99,7 @@ func main() {
 	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase if the input audio is in PCM.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
+	sceneDetectThreshold = flag.Float64("scenedetectthreshold", 0, "Scene detection threshold for splitting video (0-100). If 0, will cut at each I-frame. If > 0, will first analyze the video to detect scene changes and cut at detected scene timestamps. Recommended for codecs like FFV1 where every frame is an I-frame. See https://ffmpeg.org/ffmpeg-filters.html#scdet-1 for threshold values.")
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Recommended when either source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains. Expect lower scores compared to standard VMAF models.")
@@ -124,6 +126,11 @@ func main() {
 
 	if *gpu < 0 {
 		fmt.Fprintln(os.Stderr, "GPU must be >= 0")
+		exitCode = 1
+		return
+	}
+	if *sceneDetectThreshold < 0 || *sceneDetectThreshold > 100 {
+		fmt.Fprintln(os.Stderr, "Scene detection threshold must be between 0 and 100 (inclusive)")
 		exitCode = 1
 		return
 	}
@@ -288,7 +295,7 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		fmt.Fprintf(bypass, "Total duration of segments: %s\n", totalDuration)
 	} else {
 		fmt.Fprintln(bypass, "Splitting video stream by groups of pictures (GOP)...")
-		if err = splitFile(ctx, *input, workingDirectory, stats.Format.Duration); err != nil {
+		if err = splitFile(ctx, *input, workingDirectory, stats.Format.Duration, *sceneDetectThreshold); err != nil {
 			fmt.Fprintf(bypass, "Failed to split GOP: %s\n", err)
 			exitCode = 2
 			return

@@ -97,8 +97,21 @@ func getStreamsInfosCF(ctx context.Context, path string, timeStats bool) (stats 
 	})
 }
 
-func splitFile(ctx context.Context, path, outputDir string, totalDuration time.Duration) (err error) {
-	// live progress
+func splitFile(ctx context.Context, path, outputDir string, totalDuration time.Duration, sceneDetectThreshold float64) (err error) {
+	bypass := liveprogress.Bypass()
+	// If scene detection threshold is set, detect scenes first
+	var scenesMarkers []time.Duration
+	if sceneDetectThreshold > 0 {
+		fmt.Fprintf(bypass, "Detecting scenes with threshold %0.2f...\n", sceneDetectThreshold)
+		if scenesMarkers, err = detectScenes(ctx, path, sceneDetectThreshold, totalDuration); err != nil {
+			return fmt.Errorf("failed to detect scenes: %w", err)
+		}
+		fmt.Fprintf(bypass, "Detected %d scenes\n", len(scenesMarkers))
+		if *debug {
+			fmt.Fprintf(bypass, "Scenes markers: %+v\n", scenesMarkers)
+		}
+	}
+	// live progress for splitting
 	var currentStats ffmpegutils.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
@@ -122,12 +135,13 @@ func splitFile(ctx context.Context, path, outputDir string, totalDuration time.D
 		currentStats = stats
 		bar.CurrentSet(uint64(stats.Time))
 	}
-	// Execute
+	// Execute segmentation
 	start := time.Now()
 	if err = ffmpegutils.Segment(ctx, ffmpegutils.SegmentConfig{
 		// Input
 		Input: path,
 		// Output
+		ScenesMarkers:   scenesMarkers,
 		OutputDir:       outputDir,
 		ResetTimestamps: true,
 		// Reporting
@@ -139,7 +153,60 @@ func splitFile(ctx context.Context, path, outputDir string, totalDuration time.D
 	}
 	duration := time.Since(start)
 	// Done
-	fmt.Fprintf(liveprogress.Bypass(), "GOP slicing done in %s\n", duration.Round(time.Second))
+	if sceneDetectThreshold > 0 {
+		fmt.Fprintf(bypass, "Scene-based slicing done in %s\n", duration.Round(time.Second))
+	} else {
+		fmt.Fprintf(bypass, "GOP slicing done in %s\n", duration.Round(time.Second))
+	}
+	return
+}
+
+func detectScenes(ctx context.Context, path string, threshold float64, totalDuration time.Duration) (scenesMarkers []time.Duration, err error) {
+	// live progress
+	var currentStats ffmpegutils.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalDuration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Detecting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
+	// Execute scene detection
+	scenes, err := ffmpegutils.ScenesDetection(ctx, ffmpegutils.ScenesDetectionConfig{
+		// Input
+		Path: path,
+		// scdet
+		Threshold: threshold,
+		// Reporting
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scene detection failed: %w", err)
+	}
+	// Convert scenes to markers (timestamps as time.Duration)
+	if len(scenes) > 0 {
+		scenesMarkers = make([]time.Duration, len(scenes))
+		for i, scene := range scenes {
+			scenesMarkers[i] = scene.Start
+		}
+	}
 	return
 }
 
