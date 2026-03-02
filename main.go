@@ -228,6 +228,12 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 		return
 	}
 	inputIsDir := inputInfo.IsDir()
+	// Validate that -source is only used with directory input
+	if !inputIsDir && *source != "" {
+		fmt.Fprintln(os.Stderr, "The -source flag should only be used when -input is a directory")
+		exitCode = 1
+		return
+	}
 	//// Input file container infos
 	// For directory input, probe first segment for video properties (handles upscaling correctly)
 	// For single file input, probe the input file directly
