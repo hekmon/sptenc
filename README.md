@@ -64,7 +64,7 @@ One of sptenc's core performance features. After each complete encode job finish
 QP statistics are persisted across runs and used to accelerate future encodes with the same VMAF profile:
 
 - **Mean QP** — used as the starting point for the QP search on the next encode, avoiding blind starts from an arbitrary default
-- **Standard deviation** — used as the search increment when exploring QP values outside the already-observed range
+- **Standard deviation** — used as the QP search increment when exploring QP values outside the already-observed range
 
 ### Interpolation Within Already Observed Range
 
@@ -119,25 +119,65 @@ The stats files are **profile-specific**: changing any VMAF threshold value will
 ./sptenc -input video.mkv -vmafmean -1 -vmafp5 85 -vmafp1 75
 ```
 
-## VMAF Thresholds
+## VMAF
 
-| Flag | Description | Default |
+### Quality Score Reference
+
+| VMAF Score | Perceptual Quality | Typical Context |
 |---|---|---|
-| `-vmafmean` | Arithmetic mean of all frames | **93** |
-| `-vmafhmean` | Harmonic mean (penalizes outliers more) | disabled |
-| `-vmafmedian` | Median (P50) | disabled |
-| `-vmafp25` | 25th percentile | disabled |
-| `-vmafp10` | 10th percentile | disabled |
-| `-vmafp5` | 5th percentile | disabled |
-| `-vmafp1` | 1st percentile | disabled |
-| `-vmafmin` | Worst single frame | disabled |
-| `-vmafminalt` | Fallback worst-frame for best-effort segments | disabled |
+| **95–100** | Indistinguishable from source | Archival, mastering, very high bitrate |
+| **90–95** | Noticeable but not annoying | Premium streaming — Netflix standard: **93** |
+| **80–90** | Good quality, minor artifacts | Acceptable HD streaming |
+| **70–80** | Medium quality, visible artifacts | SD streaming or constrained bitrate |
+| **60–70** | Noticeable degradation | Low resolution or heavy compression |
+| **40–60** | Poor quality | Aggressive encoding |
+| **< 40** | Very poor quality | Very low resolutions (180p–240p) |
 
-All enabled thresholds must pass simultaneously. Set any to `-1` to disable.
+> ⚠️ **Calibration note:** VMAF 100 was calibrated against a 1080p CRF 22 encode, and VMAF 20 against a 240p CRF 28 encode. Scores below 50 are rarely encountered with 1080p sources regardless of encoding quality.
 
-> **Tip:** Start with `-vmafmean 95` alone. Inspect the embedded VMAF report in the output to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
+**Sources:** [StreamingLearningCenter](https://streaminglearningcenter.com/learning/mapping-ssim-vmaf-scores-subjective-ratings.html) · [StreamingMedia](https://www.streamingmedia.com/Articles/Columns/The-Producers-View/Comparing-Quality-Metrics-Up-and-Down-the-Encoding-Ladder-121764.aspx)
 
-## VMAF Models
+### sptenc Thresholds
+
+| Flag | Description | Default | Use Case |
+|---|---|---|---|
+| `-vmafmean` | Arithmetic mean of all frames | **93** | General quality targeting |
+| `-vmafhmean` | Harmonic mean (penalizes outliers) | disabled | Stricter than mean; enforces consistency |
+| `-vmafmedian` | Median (P50) | disabled | Ensures 50% of frames meet threshold |
+| `-vmafp25` | 25th percentile | disabled | Ensures 75% of frames meet threshold |
+| `-vmafp10` | 10th percentile | disabled | Ensures 90% of frames meet threshold |
+| `-vmafp5` | 5th percentile | disabled | Ensures 95% of frames meet threshold |
+| `-vmafp1` | 1st percentile | disabled | Ensures 99% of frames meet threshold |
+| `-vmafmin` | Worst single frame | disabled | Ensures 100% of frames meet threshold — may inflate bitrate |
+| `-vmafminalt` | Fallback for best-effort segments | disabled | For segments that cannot meet `-vmafmin` even at QP 0 |
+
+**Rules:**
+- All enabled thresholds must pass simultaneously (AND logic)
+- Set any threshold to `-1` to disable it
+
+> 💡 **Tip:** Start with `-vmafmean 95` alone. Inspect the embedded VMAF report to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
+
+### Recommended Values
+
+VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND** (Just Noticeable Difference —
+detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%) ([Netflix via StreamingLearningCenter](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html)).
+The standard target for premium encoding is **93** (arithmetic mean) ([StreamingLearningCenter — Optimal Encoding Ladder with VMAF](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)).
+
+| Use Case | Recommended metric | Target value |
+|---|---|---|
+| General streaming / VOD | `-vmafmean` | `93` |
+| Live sports / fast motion | `-vmafmean` + `-vmafp10` | `93` + `88` |
+| Archival / mastering | `-vmafhmean` | `95` |
+| Mobile / bandwidth-constrained | `-vmafmean` | `85–90` |
+| Quality consistency critical | `-vmafp5` or `-vmafp1` | `85` |
+
+> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is
+> *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers.
+> The 95 target, from a more recent paper, is the lowest score at which content is *"on average
+> subjectively indistinguishable from the original"* — a higher bar that costs ~1400 kbps extra at the
+> top rung ([StreamingLearningCenter](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)).
+
+### Models
 
 | Resolution | Standard Model | NEG Model |
 |---|---|---|
