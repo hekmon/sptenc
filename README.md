@@ -1,9 +1,11 @@
 # sptenc — Split Encoder
 
 `sptenc` (Split Encoder) is a scene-aware, [VMAF](https://github.com/Netflix/vmaf)-driven video transcoder.
+
 It splits the input into scene-aligned segments, encodes each one independently, and validates the result against configurable VMAF thresholds before accepting it.
 Failed segments are automatically re-encoded at a lower QP until all thresholds are met.
 A final, complete VMAF comparison between the encoded output and original source is performed at the end, and its results are embedded into the output file's metadata tags.
+
 This approach produces the smallest possible file without compromising the target quality defined by the VMAF profile.
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding.
@@ -27,7 +29,7 @@ This approach produces the smallest possible file without compromising the targe
 - 🧠 **Adaptive QP search with persistent stats** — Learns from previous encodes to dramatically reduce QP search iterations (see below)
 - ⚡ **NVENC support** — GPU encoding for fast VMAF profile prototyping before the final `libx265` encode (which produces significantly smaller files)
 - 🌸 **Anime tuning** — `-anime` flag for `libx265` parameters optimized for animation
-- 🖥️ **VMAF-CUDA** — Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `-vmafcuda` flag
+- 🖥️ **VMAF-CUDA** — Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `-vmafcuda` flag. See the building guide below.
 
 ## Input Requirements
 
@@ -60,9 +62,9 @@ QP statistics are persisted across runs and used to accelerate future encodes wi
 - **Mean QP** — used as the starting point for the QP search on the next encode, avoiding blind starts from an arbitrary default
 - **Standard deviation** — used as the search increment when exploring QP values outside the already-observed range
 
-### Interpolation Within Computed Range
+### Interpolation Within Already Computed Range
 
-When the next QP to test falls **inside the already-observed range** (e.g., QP 19 and QP 23 have been computed, and the next candidate is between them), sptenc uses **Fritsch-Butland monotone cubic interpolation** on N dimensions (one per active VMAF metric) to predict the next QP candidate, rather than probing blindly.
+When the next QP to test falls **inside the already-observed range** (e.g., QP 19 and QP 23 have been computed and QP 19 is ok but QP 23 is not, the next candidate is between them), sptenc uses **Fritsch-Butland monotone cubic interpolation** on N dimensions (one per active VMAF metric) to predict the next QP candidate, rather than probing blindly.
 
 ### Results
 
@@ -120,11 +122,11 @@ The stats files are **profile-specific**: changing any VMAF threshold value will
 | `-vmafmean` | Arithmetic mean of all frames | **93** |
 | `-vmafhmean` | Harmonic mean (penalizes outliers more) | disabled |
 | `-vmafmedian` | Median (P50) | disabled |
-| `-vmafmin` | Worst single frame | disabled |
-| `-vmafp1` | 1st percentile | disabled |
-| `-vmafp5` | 5th percentile | disabled |
-| `-vmafp10` | 10th percentile | disabled |
 | `-vmafp25` | 25th percentile | disabled |
+| `-vmafp10` | 10th percentile | disabled |
+| `-vmafp5` | 5th percentile | disabled |
+| `-vmafp1` | 1st percentile | disabled |
+| `-vmafmin` | Worst single frame | disabled |
 | `-vmafminalt` | Fallback worst-frame for best-effort segments | disabled |
 
 All enabled thresholds must pass simultaneously. Set any to `-1` to disable.
@@ -133,10 +135,10 @@ All enabled thresholds must pass simultaneously. Set any to `-1` to disable.
 
 ## VMAF Models
 
-| Resolution | Standard | NEG |
+| Resolution | Standard Model | NEG Model |
 |---|---|---|
-| ≤ 1080p | `vmaf_v0.6.1` | `vmaf_v0.6.1_neg` |
-| 4K (2160p+) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1_neg` |
+| < 4K | `vmaf_v0.6.1` | `vmaf_v0.6.1_neg` |
+| ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1_neg` |
 
 The model is **automatically selected** based on input resolution. Use `-vmafneg` when the source has been upscaled, sharpened, or denoised — standard models will over-score such content.
 
