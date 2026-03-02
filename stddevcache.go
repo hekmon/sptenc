@@ -78,19 +78,9 @@ func (rh *RunHistory) GetMeanStdDev() (mean, stddev int) {
 		fmt.Printf("Previous runs means average is: %f\n", meanf)
 		fmt.Printf("Previous runs stddev average is: %f\n", stddevf)
 	}
-	// Compute integers limits englobing the real float64 values
+	// Round to nearest integers - trust the statistics
 	mean = int(math.Round(meanf))
-	upper := meanf + stddevf
-	lower := meanf - stddevf
-	for stddev = int(math.Ceil(stddevf)); ; stddev++ {
-		if float64(mean-stddev) > lower {
-			continue
-		}
-		if float64(mean+stddev) < upper {
-			continue
-		}
-		break
-	}
+	stddev = max(1, int(math.Round(stddevf)))
 	return
 }
 
