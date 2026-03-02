@@ -137,7 +137,7 @@ The stats files are **profile-specific**: changing any VMAF threshold value will
 
 **Sources:** [StreamingLearningCenter](https://streaminglearningcenter.com/learning/mapping-ssim-vmaf-scores-subjective-ratings.html) · [StreamingMedia](https://www.streamingmedia.com/Articles/Columns/The-Producers-View/Comparing-Quality-Metrics-Up-and-Down-the-Encoding-Ladder-121764.aspx)
 
-### sptenc Thresholds
+### sptenc thresholds
 
 | Flag | Description | Default | Use Case |
 |---|---|---|---|
@@ -155,13 +155,12 @@ The stats files are **profile-specific**: changing any VMAF threshold value will
 - All enabled thresholds must pass simultaneously (AND logic)
 - Set any threshold to `-1` to disable it
 
-> 💡 **Tip:** Start with `-vmafmean 95` alone. Inspect the embedded VMAF report to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
+> 💡 **Tip:** Start with `-vmafmean 93` alone with the `-debug` flag to inpect each QOP's VMAF score to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
 
 ### Recommended Values
 
 VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND** (Just Noticeable Difference —
 detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%) ([Netflix via StreamingLearningCenter](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html)).
-The standard target for premium encoding is **93** (arithmetic mean) ([StreamingLearningCenter — Optimal Encoding Ladder with VMAF](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)).
 
 | Use Case | Recommended metric | Target value |
 |---|---|---|
@@ -196,6 +195,22 @@ The model is **automatically selected** based on input resolution. Use `-vmafneg
 | Speed | Slower | ✅ Much faster |
 | Recommended for | Final archival encode | VMAF profile prototyping |
 
+### Base ffmpeg encode options
+
+Under the hood, here are the base ffmpeg encoding options used by `sptenc`. There can be others depending on options specified to `sptenc` (like `-nvdec`).
+
+#### libx265
+
+```bash
+ffmpeg [...] -c:v libx265 -profile:v main10 -preset slow -qp X -x265-params 'aq-mode=3:hevc-aq=%1' [...]
+``` 
+
+#### NVENC
+
+```bash
+ffmpeg [...] -c:v hevc_nvenc -preset p7 -profile:v main10 -tune hq -rc constqp -qp X -spatial_aq 1 -temporal_aq 1 -rc-lookahead 32 [...]
+```
+
 ## Installation
 
 ```bash
@@ -206,7 +221,7 @@ go build -o sptenc .
 
 **External Dependencies:**
 - `ffmpeg` — compiled with `libx265` and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128))
-- `ffprobe` — bundled with ffmpeg
+- `ffprobe` — bundled with ffmpeg build
 - `mkvpropedit` — from [MKVToolNix](https://mkvtoolnix.download/)
 
 ## License
