@@ -99,7 +99,7 @@ func main() {
 	flac = flag.Bool("flac", false, "Encode the audio in FLAC during the merging phase if the input audio is in PCM.")
 	debug = flag.Bool("debug", false, "Print more logs, especially the executed commands.")
 	keep = flag.Bool("keep", false, "Keep temporary files (beware of disk space usage !). Usefull for debugging only.")
-	sceneDetectThreshold = flag.Float64("scenedetectthreshold", 0, "Scene detection threshold for splitting video (0-100). If 0, will cut at each I-frame. If > 0, will first analyze the video to detect scene changes and cut at detected scene timestamps. Recommended for codecs like FFV1 where every frame is an I-frame. See https://ffmpeg.org/ffmpeg-filters.html#scdet-1 for threshold values.")
+	sceneDetectThreshold = flag.Float64("scenedetectthreshold", 10, "Scene detection threshold for splitting video (0-100). Default is 10 (FFmpeg's scdet default). If 0, will cut at each I-frame (skip the detection phase but may produce too many cuts or even unusable GOP of 1 frame each with codecs like FFV1). If > 0, will first analyze the video to detect scene changes and cut at detected scene timestamps. See https://ffmpeg.org/ffmpeg-filters.html#scdet-1 for threshold values.")
 	//// vmaf
 	vmafcuda = flag.Bool("vmafcuda", false, "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.")
 	vmafNEG = flag.Bool("vmafneg", false, "Use VMAF NEG (No Enhancement Gain) alternative models. Recommended when either source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains. Expect lower scores compared to standard VMAF models.")
