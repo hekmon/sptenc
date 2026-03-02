@@ -164,9 +164,10 @@ detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%) ([Netflix vi
 
 | Use Case | Recommended metric | Target value |
 |---|---|---|
+| "I am afraid of deleting my lossless master file" | `-vmafmean` + `-vmafmin` | `99` + `93` |
+| Archival / mastering | `-vmafhmean` | `95` |
 | General streaming / VOD | `-vmafmean` | `93` |
 | Live sports / fast motion | `-vmafmean` + `-vmafp10` | `93` + `88` |
-| Archival / mastering | `-vmafhmean` | `95` |
 | Mobile / bandwidth-constrained | `-vmafmean` | `85–90` |
 | Quality consistency critical | `-vmafp5` or `-vmafp1` | `85` |
 
