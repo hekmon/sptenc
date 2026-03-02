@@ -42,6 +42,7 @@ This approach produces the smallest possible file without compromising the targe
 - VMAF comparison requires frame-exact alignment between source and encoded segments
 
 If your source is not closed GOP, convert it first:
+
 ```bash
 # TODO
 ```
@@ -49,9 +50,11 @@ If your source is not closed GOP, convert it first:
 > **Note:** Bluray remuxes are typically closed GOP, but often use a fixed length GOPs (e.g. 10s). This will lower the QP variation range and may result in lower efficiency. Even for Bluray remuxes with closed GOP, it's recommended to run the above command to use the encoder heuristics to recreate variable GOP length.
 
 ### Pre-segmented Input (Optional)
+
 Instead of letting sptenc split the input automatically, you can provide an already-split directory of closed GOP segments:
+
 ```bash
-./sptenc -input ./gop_dir/ -source original_with_audio.mkv -vmafmean 95
+./sptenc -input ./gop_dir/ -source original_with_audio.mkv
 ```
 When using a pre-segmented directory, you can also use `-source` to specify the original file with audio tracks for final remuxing.
 
@@ -76,8 +79,8 @@ This results in significantly fewer encode iterations and improved encode time. 
 
 | Encode job | Without stats | With stats |
 |---|---|---|
-| Film | ~85h | ~60h |
 | Small episode | ~7h30 | ~4h |
+| Film | ~85h | ~60h |
 
 The stats files are **profile-specific**: changing any VMAF threshold value will change the file name and starts a fresh learning curve for this new profile.
 
@@ -155,7 +158,7 @@ The stats files are **profile-specific**: changing any VMAF threshold value will
 - All enabled thresholds must pass simultaneously (AND logic)
 - Set any threshold to `-1` to disable it
 
-> 💡 **Tip:** Start with `-vmafmean 93` alone with the `-debug` flag to inpect each QOP's VMAF score to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
+> 💡 **Tip:** Start with `-vmafmean 93` alone with the `-debug` flag to inpect each encode attempt VMAF score to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
 
 ### Recommended Values
 
