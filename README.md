@@ -79,7 +79,7 @@ This results in significantly fewer encode iterations and improved encode time. 
 | Film | ~85h | ~60h |
 | Small episode | ~7h30 | ~4h |
 
-The stats files are **profile-specific**: changing any VMAF threshold value will change the file name and starts a fresh learning curve for a new profile.
+The stats files are **profile-specific**: changing any VMAF threshold value will change the file name and starts a fresh learning curve for this new profile.
 
 ## Quick Start
 
@@ -145,6 +145,8 @@ All enabled thresholds must pass simultaneously. Set any to `-1` to disable.
 | ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1_neg` |
 
 The model is **automatically selected** based on input resolution. Use `-vmafneg` when the source has been upscaled, sharpened, or denoised — standard models will over-score such content.
+
+> **Note:** NEG stands for **No Enhancement Gain**. These variants are designed to avoid over-scoring processed content (upscaled, denoised, sharpened). See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models.md#disabling-enhancement-gain-neg-mode) for details.
 
 ## NVENC vs libx265
 
