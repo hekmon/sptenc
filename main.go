@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -50,6 +51,16 @@ var (
 	workingDirectory string
 	interrupted      bool
 )
+
+// isASCII checks if a string contains only ASCII characters (code points 0-127)
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return false
+		}
+	}
+	return true
+}
 
 func main() {
 	var exitCode int
@@ -166,6 +177,14 @@ func main() {
 	}
 	if !filepath.IsAbs(*tmpDir) {
 		*tmpDir = filepath.Join(currentWorkingDirectory, *tmpDir)
+	}
+	// Validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
+	if runtime.GOOS == "windows" && !isASCII(*tmpDir) {
+		fmt.Fprintf(os.Stderr, "Error: The temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows.\n")
+		fmt.Fprintf(os.Stderr, "Please use a path with only ASCII characters (no accents or special characters).\n")
+		fmt.Fprintf(os.Stderr, "Current path: %s\n", *tmpDir)
+		exitCode = 1
+		return
 	}
 	// If source is provided, convert to absolute path and validate
 	if *source != "" {
