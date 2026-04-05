@@ -175,18 +175,7 @@ func main() {
 	if *output != "" && !filepath.IsAbs(*output) {
 		*output = filepath.Join(currentWorkingDirectory, *output)
 	}
-	if !filepath.IsAbs(*tmpDir) {
-		*tmpDir = filepath.Join(currentWorkingDirectory, *tmpDir)
-	}
-	// Validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
-	if runtime.GOOS == "windows" && !isASCII(*tmpDir) {
-		fmt.Fprintf(os.Stderr, "Error: The temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows.\n")
-		fmt.Fprintf(os.Stderr, "Please use a path with only ASCII characters (no accents or special characters).\n")
-		fmt.Fprintf(os.Stderr, "Current path: %s\n", *tmpDir)
-		exitCode = 1
-		return
-	}
-	// If source is provided, convert to absolute path and validate
+	// If source is provided, convert to absolute path and validate (must be done before output determination)
 	if *source != "" {
 		if !filepath.IsAbs(*source) {
 			*source = filepath.Join(currentWorkingDirectory, *source)
@@ -202,6 +191,37 @@ func main() {
 			exitCode = 1
 			return
 		}
+	}
+	// If output is empty, determine default output directory
+	if *output == "" {
+		inputInfo, err := os.Stat(*input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to access input: %s\n", err)
+			exitCode = 1
+			return
+		}
+		if inputInfo.IsDir() {
+			// Pre-segmented mode: use source directory if provided, otherwise input directory
+			if *source != "" {
+				*output = filepath.Dir(*source)
+			} else {
+				*output = *input
+			}
+		} else {
+			// Single file mode: use input file's directory
+			*output = filepath.Dir(*input)
+		}
+	}
+	if !filepath.IsAbs(*tmpDir) {
+		*tmpDir = filepath.Join(currentWorkingDirectory, *tmpDir)
+	}
+	// Validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
+	if runtime.GOOS == "windows" && !isASCII(*tmpDir) {
+		fmt.Fprintf(os.Stderr, "Error: The temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows.\n")
+		fmt.Fprintf(os.Stderr, "Please use a path with only ASCII characters (no accents or special characters).\n")
+		fmt.Fprintf(os.Stderr, "Current path: %s\n", *tmpDir)
+		exitCode = 1
+		return
 	}
 	workingDirectory = generateWorkingDirectoryPath(*tmpDir)
 	// Load previous ideal QPs
