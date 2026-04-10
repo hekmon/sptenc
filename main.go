@@ -255,8 +255,13 @@ func sptenc(ctx context.Context, auditor, auditorAlt *VMAFChecker) (exitCode int
 	var err error
 	bypass := liveprogress.Bypass()
 	start := time.Now()
-	// Prepare
-	fmt.Fprintf(bypass, "Input: %q\n", filepath.Base(*input))
+	// Prepare - print status
+	fmt.Fprintf(bypass, "Input: %s\n", *input)
+	if *source != "" {
+		fmt.Fprintf(bypass, "Source: %s\n", *source)
+	}
+	fmt.Fprintf(bypass, "Output: %s\n", *output)
+	fmt.Fprintf(bypass, "Tmp: %s\n", *tmpDir)
 	//// Working directory
 	if err = os.MkdirAll(workingDirectory, 0755); err != nil {
 		fmt.Fprintf(bypass, "Failed to create working directory: %s\n", err)
