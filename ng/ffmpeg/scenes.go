@@ -143,10 +143,9 @@ func scdetProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats
 
 // Scene detection constants
 const (
-	scdetLineFields      = 7    // Expected fields in scdet output line
-	scdetScoreFieldIndex = 4    // Field index for score
-	scdetTimeFieldIndex  = 6    // Field index for timestamp
-	scdetTimeMultiplier  = 1000 // Convert seconds to milliseconds
+	scdetLineFields      = 7 // Expected fields in scdet output line
+	scdetScoreFieldIndex = 4 // Field index for score
+	scdetTimeFieldIndex  = 6 // Field index for timestamp
 )
 
 func parseScdet(line string) (scene Scene, err error) {
@@ -170,8 +169,7 @@ func parseScdet(line string) (scene Scene, err error) {
 		err = fmt.Errorf("error parsing start: %w", err)
 		return
 	}
-	// multiply by 1000 to get milliseconds and round to before switching back to seconds to avoid float rounding error:
-	// [scdet @ 0x55b4790b5dc0] lavfi.scd.score: 22.189, lavfi.scd.time: 514.723 --> Scene detected at 8m34.722999999s with score 22.189
-	scene.Start = time.Duration(math.Round(start*scdetTimeMultiplier*float64(time.Second)) / scdetTimeMultiplier)
+	// Round to nearest millisecond to avoid sub-ms float noise like 8m34.722999999s.
+	scene.Start = time.Duration(math.Round(start*1000)) * time.Millisecond
 	return
 }

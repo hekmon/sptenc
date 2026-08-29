@@ -72,8 +72,8 @@ var splitCommand = &cli.Command{
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		// Scene detection threshold
-		sceneDetectTreshold := cmd.Float64("threshold")
-		if sceneDetectTreshold < 0 || sceneDetectTreshold > 100 {
+		sceneDetectThreshold := cmd.Float64("threshold")
+		if sceneDetectThreshold < 0 || sceneDetectThreshold > 100 {
 			return ctx, errors.New("scene detection threshold must be between 0 and 100")
 		}
 		return ctx, nil
@@ -105,13 +105,13 @@ var splitCommand = &cli.Command{
 		}
 		duration := stats.Format.Duration
 		if cmd.Bool("analyze") {
-			fmt.Fprintf(liveprogress.Bypass(), "Analyzing scenes of %s (%s) with treshold %s\n",
+			fmt.Fprintf(liveprogress.Bypass(), "Analyzing scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 			)
 		} else {
-			fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes of %s (%s) with treshold %s\n",
+			fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
@@ -150,7 +150,7 @@ var splitCommand = &cli.Command{
 		}
 
 		// analyze
-		fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with treshold above %s...\n",
+		fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with threshold above %s...\n",
 			strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 		)
 		start := time.Now()

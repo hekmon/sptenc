@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
+type ctxKey string
+
 const (
-	inputFileSizeCtxKey = "inputsize"
+	inputFileSizeCtxKey ctxKey = "inputsize"
 )
 
 func extractFileNameInfos(path string) (name, extension string) {

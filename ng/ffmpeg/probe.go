@@ -97,7 +97,7 @@ func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (sta
 		return
 	}
 	defer file.Close()
-	readerWrapper := readerCounter{
+	readerWrapper := &readerCounter{
 		wrapped: file,
 		updater: config.ReadBytesReport,
 	}
@@ -132,7 +132,7 @@ type readerCounter struct {
 	updater func(bytesRead int)
 }
 
-func (rc readerCounter) Read(p []byte) (n int, err error) {
+func (rc *readerCounter) Read(p []byte) (n int, err error) {
 	if rc.wrapped == nil {
 		err = io.EOF
 		return
