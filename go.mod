@@ -10,6 +10,7 @@ require (
 	github.com/hekmon/ffmpegutils v1.0.0
 	github.com/hekmon/liveprogress/v2 v2.2.1
 	github.com/hekmon/liveterm/v2 v2.6.1
+	github.com/hekmon/processpriority v1.0.0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/urfave/cli/v3 v3.11.0
 	gonum.org/v1/gonum v0.17.0
@@ -23,7 +24,6 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/hekmon/processpriority v1.0.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
