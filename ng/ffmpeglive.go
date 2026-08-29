@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 
@@ -11,7 +12,11 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-func liveCountNbFrames(ctx context.Context, inputFilePath string, debug func(msg string), runtimeError func(err error)) (nbFrames int, codec string, err error) {
+/*
+ * Master
+ */
+
+func liveCountNbFrames(ctx context.Context, inputFilePath string, debug bool) (nbFrames int, codec string, duration time.Duration, err error) {
 	// prepare live progress
 	analyzeBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(ctx.Value(inputFileSizeCtxKey).(int64))),
@@ -40,8 +45,14 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, debug func(msg
 			// Input
 			Path: inputFilePath,
 			// Reporting
-			Debug:        debug,
-			RuntimeError: runtimeError,
+			Debug: func(s string) {
+				if debug {
+					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+				}
+			},
+			RuntimeError: func(err error) {
+				fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+			},
 		},
 		ReadBytesReport: analyzeProgress,
 	})
@@ -49,6 +60,7 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, debug func(msg
 		err = fmt.Errorf("ffprobe execution error: %w", err)
 		return
 	}
+	duration = mediaInfos.Format.Duration
 	// extract number of frames from results
 	videoInfos := mediaInfos.VideoTrack()
 	if videoInfos == nil {
@@ -60,7 +72,7 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, debug func(msg
 	return
 }
 
-func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFrames int, debug func(msg string), runtimeError func(err error)) (err error) {
+func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFrames int, debug bool) (err error) {
 	// prepare live progress
 	encodeBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(nbFrames)),
@@ -85,11 +97,69 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 	if err = ffmpeg.FFV1VideoMaster(ctx, ffmpeg.FFV1VideoMasterConfig{
 		InputFilePath:  inputFilePath,
 		OutputFilePath: finalFile,
-		Debug:          debug,
-		RuntimeError:   runtimeError,
-		StatsReport:    progress,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		StatsReport: progress,
 	}); err != nil {
 		return fmt.Errorf("failed to encode ffv1 master: %w", err)
+	}
+	return
+}
+
+/*
+ * Split
+ */
+
+func liveDetectScenes(ctx context.Context, path string, threshold float64, totalDuration time.Duration, debug bool) (scenes []ffmpeg.Scene, err error) {
+	// live progress
+	var currentStats ffmpeg.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalDuration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Detecting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
+	// Execute scene detection
+	scenes, err = ffmpeg.ScenesDetection(ctx, ffmpeg.ScenesDetectionConfig{
+		// Input
+		Path: path,
+		// scdet
+		Threshold: threshold,
+		// Reporting
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scene detection failed: %w", err)
 	}
 	return
 }

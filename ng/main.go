@@ -15,6 +15,12 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+const (
+	// set SoT for flag accessed across several cmds
+	debugFlagName  = "debug"
+	tmpdirFlagName = "tmpdir"
+)
+
 func main() {
 	// Application-wide signal handling
 	ctx, stop := signal.NotifyContext(context.Background(),
@@ -31,10 +37,16 @@ func main() {
 		Version: version(),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name:     "debug",
+				Name:     debugFlagName,
 				Aliases:  []string{"d"},
 				Usage:    "print debug logs",
 				Value:    false,
+				OnlyOnce: true,
+			},
+			&cli.StringFlag{
+				Name:     tmpdirFlagName,
+				Usage:    "temporary directory location that will be used for intermediate files if needed",
+				Value:    os.TempDir(),
 				OnlyOnce: true,
 			},
 			&cli.StringFlag{
@@ -51,15 +63,20 @@ func main() {
 			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			if runtime.GOOS == "windows" && !isASCII(cmd.String(tmpdirFlagName)) {
+				return ctx, fmt.Errorf("the temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows\n"+
+					"Please use a path with only ASCII characters (no accents or special characters).\n"+
+					"Current path: %s", cmd.String(tmpdirFlagName))
+			}
 			if cmd.String("ffmpegpath") != ffmpeg.FFMPEGBinary {
 				ffmpeg.FFMPEGBinary = cmd.String("ffmpegpath")
-				if cmd.Bool("debug") {
+				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom ffmpeg path\n", shellescape.Quote(ffmpeg.FFMPEGBinary))
 				}
 			}
 			if cmd.String("ffprobepath") != ffmpeg.FFProbeBinary {
 				ffmpeg.FFProbeBinary = cmd.String("ffprobepath")
-				if cmd.Bool("debug") {
+				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom ffprobe path\n", shellescape.Quote(ffmpeg.FFProbeBinary))
 				}
 			}
@@ -67,6 +84,7 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			masterCommand,
+			splitCommand,
 		},
 	}
 	if err := cmd.Run(ctx, os.Args); err != nil {
