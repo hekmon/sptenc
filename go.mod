@@ -11,6 +11,7 @@ require (
 	github.com/hekmon/liveprogress/v2 v2.2.1
 	github.com/hekmon/liveterm/v2 v2.6.1
 	github.com/olekukonko/tablewriter v1.1.3
+	github.com/urfave/cli/v3 v3.11.0
 	gonum.org/v1/gonum v0.17.0
 )
 
