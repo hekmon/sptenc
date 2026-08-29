@@ -16,11 +16,13 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
+// Scene represents a detected scene boundary with its start time and detection score.
 type Scene struct {
 	Start time.Duration
 	Score float64
 }
 
+// ScenesDetectionConfig holds the configuration for ScenesDetection.
 type ScenesDetectionConfig struct {
 	// Config
 	Path      string
@@ -31,6 +33,8 @@ type ScenesDetectionConfig struct {
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
+// ScenesDetection runs ffmpeg with the scdet filter to detect scene changes in a video.
+// It returns a slice of Scene values representing the detected boundaries.
 func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes []Scene, err error) {
 	// Validate inputs
 	if config.Path == "" {

@@ -57,7 +57,6 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, debug bool) (n
 		ReadBytesReport: analyzeProgress,
 	})
 	if err != nil {
-		err = fmt.Errorf("ffprobe execution error: %w", err)
 		return
 	}
 	duration = mediaInfos.Format.Duration
@@ -94,7 +93,7 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 		encodeBar.CurrentSet(uint64(stats.CurrentFrame))
 	}
 	// encode
-	if err = ffmpeg.FFV1VideoMaster(ctx, ffmpeg.FFV1VideoMasterConfig{
+	return ffmpeg.FFV1VideoMaster(ctx, ffmpeg.FFV1VideoMasterConfig{
 		InputFilePath:  inputFilePath,
 		OutputFilePath: finalFile,
 		Debug: func(s string) {
@@ -106,10 +105,7 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
 		},
 		StatsReport: progress,
-	}); err != nil {
-		return fmt.Errorf("failed to encode ffv1 master: %w", err)
-	}
-	return
+	})
 }
 
 /*
@@ -158,8 +154,55 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 		},
 		FFMPEGStatsReport: progress,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("scene detection failed: %w", err)
-	}
 	return
+}
+
+func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration time.Duration, scenes []ffmpeg.Scene, debug bool) (err error) {
+	// live progress for splitting
+	var currentStats ffmpeg.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalDuration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		// liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Splitting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
+	// extract timestamps
+	scenesMarkers := make([]time.Duration, len(scenes))
+	for i, scene := range scenes {
+		scenesMarkers[i] = scene.Start
+	}
+	// Execute segmentation
+	return ffmpeg.Segment(ctx, ffmpeg.SegmentConfig{
+		// Input
+		Input: path,
+		// Output
+		ScenesMarkers: scenesMarkers,
+		OutputDir:     outputDir,
+		// Reporting
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
 }

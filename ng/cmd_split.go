@@ -88,7 +88,7 @@ var splitCommand = &cli.Command{
 		defer liveprogress.Stop(false)
 
 		// handle modes and master preparation
-		fileToanalyze := inputFilePath
+		fileToProcess := inputFilePath
 		var stats ffmpeg.FFProbeStats
 		if stats, err = ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
 			Path: inputFilePath,
@@ -135,11 +135,6 @@ var splitCommand = &cli.Command{
 							shellescape.Quote(workingDir),
 						)
 					} else {
-						if cmd.Bool(debugFlagName) {
-							fmt.Fprintf(liveprogress.Bypass(), "DEBUG: Deleting temporary working directory %s\n",
-								shellescape.Quote(workingDir),
-							)
-						}
 						if removeErr := os.RemoveAll(workingDir); removeErr != nil {
 							fmt.Fprintf(liveprogress.Bypass(), "Failed to delete temporary working directory %s: %s\n",
 								shellescape.Quote(workingDir), removeErr,
@@ -148,7 +143,7 @@ var splitCommand = &cli.Command{
 					}
 				}()
 				// create the master within
-				if fileToanalyze, duration, err = createMaster(ctx, inputFilePath, workingDir, cmd.Bool(debugFlagName)); err != nil {
+				if fileToProcess, duration, err = createMaster(ctx, inputFilePath, workingDir, cmd.Bool(debugFlagName)); err != nil {
 					return fmt.Errorf("failed to create the master file: %w", err)
 				}
 			}
@@ -159,7 +154,7 @@ var splitCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 		)
 		start := time.Now()
-		scenes, err := liveDetectScenes(ctx, fileToanalyze, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName))
+		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
@@ -178,7 +173,14 @@ var splitCommand = &cli.Command{
 		}
 
 		// split
-		// TODO
+		fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes...\n")
+		start = time.Now()
+		if err = liveSplitScenes(ctx, fileToProcess, cmd.String("outputdir"), duration, scenes, cmd.Bool(debugFlagName)); err != nil {
+			return fmt.Errorf("failed to split scenes: %w", err)
+		}
+		fmt.Fprintf(liveprogress.Bypass(), "\tSplitted %d scenes in %s\n",
+			len(scenes), time.Since(start).Round(time.Second),
+		)
 
 		return
 	},
