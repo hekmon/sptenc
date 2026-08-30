@@ -17,8 +17,7 @@ import (
 
 const (
 	// set SoT for flag accessed across several cmds
-	debugFlagName  = "debug"
-	tmpdirFlagName = "tmpdir"
+	debugFlagName = "debug"
 )
 
 func main() {
@@ -44,12 +43,6 @@ func main() {
 				OnlyOnce: true,
 			},
 			&cli.StringFlag{
-				Name:     tmpdirFlagName,
-				Usage:    "temporary directory location that will be used for intermediate files if needed",
-				Value:    os.TempDir(),
-				OnlyOnce: true,
-			},
-			&cli.StringFlag{
 				Name:     "ffmpegpath",
 				Usage:    "ffmpeg binary path",
 				Value:    ffmpeg.FFMPEGBinary,
@@ -63,11 +56,6 @@ func main() {
 			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			if runtime.GOOS == "windows" && !isASCII(cmd.String(tmpdirFlagName)) {
-				return ctx, fmt.Errorf("the temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows\n"+
-					"Please use a path with only ASCII characters (no accents or special characters).\n"+
-					"Current path: %s", cmd.String(tmpdirFlagName))
-			}
 			if cmd.String("ffmpegpath") != ffmpeg.FFMPEGBinary {
 				ffmpeg.FFMPEGBinary = cmd.String("ffmpegpath")
 				if cmd.Bool(debugFlagName) {
@@ -85,6 +73,7 @@ func main() {
 		Commands: []*cli.Command{
 			masterCommand,
 			splitCommand,
+			encodeCommand,
 		},
 	}
 	if err := cmd.Run(ctx, os.Args); err != nil {

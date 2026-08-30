@@ -24,11 +24,12 @@ var splitCommand = &cli.Command{
 	Description: "Detect scene changes in a video and split it into separate files at each transition. By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter to find scene boundaries. Use --analyze to preview detected scenes without splitting, or --master if the input has already been converted with the master command. The detection threshold can be (and should be!) tuned with --threshold to control sensitivity: experiment different values with --analyze first and validate with the original file before performing the actual splitting.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
-			Name:     "threshold",
-			Aliases:  []string{"t"},
-			Usage:    "Scene detection threshold for splitting video (0-100). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1",
-			Value:    10,
-			OnlyOnce: true,
+			Name:      "threshold",
+			Aliases:   []string{"t"},
+			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", sceneTresholdMin, sceneTresholdMax),
+			Value:     10,
+			OnlyOnce:  true,
+			Validator: validateSceneTreshold,
 		},
 		&cli.BoolFlag{
 			Name:     "analyze",
@@ -51,6 +52,15 @@ var splitCommand = &cli.Command{
 			Value:    ".",
 			OnlyOnce: true,
 		},
+		&cli.StringFlag{
+			Name:             "tmpdir",
+			Aliases:          []string{"t"},
+			Usage:            "temporary directory location that will be used for intermediate files if needed",
+			Value:            os.TempDir(),
+			OnlyOnce:         true,
+			Validator:        validateTmpDir,
+			ValidateDefaults: true,
+		},
 	},
 	Arguments: []cli.Argument{
 		&cli.StringArg{
@@ -71,11 +81,6 @@ var splitCommand = &cli.Command{
 			return ctx, errors.New("input file must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
-		// Scene detection threshold
-		sceneDetectThreshold := cmd.Float64("threshold")
-		if sceneDetectThreshold < 0 || sceneDetectThreshold > 100 {
-			return ctx, errors.New("scene detection threshold must be between 0 and 100")
-		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -118,7 +123,7 @@ var splitCommand = &cli.Command{
 			)
 			if !cmd.Bool("master") {
 				// create a temporary directory
-				workingDir := generateWorkingDirectoryPath(cmd.String(tmpdirFlagName))
+				workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
 				if cmd.Bool(debugFlagName) {
 					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: Creating temporary working directory %s\n",
 						shellescape.Quote(workingDir),
