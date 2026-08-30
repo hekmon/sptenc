@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/hekmon/sptenc/ng/core"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
@@ -16,12 +18,33 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+var encoders = []string{
+	// HEVC
+	string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVENC), string(ffmpeg.HEVCEncoderVAAPI),
+	// AV1
+	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderNVENC), string(ffmpeg.AV1EncoderVAAPI),
+}
+
 var encodeCommand = &cli.Command{
 	Name:        "encode",
 	Aliases:     []string{"e"},
 	Usage:       "Encode video segments to meet perceptual quality targets at minimal file size",
 	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:     "encoder",
+			Aliases:  []string{"e"},
+			Usage:    fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(encoders, ", ")),
+			Value:    string(ffmpeg.HEVCEncoderLibx265),
+			OnlyOnce: true,
+			Validator: func(e string) error {
+				if !slices.Contains(encoders, e) {
+					return fmt.Errorf("invalid encoder %q, valid values are: %s", e, strings.Join(encoders, ", "))
+				}
+				return nil
+			},
+			ValidateDefaults: true,
+		},
 		// directories
 		&cli.StringFlag{
 			Name:     "outputdir",
@@ -178,11 +201,15 @@ var encodeCommand = &cli.Command{
 			if !fileInfos.Mode().IsRegular() {
 				return ctx, errors.New("original file must be a regular file")
 			}
+			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		}
 		//
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
+		/*
+		 * Prepare
+		 */
 		// retreive input infos
 		inputPath := cmd.StringArg("inputpath")
 		inputInfos := ctx.Value(inputFileInfosCtxKey).(os.FileInfo)
@@ -219,20 +246,24 @@ var encodeCommand = &cli.Command{
 			}
 		}()
 
+		/*
+		 * Execute process
+		 */
+
 		// Split if needed
 		if !inputInfos.IsDir() {
-			fmt.Printf("Start encoding of %s (%s)\n",
+			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of %s (%s)\n",
 				shellescape.Quote(filepath.Base(inputPath)),
-				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+				cunits.ImportInBytes(float64(ctx.Value(inputFileInfosCtxKey).(os.FileInfo).Size())),
 			)
 		} else {
-			fmt.Printf("Start encoding of split video files within %s\n",
+			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
 				shellescape.Quote(filepath.Base(inputPath)),
+				shellescape.Quote(filepath.Base(cmd.String("originalfile"))),
+				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 			)
 		}
 
-		// create master
-		_, _, err = createMaster(ctx, inputPath, cmd.String("outputdir"), cmd.Bool(debugFlagName))
 		return
 	},
 }
