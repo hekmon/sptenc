@@ -38,7 +38,7 @@ func main() {
 			&cli.BoolFlag{
 				Name:     debugFlagName,
 				Aliases:  []string{"d"},
-				Usage:    "print debug logs",
+				Usage:    "print debug logs and keep temporary directory if any",
 				Value:    false,
 				OnlyOnce: true,
 			},
