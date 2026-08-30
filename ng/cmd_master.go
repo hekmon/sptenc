@@ -18,7 +18,7 @@ var masterCommand = &cli.Command{
 	Name:        "master",
 	Aliases:     []string{"m"},
 	Usage:       "Create an intermediate lossless video master that can be cut at any frame",
-	Description: "Most video files use Group of Pictures (GoP) encoding, mixing I, P, and B frames. Cutting can only happen on I frames (keyframes), which limits where cuts are possible. Open GoPs make things worse: some B and P frames depend on data outside the GoP, so cutting at an I frame can still silently drop surrounding frames. This command reencodes the source into a lossless all-intra master using the FFV1 codec, producing a video-only stream where every frame is self-contained. Because FFV1 is mathematically lossless, this introduces no quality degradation compared to the original, enabling precise cuts at any frame with no generational loss.",
+	Description: "Most video files use Group of Pictures (GoP) encoding, mixing I, P, and B frames. Cutting can only happen on I frames (keyframes), which limits where cuts are possible. Open GoPs make things worse: some B and P frames depend on data outside the GoP, so cutting at an I frame can still silently drop surrounding frames. This command re-encodes the source into a lossless all-intra master using the FFV1 codec, producing a video-only stream where every frame is self-contained. Because FFV1 is mathematically lossless, this introduces no quality degradation compared to the original, enabling precise cuts at any frame with no generational loss.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "outputdir",
