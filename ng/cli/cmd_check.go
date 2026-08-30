@@ -22,6 +22,7 @@ var checkCommand = &cli.Command{
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")
 		fmt.Println()
+		fmt.Println()
 		var (
 			ffprobeOK      bool
 			ffmpegOK       bool

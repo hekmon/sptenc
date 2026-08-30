@@ -180,17 +180,54 @@ var encodeCommand = &cli.Command{
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
-		// handle input file
+		// retreive input infos
 		inputPath := cmd.StringArg("inputpath")
-		fmt.Printf("Creating a master of %s (%s)\n",
-			shellescape.Quote(filepath.Base(inputPath)),
-			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-		)
+		inputInfos := ctx.Value(inputFileInfosCtxKey).(os.FileInfo)
+
 		// start live progress
 		if err = liveprogress.Start(); err != nil {
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
+
+		// create a temporary directory
+		workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(liveprogress.Bypass(), "DEBUG: Creating temporary working directory %s\n",
+				shellescape.Quote(workingDir),
+			)
+		}
+		if err = os.MkdirAll(workingDir, 0755); err != nil {
+			return fmt.Errorf("failed to create temporary working directory %s: %w",
+				shellescape.Quote(workingDir), err,
+			)
+		}
+		defer func() {
+			if err != nil || cmd.Bool(debugFlagName) {
+				fmt.Fprintf(liveprogress.Bypass(), "Temporary directory left for inspection: %s\n",
+					shellescape.Quote(workingDir),
+				)
+			} else {
+				if removeErr := os.RemoveAll(workingDir); removeErr != nil {
+					fmt.Fprintf(liveprogress.Bypass(), "Failed to delete temporary working directory %s: %s\n",
+						shellescape.Quote(workingDir), removeErr,
+					)
+				}
+			}
+		}()
+
+		// Split if needed
+		if !inputInfos.IsDir() {
+			fmt.Printf("Start encoding of %s (%s)\n",
+				shellescape.Quote(filepath.Base(inputPath)),
+				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+			)
+		} else {
+			fmt.Printf("Start encoding of split video files within %s\n",
+				shellescape.Quote(filepath.Base(inputPath)),
+			)
+		}
+
 		// create master
 		_, _, err = createMaster(ctx, inputPath, cmd.String("outputdir"), cmd.Bool(debugFlagName))
 		return
