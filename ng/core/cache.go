@@ -21,20 +21,8 @@ func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFStats)
 	sch = &StatsCacheHistory{
 		path: filepath.Join(dir, computeCacheStatsFileName(encoder, profile)),
 	}
-	switch encoder {
-	case ffmpeg.HEVCEncoderLibx265, ffmpeg.HEVCEncoderNVENC, ffmpeg.HEVCEncoderVAAPI:
-		sch.qpMin = ffmpeg.HEVCQPMin
-		sch.qpMax = ffmpeg.HEVCQPMax
-	case ffmpeg.AV1EncoderLibaom:
-		sch.qpMin = ffmpeg.AV1LibaomQPMin
-		sch.qpMax = ffmpeg.AV1LibaomQPMax
-	case ffmpeg.AV1EncoderNVENC:
-		sch.qpMin = ffmpeg.AV1NVENCQPMin
-		sch.qpMax = ffmpeg.AV1NVENCQPMax
-	case ffmpeg.AV1EncoderVAAPI:
-		sch.qpMin = ffmpeg.AV1VAAPIQPMin
-		sch.qpMax = ffmpeg.AV1VAAPIQPMax
-	default:
+	var found bool
+	if sch.qpMin, sch.qpMax, found = ffmpeg.GetEncoderQPRange(encoder); !found {
 		err = fmt.Errorf("unsupported encoder %s", encoder)
 		return
 	}
