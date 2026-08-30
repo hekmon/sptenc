@@ -32,7 +32,7 @@ func main() {
 	// Start application
 	cmd := &cli.Command{
 		Name:    "sptenc",
-		Usage:   "Split Encoder: a percieved quality (VMAF) driven encoder",
+		Usage:   "Split Encoder: a perceived quality (VMAF) driven encoder",
 		Version: version(),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{

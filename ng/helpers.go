@@ -40,13 +40,13 @@ func generateWorkingDirectoryPath(basePath string) string {
 }
 
 const (
-	sceneTresholdMin = 0
-	sceneTresholdMax = 100
+	sceneThresholdMin = 0
+	sceneThresholdMax = 100
 )
 
-func validateSceneTreshold(v float64) error {
-	if v < sceneTresholdMin || v > sceneTresholdMax {
-		return fmt.Errorf("must be between %d and %d", sceneTresholdMin, sceneTresholdMax)
+func validateSceneThreshold(v float64) error {
+	if v < sceneThresholdMin || v > sceneThresholdMax {
+		return fmt.Errorf("must be between %d and %d", sceneThresholdMin, sceneThresholdMax)
 	}
 	return nil
 }
@@ -67,7 +67,7 @@ const (
 
 func vmafValueValidator(v float64) error {
 	if v != VMAFOffValue && (v < VMAFMinValue || v > VMAFMaxValue) {
-		return fmt.Errorf("must be between %d and %d or %d to disable", VMAFMinValue, VMAFMaxValue, VMAFOffValue)
+		return fmt.Errorf("must be between %d and %d, or %d to disable", VMAFMinValue, VMAFMaxValue, VMAFOffValue)
 	}
 	return nil
 }

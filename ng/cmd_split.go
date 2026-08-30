@@ -25,30 +25,30 @@ var splitCommand = &cli.Command{
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
 			Name:      "threshold",
-			Aliases:   []string{"t"},
-			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", sceneTresholdMin, sceneTresholdMax),
+			Aliases:   []string{"T"},
+			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", sceneThresholdMin, sceneThresholdMax),
 			Value:     10,
 			OnlyOnce:  true,
-			Validator: validateSceneTreshold,
+			Validator: validateSceneThreshold,
 		},
 		&cli.BoolFlag{
 			Name:     "analyze",
 			Aliases:  []string{"a"},
-			Usage:    "Simply analyze input file (skip the master creation phase)",
+			Usage:    "Simply analyze the input file (skip the master creation phase)",
 			Value:    false,
 			OnlyOnce: true,
 		},
 		&cli.BoolFlag{
 			Name:     "master",
 			Aliases:  []string{"m"},
-			Usage:    "Use if input file is an already processed master file (see the master command). Without this flag, the split command will create one before splitting it.",
+			Usage:    "Use if the input file is an already-processed master file (see the master command). Without this flag, the split command will create one before splitting it.",
 			Value:    false,
 			OnlyOnce: true,
 		},
 		&cli.StringFlag{
 			Name:     "outputdir",
 			Aliases:  []string{"o"},
-			Usage:    "Output directory for splitted scenes",
+			Usage:    "Output directory for split scenes",
 			Value:    ".",
 			OnlyOnce: true,
 		},
@@ -71,7 +71,7 @@ var splitCommand = &cli.Command{
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		// Input file arg
 		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("one input file only is required")
+			return ctx, errors.New("only one input file is required")
 		}
 		fileInfos, err := os.Stat(cmd.Args().First()) // args are not parsed yet, can not use cmd.StringArg("inputfile")
 		if err != nil {
@@ -183,7 +183,7 @@ var splitCommand = &cli.Command{
 		if err = liveSplitScenes(ctx, fileToProcess, cmd.String("outputdir"), duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to split scenes: %w", err)
 		}
-		fmt.Fprintf(liveprogress.Bypass(), "\tSplitted %d scenes in %s\n",
+		fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %s\n",
 			len(scenes), time.Since(start).Round(time.Second),
 		)
 

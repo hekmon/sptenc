@@ -36,7 +36,7 @@ var masterCommand = &cli.Command{
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("one input file only is required")
+			return ctx, errors.New("only one input file is required")
 		}
 		fileInfos, err := os.Stat(cmd.Args().First()) // args are not parsed yet, can not use cmd.StringArg("inputfile")
 		if err != nil {
