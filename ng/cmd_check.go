@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
+
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -18,9 +19,9 @@ var checkCommand = &cli.Command{
 	Usage:       "Verify third-party tools are present and usable",
 	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf) and ffprobe",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
-		fmt.Println("Environment Check")
 		fmt.Println()
-
+		fmt.Println("Third-Party Tools Check")
+		fmt.Println()
 		var (
 			ffprobeOK      bool
 			ffmpegOK       bool
@@ -29,47 +30,44 @@ var checkCommand = &cli.Command{
 			hasLibvmaf     bool
 			hasLibvmafCUDA bool
 		)
-
 		// Check ffprobe
 		ffprobeVersion, ffprobeErr := ffmpeg.GetFFProbeVersion(ctx)
 		if ffprobeErr == nil {
 			ffprobeOK = true
 		}
-		renderCheckTable("ffprobe", ffprobeVersion.Version, ffprobeErr, nil)
-
+		renderCheckTable("🔍 ffprobe", ffprobeVersion.Version, ffprobeErr, nil)
 		// Check ffmpeg
 		ffmpegVersion, ffmpegErr := ffmpeg.GetFFMPEGVersion(ctx)
 		var ffmpegDetails [][2]string
 		if ffmpegErr == nil {
+			// check encoders
 			encoders, encErr := ffmpeg.GetEncoders(ctx)
 			if encErr != nil {
 				ffmpegErr = fmt.Errorf("failed to list encoders: %w", encErr)
 			} else {
 				hasLibx265 = encoders.Has("libx265")
 				hasHevcNvenc = encoders.Has("hevc_nvenc")
-				ffmpegDetails = append(ffmpegDetails, [2]string{"libx265 encoder", boolToEmoji(hasLibx265)})
-				ffmpegDetails = append(ffmpegDetails, [2]string{"hevc_nvenc encoder", boolToEmoji(hasHevcNvenc)})
+				ffmpegDetails = append(ffmpegDetails, [2]string{"libx265", boolToEmoji(hasLibx265)})
+				ffmpegDetails = append(ffmpegDetails, [2]string{"hevc_nvenc", boolToEmoji(hasHevcNvenc)})
 			}
-
+			// check filters
 			filters, filtErr := ffmpeg.GetFilters(ctx)
 			if filtErr != nil {
 				ffmpegErr = fmt.Errorf("failed to list filters: %w", filtErr)
 			} else {
 				hasLibvmaf = filters.HasLibVMAF()
 				hasLibvmafCUDA = filters.HasLibVMAFCUDA()
-				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf filter", boolToEmoji(hasLibvmaf)})
-				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf_cuda filter", boolToEmoji(hasLibvmafCUDA)})
+				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf", boolToEmoji(hasLibvmaf)})
+				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf_cuda", boolToEmoji(hasLibvmafCUDA)})
 			}
 		}
 		if ffmpegErr == nil {
 			ffmpegOK = true
 		}
-		renderCheckTable("ffmpeg", ffmpegVersion.Version, ffmpegErr, ffmpegDetails)
-
+		renderCheckTable("🎬 ffmpeg", ffmpegVersion.Version, ffmpegErr, ffmpegDetails)
 		// Determine status
 		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasLibx265 || hasHevcNvenc, hasLibx265 && hasHevcNvenc && hasLibvmafCUDA)
-		fmt.Printf("\nStatus: %s %s\n", statusEmoji, status)
-
+		fmt.Printf("Status:\n %s %s\n", statusEmoji, status)
 		if status == "not ok" {
 			return fmt.Errorf("one or more required tools are missing or misconfigured")
 		}
@@ -99,6 +97,19 @@ func renderCheckTable(name, version string, checkErr error, details [][2]string)
 				},
 			},
 		})),
+		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Formatting: tw.CellFormatting{
+					AutoWrap: tw.WrapNone,
+				},
+			},
+			Row: tw.CellConfig{
+				Alignment: tw.CellAlignment{PerColumn: []tw.Align{tw.AlignRight, tw.AlignCenter}},
+				Formatting: tw.CellFormatting{
+					AutoWrap: tw.WrapNone,
+				},
+			},
+		}),
 	)
 
 	if checkErr != nil {
