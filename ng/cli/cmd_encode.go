@@ -34,17 +34,12 @@ var encodeCommand = &cli.Command{
 	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "encoder",
-			Aliases:  []string{"e"},
-			Usage:    fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(encoders, ", ")),
-			Value:    string(ffmpeg.HEVCEncoderLibx265),
-			OnlyOnce: true,
-			Validator: func(e string) error {
-				if !slices.Contains(encoders, e) {
-					return fmt.Errorf("invalid encoder %q, valid values are: %s", e, strings.Join(encoders, ", "))
-				}
-				return nil
-			},
+			Name:             "encoder",
+			Aliases:          []string{"e"},
+			Usage:            fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(encoders, ", ")),
+			Value:            string(ffmpeg.HEVCEncoderLibx265),
+			OnlyOnce:         true,
+			Validator:        encoderValidator,
 			ValidateDefaults: true,
 		},
 		// directories
@@ -212,6 +207,10 @@ var encodeCommand = &cli.Command{
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("output directory path must be a directory")
 		}
+		// Create the cache dir if necessary
+		if err = os.MkdirAll(cmd.String("statscachedir"), 0755); err != nil {
+			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -256,22 +255,35 @@ var encodeCommand = &cli.Command{
 		}()
 
 		// Create the VMAF auditor
-		_, err = core.NewVMAFChecker(
+		vmafAuditor, err := core.NewVMAFChecker(
 			cmd.Float64("vmafmin"), cmd.Float64("vmafp1"), cmd.Float64("vmafp5"), cmd.Float64("vmafp10"),
 			cmd.Float64("vmafp25"), cmd.Float64("vmafmedian"), cmd.Float64("vmafhmean"), cmd.Float64("vmafmean"))
 		if err != nil {
-			err = fmt.Errorf("failed to create VMAF auditor: %s", err)
+			err = fmt.Errorf("failed to create VMAF auditor: %w", err)
 			return
 		}
+
+		// Get the stats cache
+		statsCache, err := core.NewStatsCacheHistory(cmd.String("statscachedir"), ffmpeg.Encoder(cmd.String("encoder")), vmafAuditor)
+		if err != nil {
+			err = fmt.Errorf("failed to create stats cache: %w", err)
+			return
+		}
+		defer func() {
+			if saveErr := statsCache.SaveStats(); err != nil {
+				fmt.Fprintf(liveprogress.Bypass(), "ERROR: failed to save stats cache: %s\n", saveErr)
+			}
+		}()
 
 		/*
 		 * Execute process
 		 */
 
-		// Segments and media infos
+		// Step 1 - Segments and media infos
 		var (
-			stats        ffmpeg.FFProbeStats
-			segmentPaths []string
+			segmentPaths  []string
+			stats         ffmpeg.FFProbeStats
+			totalDuration time.Duration
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of %s (%s)\n",
@@ -308,11 +320,11 @@ var encodeCommand = &cli.Command{
 			if err = liveSplitScenes(ctx, masterFile, segmentsDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
-			fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %s\n",
+			fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %w",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
 			if segmentPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
-				err = fmt.Errorf("Failed to get segments from directory: %s\n", err)
+				err = fmt.Errorf("Failed to get segments from directory: %w", err)
 				return
 			}
 			// get stream infos
@@ -320,6 +332,7 @@ var encodeCommand = &cli.Command{
 				err = fmt.Errorf("Failed to probe input file: %w", err)
 				return
 			}
+			totalDuration = stats.Format.Duration
 		} else {
 			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
 				shellescape.Quote(filepath.Base(inputPath)),
@@ -328,20 +341,115 @@ var encodeCommand = &cli.Command{
 			)
 			// get segments
 			if segmentPaths, err = getSegmentsFromDir(inputPath); err != nil {
-				err = fmt.Errorf("Failed to get segments from directory: %s\n", err)
+				err = fmt.Errorf("Failed to get segments from directory: %w", err)
 				return
 			}
 			if len(segmentPaths) == 0 {
 				err = fmt.Errorf("No segment files found in input directory")
 				return
 			}
+			fmt.Fprintf(liveprogress.Bypass(), "Found %d segments in directory\n", len(segmentPaths))
 			// get stream infos (from first segment)
 			if stats, err = getStreamsInfos(ctx, segmentPaths[0], cmd.Bool(debugFlagName)); err != nil {
-				err = fmt.Errorf("Failed to probe segment file: %s\n", err)
+				err = fmt.Errorf("Failed to probe segment file: %w", err)
 				return
 			}
+			// Calculate total duration of all segments for accurate progress bar
+			fmt.Fprintln(liveprogress.Bypass(), "Calculating total duration of segments...")
+			if totalDuration, err = getSegmentsTotalDuration(ctx, segmentPaths, cmd.Bool(debugFlagName)); err != nil {
+				err = fmt.Errorf("Failed to calculate total duration: %w", err)
+				return
+			}
+			fmt.Fprintf(liveprogress.Bypass(), "\tTotal duration of segments: %s\n", totalDuration)
 		}
+
+		// Step 2 - Encode segments
+		meanAvg, stdDevAvg := statsCache.GetMeanStdDev()
+		fmt.Fprintf(liveprogress.Bypass(),
+			"Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
+			meanAvg, stdDevAvg,
+		)
+		var (
+			segmentsQP []int
+			statsQP    QPStats
+		)
+		if segmentsQP, statsQP, err = findAllGOPQP(ctx, workingDir, segmentPaths, meanAvg, stdDevAvg, totalDuration, vmafAuditor); err != nil {
+			err = fmt.Errorf("Failed to encode segments: %w", err)
+			return
+		}
+
+		// Step 3 - Merging
 
 		return
 	},
+}
+
+func encoderValidator(e string) error {
+	if !slices.Contains(encoders, e) {
+		return fmt.Errorf("invalid encoder %q, valid values are: %s", e, strings.Join(encoders, ", "))
+	}
+	return nil
+}
+
+func getCacheDir() string {
+	userCacheDir, err := os.UserCacheDir()
+	if err != nil {
+		userCacheDir = os.TempDir()
+	}
+	return filepath.Join(userCacheDir, "sptenc")
+}
+
+func vmafValueValidator(v float64) error {
+	if v != core.VMAFOffValue && (v < core.VMAFMinValue || v > core.VMAFMaxValue) {
+		return fmt.Errorf("must be between %d and %d, or %d to disable", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue)
+	}
+	return nil
+}
+
+// getSegmentsFromDir returns sorted list of video file paths from inputDir.
+// Files are sorted alphabetically and returned as full paths.
+func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		err = fmt.Errorf("failed to read input directory: %w", err)
+		return
+	}
+	// Filter video files
+	var files []os.DirEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext == ".mkv" || ext == ".mp4" {
+			files = append(files, entry)
+		}
+	}
+	// Sort by name to ensure consistent ordering
+	for i := 0; i < len(files); i++ {
+		for j := i + 1; j < len(files); j++ {
+			if files[i].Name() > files[j].Name() {
+				files[i], files[j] = files[j], files[i]
+			}
+		}
+	}
+	// Build full paths
+	filePaths = make([]string, len(files))
+	for i, file := range files {
+		filePaths[i] = filepath.Join(inputDir, file.Name())
+	}
+	return
+}
+
+// getSegmentsTotalDuration calculates the total duration of all segment files
+func getSegmentsTotalDuration(ctx context.Context, segmentPaths []string, debug bool) (totalDuration time.Duration, err error) {
+	var stats ffmpeg.FFProbeStats
+	for _, path := range segmentPaths {
+		if stats, err = getStreamsInfos(ctx, path, debug); err != nil {
+			err = fmt.Errorf("failed to get stream info for segment %s: %w", path, err)
+			return
+		}
+		totalDuration += stats.Format.Duration
+	}
+	return
 }

@@ -37,13 +37,12 @@ type VMAFStats struct {
 // NewVMAFChecker creates a new VMAFChecker with the given thresholds.
 // Each threshold can be set to VMAFOffValue to disable that specific check.
 // Returns an error if all values are off or if any value is out of the valid VMAF range.
-func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc *VMAFChecker, err error) {
+func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc VMAFChecker, err error) {
 	if min == VMAFOffValue && p1 == VMAFOffValue && p5 == VMAFOffValue && p10 == VMAFOffValue &&
 		p25 == VMAFOffValue && median == VMAFOffValue && hmean == VMAFOffValue && mean == VMAFOffValue {
 		err = errors.New("all values are off")
 		return
 	}
-	vc = new(VMAFChecker)
 	if (min < VMAFMinValue || min > VMAFMaxValue) && min != VMAFOffValue {
 		err = fmt.Errorf("min value %f is out of range [%d, %d]", min, VMAFMinValue, VMAFMaxValue)
 		return
