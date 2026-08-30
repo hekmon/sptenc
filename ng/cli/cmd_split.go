@@ -81,6 +81,13 @@ var splitCommand = &cli.Command{
 			return ctx, errors.New("input file must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
+		// Check Output directory
+		if fileInfos, err = os.Stat(cmd.String("outputdir")); err != nil {
+			return ctx, fmt.Errorf("failed to access output directory: %w", err)
+		}
+		if !fileInfos.IsDir() {
+			return ctx, errors.New("output directory path must be a directory")
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {

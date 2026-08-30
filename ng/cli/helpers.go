@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hekmon/sptenc/ng/core"
@@ -65,10 +66,46 @@ func vmafValueValidator(v float64) error {
 }
 
 func validateTmpDir(path string) error {
+	// validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
 	if runtime.GOOS == "windows" && !isASCII(path) {
 		return fmt.Errorf("the temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows\n"+
 			"Please use a path with only ASCII characters (no accents or special characters).\n"+
 			"Current path: %s", path)
 	}
 	return nil
+}
+
+// getSegmentsFromDir returns sorted list of video file paths from inputDir.
+// Files are sorted alphabetically and returned as full paths.
+func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
+	entries, err := os.ReadDir(inputDir)
+	if err != nil {
+		err = fmt.Errorf("failed to read input directory: %w", err)
+		return
+	}
+	// Filter video files
+	var files []os.DirEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext == ".mkv" || ext == ".mp4" {
+			files = append(files, entry)
+		}
+	}
+	// Sort by name to ensure consistent ordering
+	for i := 0; i < len(files); i++ {
+		for j := i + 1; j < len(files); j++ {
+			if files[i].Name() > files[j].Name() {
+				files[i], files[j] = files[j], files[i]
+			}
+		}
+	}
+	// Build full paths
+	filePaths = make([]string, len(files))
+	for i, file := range files {
+		filePaths[i] = filepath.Join(inputDir, file.Name())
+	}
+	return
 }

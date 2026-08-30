@@ -206,3 +206,23 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 		FFMPEGStatsReport: progress,
 	})
 }
+
+/*
+ * Encode
+ */
+
+func getStreamsInfos(ctx context.Context, path string, debug bool) (stats ffmpeg.FFProbeStats, err error) {
+	return ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
+		// Input
+		Path: path,
+		// Reporting
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+	})
+}

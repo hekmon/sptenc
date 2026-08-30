@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hekmon/sptenc/ng/core"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
@@ -203,13 +205,20 @@ var encodeCommand = &cli.Command{
 			}
 			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		}
-		//
+		// Check Output directory
+		if fileInfos, err = os.Stat(cmd.String("outputdir")); err != nil {
+			return ctx, fmt.Errorf("failed to access output directory: %w", err)
+		}
+		if !fileInfos.IsDir() {
+			return ctx, errors.New("output directory path must be a directory")
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		/*
 		 * Prepare
 		 */
+
 		// retreive input infos
 		inputPath := cmd.StringArg("inputpath")
 		inputInfos := ctx.Value(inputFileInfosCtxKey).(os.FileInfo)
@@ -247,11 +256,11 @@ var encodeCommand = &cli.Command{
 		}()
 
 		// Create the VMAF auditor
-		vmafAuditor, err := core.NewVMAFChecker(
+		_, err = core.NewVMAFChecker(
 			cmd.Float64("vmafmin"), cmd.Float64("vmafp1"), cmd.Float64("vmafp5"), cmd.Float64("vmafp10"),
 			cmd.Float64("vmafp25"), cmd.Float64("vmafmedian"), cmd.Float64("vmafhmean"), cmd.Float64("vmafmean"))
 		if err != nil {
-			fmt.Errorf("failed to create VMAF auditor: %s", err)
+			err = fmt.Errorf("failed to create VMAF auditor: %s", err)
 			return
 		}
 
@@ -259,18 +268,78 @@ var encodeCommand = &cli.Command{
 		 * Execute process
 		 */
 
-		// Split if needed
+		// Segments and media infos
+		var (
+			stats        ffmpeg.FFProbeStats
+			segmentPaths []string
+		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of %s (%s)\n",
 				shellescape.Quote(filepath.Base(inputPath)),
-				cunits.ImportInBytes(float64(ctx.Value(inputFileInfosCtxKey).(os.FileInfo).Size())),
+				cunits.ImportInBytes(float64(inputInfos.Size())),
 			)
+			// create master
+			var (
+				masterFile string
+				duration   time.Duration
+			)
+			if masterFile, duration, err = createMaster(ctx, inputPath, workingDir, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to create the master file: %w", err)
+			}
+			// analyze
+			fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with threshold above %s...\n",
+				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
+			)
+			var scenes []ffmpeg.Scene
+			start := time.Now()
+			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to detect scenes: %w", err)
+			}
+			fmt.Fprintf(liveprogress.Bypass(), "\tDetected %d scenes in %s\n",
+				len(scenes), time.Since(start).Round(time.Second),
+			)
+			// split
+			fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes...\n")
+			segmentsDir := filepath.Join(workingDir, "segments")
+			if err = os.MkdirAll(segmentsDir, 0755); err != nil {
+				return fmt.Errorf("failed to create segments directory: %w", err)
+			}
+			start = time.Now()
+			if err = liveSplitScenes(ctx, masterFile, segmentsDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to split scenes: %w", err)
+			}
+			fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %s\n",
+				len(scenes), time.Since(start).Round(time.Second),
+			)
+			if segmentPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
+				err = fmt.Errorf("Failed to get segments from directory: %s\n", err)
+				return
+			}
+			// get stream infos
+			if stats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
+				err = fmt.Errorf("Failed to probe input file: %w", err)
+				return
+			}
 		} else {
 			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				shellescape.Quote(filepath.Base(cmd.String("originalfile"))),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 			)
+			// get segments
+			if segmentPaths, err = getSegmentsFromDir(inputPath); err != nil {
+				err = fmt.Errorf("Failed to get segments from directory: %s\n", err)
+				return
+			}
+			if len(segmentPaths) == 0 {
+				err = fmt.Errorf("No segment files found in input directory")
+				return
+			}
+			// get stream infos (from first segment)
+			if stats, err = getStreamsInfos(ctx, segmentPaths[0], cmd.Bool(debugFlagName)); err != nil {
+				err = fmt.Errorf("Failed to probe segment file: %s\n", err)
+				return
+			}
 		}
 
 		return
