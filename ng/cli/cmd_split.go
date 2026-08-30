@@ -26,7 +26,7 @@ var splitCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "threshold",
 			Aliases:   []string{"T"},
-			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", sceneThresholdMin, sceneThresholdMax),
+			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
 			Value:     10,
 			OnlyOnce:  true,
 			Validator: validateSceneThreshold,

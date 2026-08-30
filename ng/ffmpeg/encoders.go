@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+type Encoder string
+
 // GetEncoders runs ffmpeg -encoders and parses its output.
 func GetEncoders(ctx context.Context) (info EncodersInfo, err error) {
 	args := []string{"-encoders"}
@@ -35,7 +37,7 @@ func GetEncoders(ctx context.Context) (info EncodersInfo, err error) {
 // EncodersInfo holds the parsed output of ffmpeg -encoders.
 type EncodersInfo struct {
 	VersionInfo
-	Encoders []Encoder
+	Encoders []EncoderProfile
 }
 
 // Has reports whether an encoder with the given name is available.
@@ -48,8 +50,8 @@ func (ei *EncodersInfo) Has(name string) bool {
 	return false
 }
 
-// Encoder represents a single encoder entry from ffmpeg -encoders.
-type Encoder struct {
+// EncoderProfile represents a single encoder entry from ffmpeg -encoders.
+type EncoderProfile struct {
 	Flags       string // e.g. "V....D" or "A....D"
 	Name        string
 	Description string
@@ -92,7 +94,7 @@ func (ei *EncodersInfo) Parse(data []byte) error {
 		}
 
 		if m := encoderLineRe.FindStringSubmatch(line); m != nil {
-			enc := Encoder{
+			enc := EncoderProfile{
 				Flags:       m[1],
 				Name:        m[2],
 				Description: strings.TrimSpace(m[3]),

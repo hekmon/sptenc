@@ -16,6 +16,13 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
+const (
+	// SceneThresholdMin is the minimum valid value for the scene detection threshold.
+	SceneThresholdMin = 0
+	// SceneThresholdMax is the maximum valid value for the scene detection threshold.
+	SceneThresholdMax = 100
+)
+
 // Scene represents a detected scene boundary with its start time and detection score.
 type Scene struct {
 	Start time.Duration
@@ -41,8 +48,8 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 		err = errors.New("input path cannot be empty")
 		return
 	}
-	if config.Threshold < 0 || config.Threshold > 100 {
-		err = errors.New("scene detection threshold must be between 0 and 100")
+	if config.Threshold < SceneThresholdMin || config.Threshold > SceneThresholdMax {
+		err = fmt.Errorf("scene detection threshold must be between %d and %d", SceneThresholdMin, SceneThresholdMax)
 		return
 	}
 	// Prepare command

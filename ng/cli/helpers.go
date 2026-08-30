@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/hekmon/sptenc/ng/core"
+	"github.com/hekmon/sptenc/ng/ffmpeg"
 )
 
 type ctxKey string
@@ -39,14 +42,9 @@ func generateWorkingDirectoryPath(basePath string) string {
 	return filepath.Join(basePath, fmt.Sprintf("sptenc-%d", time.Now().Unix()))
 }
 
-const (
-	sceneThresholdMin = 0
-	sceneThresholdMax = 100
-)
-
 func validateSceneThreshold(v float64) error {
-	if v < sceneThresholdMin || v > sceneThresholdMax {
-		return fmt.Errorf("must be between %d and %d", sceneThresholdMin, sceneThresholdMax)
+	if v < ffmpeg.SceneThresholdMin || v > ffmpeg.SceneThresholdMax {
+		return fmt.Errorf("must be between %d and %d", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax)
 	}
 	return nil
 }
@@ -59,15 +57,9 @@ func getCacheDir() string {
 	return filepath.Join(userCacheDir, "sptenc")
 }
 
-const (
-	VMAFOffValue = -1
-	VMAFMinValue = 0
-	VMAFMaxValue = 100
-)
-
 func vmafValueValidator(v float64) error {
-	if v != VMAFOffValue && (v < VMAFMinValue || v > VMAFMaxValue) {
-		return fmt.Errorf("must be between %d and %d, or %d to disable", VMAFMinValue, VMAFMaxValue, VMAFOffValue)
+	if v != core.VMAFOffValue && (v < core.VMAFMinValue || v > core.VMAFMaxValue) {
+		return fmt.Errorf("must be between %d and %d, or %d to disable", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue)
 	}
 	return nil
 }

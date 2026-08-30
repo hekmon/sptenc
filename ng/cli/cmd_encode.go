@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hekmon/sptenc/ng/core"
+	"github.com/hekmon/sptenc/ng/ffmpeg"
+
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
@@ -17,7 +20,7 @@ var encodeCommand = &cli.Command{
 	Name:        "encode",
 	Aliases:     []string{"e"},
 	Usage:       "Encode video segments to meet perceptual quality targets at minimal file size",
-	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", VMAFMinValue, VMAFMaxValue, VMAFOffValue),
+	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: []cli.Flag{
 		// directories
 		&cli.StringFlag{
@@ -50,7 +53,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "threshold",
 			Aliases:   []string{"T"},
-			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value for your video with the split command.", sceneThresholdMin, sceneThresholdMax),
+			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value for your video with the split command.", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
 			Value:     10,
 			OnlyOnce:  true,
 			Category:  "Single Video File",
@@ -83,7 +86,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafmin",
 			Usage:     "Minimum acceptable VMAF score for the worst frame.",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -91,7 +94,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafp1",
 			Usage:     "Minimum acceptable VMAF score for the 1st percentile.",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -99,7 +102,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafp5",
 			Usage:     "Minimum acceptable VMAF score for the 5th percentile.",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -107,7 +110,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafp10",
 			Usage:     "Minimum acceptable VMAF score for the 10th percentile.",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -115,7 +118,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafp25",
 			Usage:     "Minimum acceptable VMAF score for the 25th percentile.",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -123,7 +126,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafmedian",
 			Usage:     "Minimum acceptable VMAF score for the median (50th percentile).",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -131,7 +134,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafhmean",
 			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
-			Value:     VMAFOffValue,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
