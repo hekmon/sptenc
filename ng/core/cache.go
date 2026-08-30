@@ -17,7 +17,9 @@ import (
 	"gonum.org/v1/gonum/stat"
 )
 
-func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFStats) (sch *StatsCacheHistory, err error) {
+// NewStatsCacheHistory initializes a stats cache for the given encoder and VMAF profile.
+// It loads any existing cache from disk or starts with an empty history.
+func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFChecker) (sch *StatsCacheHistory, err error) {
 	sch = &StatsCacheHistory{
 		path: filepath.Join(dir, computeCacheStatsFileName(encoder, profile)),
 	}
@@ -30,6 +32,8 @@ func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFStats)
 	return
 }
 
+// StatsCacheHistory persists and aggregates QP statistics across encoding runs
+// for a specific encoder and VMAF profile.
 type StatsCacheHistory struct {
 	path  string
 	stats []runStats
@@ -37,16 +41,19 @@ type StatsCacheHistory struct {
 	qpMax int
 }
 
+// runStats represents the statistical summary of a single encoding run.
 type runStats struct {
 	Mean   float64 `json:"mean"`
 	StdDev float64 `json:"stddev"`
 	Weight int     `json:"weight"`
 }
 
+// GetPath returns the file path used to persist the cache.
 func (sch *StatsCacheHistory) GetPath() string {
 	return sch.path
 }
 
+// LoadStats reads the cache from disk. A missing file is treated as an empty cache.
 func (sch *StatsCacheHistory) LoadStats() (err error) {
 	fd, err := os.Open(sch.path)
 	if err != nil {
@@ -60,6 +67,7 @@ func (sch *StatsCacheHistory) LoadStats() (err error) {
 	return json.NewDecoder(fd).Decode(&sch.stats)
 }
 
+// SaveStats writes the current cache to disk as indented JSON.
 func (sch *StatsCacheHistory) SaveStats() error {
 	// Create or truncate file
 	fd, err := os.Create(sch.path)
@@ -74,6 +82,8 @@ func (sch *StatsCacheHistory) SaveStats() error {
 	return enc.Encode(sch.stats)
 }
 
+// AddRun records a new set of QP values and returns their mean and standard deviation.
+// Duplicate runs (same mean, stddev, and weight) are ignored.
 func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64) {
 	// Convert to float64
 	qpf := make([]float64, len(qps))
@@ -96,6 +106,8 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64) {
 	return
 }
 
+// GetMeanStdDev returns the weighted mean and standard deviation of all recorded runs.
+// If no runs have been recorded, it returns a heuristic estimate based on the encoder's QP range.
 func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 	// If we do not have stats yet, set data like a quick sort/search
 	if len(sch.stats) == 0 {
@@ -121,17 +133,16 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 	return
 }
 
-func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFStats) string {
+func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) string {
 	var builder bytes.Buffer
 	builder.WriteString(string(encoder))
-	builder.WriteString(strconv.FormatFloat(profile.Minimum, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.Percentile1, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.Percentile5, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.Percentile10, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.Percentile25, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.Median, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.HarmonicMean, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.Mean, 'f', -1, 64))
-	// a profile does not contain max
+	builder.WriteString(strconv.FormatFloat(profile.min, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.p1, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.p5, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.p10, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.p25, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.median, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
 	return fmt.Sprintf("sptenc_qp_history_%s.json", base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 }
