@@ -136,13 +136,14 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFStats) string {
 	var builder bytes.Buffer
 	builder.WriteString(string(encoder))
-	builder.WriteString(strconv.FormatFloat(profile.Min, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.P1, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.P5, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.P10, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.P25, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.Minimum, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.Percentile1, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.Percentile5, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.Percentile10, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.Percentile25, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.Median, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.HMean, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.HarmonicMean, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.Mean, 'f', -1, 64))
+	// a profile does not contain max
 	return fmt.Sprintf("sptenc_qp_history_%s.json", base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 }

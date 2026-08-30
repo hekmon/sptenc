@@ -11,12 +11,14 @@ const (
 
 // VMAFStats holds the statistical distribution of VMAF scores for a given video comparison.
 type VMAFStats struct {
-	Min    float64
-	P1     float64
-	P5     float64
-	P10    float64
-	P25    float64
-	Median float64
-	HMean  float64
-	Mean   float64
+	Version      string
+	Minimum      float64 `json:"min"`
+	Percentile1  float64 `json:"p1"`
+	Percentile5  float64 `json:"p5"`
+	Percentile10 float64 `json:"p10"`
+	Percentile25 float64 `json:"p25"`
+	Median       float64 `json:"median"`
+	HarmonicMean float64 `json:"harmonic_mean"`
+	Mean         float64 `json:"mean"`
+	Maximum      float64 `json:"max"`
 }

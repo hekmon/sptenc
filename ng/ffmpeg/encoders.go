@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// Encoder is an FFmpeg encoder identifier (e.g. "libx265").
 type Encoder string
 
 // GetEncoders runs ffmpeg -encoders and parses its output.
