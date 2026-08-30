@@ -29,7 +29,7 @@ var encodeCommand = &cli.Command{
 	Name:        "encode",
 	Aliases:     []string{"e"},
 	Usage:       "Encode video segments to meet perceptual quality targets at minimal file size",
-	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
+	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "encoder",
@@ -245,6 +245,15 @@ var encodeCommand = &cli.Command{
 				}
 			}
 		}()
+
+		// Create the VMAF auditor
+		vmafAuditor, err := core.NewVMAFChecker(
+			cmd.Float64("vmafmin"), cmd.Float64("vmafp1"), cmd.Float64("vmafp5"), cmd.Float64("vmafp10"),
+			cmd.Float64("vmafp25"), cmd.Float64("vmafmedian"), cmd.Float64("vmafhmean"), cmd.Float64("vmafmean"))
+		if err != nil {
+			fmt.Errorf("failed to create VMAF auditor: %s", err)
+			return
+		}
 
 		/*
 		 * Execute process
