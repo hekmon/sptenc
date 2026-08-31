@@ -3,10 +3,12 @@ package core
 import (
 	"fmt"
 
+	"github.com/hekmon/sptenc/ng/ffmpeg"
+
 	"gonum.org/v1/gonum/interp"
 )
 
-func NewPredicator(existingResults map[int]VMAFStats, qpMin, qpMax int, debug func(msg string)) (p Predicator, err error) {
+func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, debug func(msg string)) (p Predicator, err error) {
 	// Spawn the interpolators
 	p.minInterpolator = new(interp.FritschButland)
 	p.p1Interpolator = new(interp.FritschButland)
@@ -86,7 +88,7 @@ type Predicator struct {
 	debug               func(msg string)
 }
 
-func (p *Predicator) Predict(qp int) (stats VMAFStats, err error) {
+func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic encountered: %+v", r)
@@ -114,7 +116,7 @@ func (p *Predicator) Predict(qp int) (stats VMAFStats, err error) {
 	return
 }
 
-func (p *Predicator) adapt(qp int, stats VMAFStats) (adapted VMAFStats) {
+func (p *Predicator) adapt(qp int, stats ffmpeg.VMAFStats) (adapted ffmpeg.VMAFStats) {
 	adapted = stats
 	var preIndex, postIndex int
 	// Find known values indexes sourrounding qp

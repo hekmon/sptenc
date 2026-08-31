@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 
 	"github.com/hekmon/cunits/v3"
@@ -225,4 +227,179 @@ func getStreamsInfos(ctx context.Context, path string, debug bool) (stats ffmpeg
 			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
 		},
 	})
+}
+
+func getStreamsInfosCF(ctx context.Context, path string, debug bool) (stats ffmpeg.FFProbeStats, err error) {
+	// Prepare
+	fileInfos, err := os.Stat(path)
+	if err != nil {
+		err = fmt.Errorf("failed to stat the file: %w", err)
+		return
+	}
+	// Live Progress
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(fileInfos.Size())),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "   Analyze | "
+		}),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %s/%s",
+				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(n int) {
+		bar.CurrentAdd(uint64(n))
+	}
+	// Execute
+	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
+		GetStreamsInfosConfig: ffmpeg.GetStreamsInfosConfig{
+			// Input
+			Path: path,
+			// Reporting
+			Debug: func(s string) {
+				if debug {
+					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+				}
+			},
+			RuntimeError: func(err error) {
+				fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+			},
+		},
+		ReadBytesReport: progress,
+	})
+}
+
+func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, debug bool) (err error) {
+	// Prepare
+	var preset ffmpeg.EncodingPreset
+	if *nvenc {
+		preset = nvencProfile
+	} else {
+		preset = x265Profile
+	}
+	// live progress
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Encode | "
+		}),
+		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpegutils.ProgressStats) {
+		bar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+	// Execute
+	start := time.Now()
+	if err = ffmpegutils.HEVCEncode(ctx, ffmpegutils.HEVCEncodeConfig{
+		// Input
+		Input: input,
+		// Output
+		ConvertTo10bits: convert10bits,
+		Quantization:    qp,
+		Preset:          preset,
+		AnimationTuning: *animeTuning,
+		Tags:            nil,
+		OutputFilePath:  output,
+		// Hardware Acceleration
+		NVDEC: *nvdec,
+		NVENC: *nvenc,
+		GPUID: gpu,
+		// Reporting
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
+	}); err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "GOP encoded in %s\n", duration.Round(time.Second))
+	}
+	return
+}
+
+func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (
+	vmaf ffmpeg.VMAFStats, err error) {
+	// live progress
+	var bar *liveprogress.Bar
+	if timeStats {
+		bar = liveprogress.AddBar(
+			liveprogress.WithTotal(uint64(totalFrames)),
+			liveprogress.WithMultiplyRunes(),
+			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithSameAutoSizeInternalPadding(true, false),
+			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+				return "      VMAF | "
+			}),
+			liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+			liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+				return fmt.Sprintf(" left | %d/%d frames", bar.Current(), bar.Total())
+			}),
+		)
+	} else {
+		bar = liveprogress.AddBar(
+			liveprogress.WithTotal(uint64(totalFrames)),
+			liveprogress.WithMultiplyRunes(),
+			// liveprogress.WithWidth(barsWidth),
+			liveprogress.WithSameAutoSizeInternalPadding(true, false),
+			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+				return "      VMAF | "
+			}),
+			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+				return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+			}),
+		)
+	}
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		bar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+	// Execute
+	start := time.Now()
+	report, err := ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
+		// Input
+		ReferencePath:  reference,
+		InputFrameRate: frameRate,
+		DistortedPath:  distorted,
+		// VMAF generation
+		ReportPath:        reportPath,
+		UltraHD:           ultraHD,
+		NVDEC:             *nvdec,
+		NoEnhancementGain: *vmafNEG,
+		VMAFCuda:          *vmafcuda,
+		GPUID:             gpu,
+		// Reporting
+		Debug:             debugPrint,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: progress,
+	})
+	if err != nil {
+		return
+	}
+	duration := time.Since(start)
+	// Done
+	vmaf = report.GetStats()
+	if *debug {
+		fmt.Fprintf(liveprogress.Bypass(), "VMAF computed in %s\n", duration.Round(time.Second))
+	}
+	return
 }

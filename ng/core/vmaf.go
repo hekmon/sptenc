@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hekmon/sptenc/ng/ffmpeg"
+
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -19,20 +21,6 @@ const (
 	// VMAFMaxValue is the maximum valid VMAF score.
 	VMAFMaxValue = 100
 )
-
-// VMAFStats holds the statistical distribution of VMAF scores for a given video comparison.
-type VMAFStats struct {
-	Version      string
-	Minimum      float64 `json:"min"`
-	Percentile1  float64 `json:"p1"`
-	Percentile5  float64 `json:"p5"`
-	Percentile10 float64 `json:"p10"`
-	Percentile25 float64 `json:"p25"`
-	Median       float64 `json:"median"`
-	HarmonicMean float64 `json:"harmonic_mean"`
-	Mean         float64 `json:"mean"`
-	Maximum      float64 `json:"max"`
-}
 
 // NewVMAFChecker creates a new VMAFChecker with the given thresholds.
 // Each threshold can be set to VMAFOffValue to disable that specific check.
@@ -100,7 +88,7 @@ type VMAFChecker struct {
 
 // Validate checks whether the provided VMAFStats meet all configured thresholds.
 // It returns false if any active threshold is not met, otherwise true.
-func (vc VMAFChecker) Validate(stats VMAFStats) bool {
+func (vc VMAFChecker) Validate(stats ffmpeg.VMAFStats) bool {
 	if vc.min != VMAFOffValue && stats.Minimum < vc.min {
 		return false
 	}
