@@ -8,7 +8,6 @@ import (
 	"math"
 	"os"
 	"os/exec"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -143,7 +142,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 			"-filter_complex",
 			fmt.Sprintf(
 				"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]setpts=PTS-STARTPTS[reference];[distorted][reference]libvmaf=model=version=%s:log_fmt=json:log_path=%s:n_threads=%d",
-				version, adaptVMAFPath(config.ReportPath), runtime.NumCPU(),
+				version, adaptVMAFPath(config.ReportPath), NbThreadsToUse,
 			),
 		)
 	}

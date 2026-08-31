@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/hekmon/ffmpegutils"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 
 	"github.com/hekmon/cunits/v3"
@@ -300,12 +299,12 @@ func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, de
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
-	progress := func(stats ffmpegutils.ProgressStats) {
+	progress := func(stats ffmpeg.ProgressStats) {
 		bar.CurrentSet(uint64(stats.CurrentFrame))
 	}
 	// Execute
 	start := time.Now()
-	if err = ffmpegutils.HEVCEncode(ctx, ffmpegutils.HEVCEncodeConfig{
+	if err = ffmpeg.HEVCEncode(ctx, ffmpeg.HEVCEncodeConfig{
 		// Input
 		Input: input,
 		// Output
