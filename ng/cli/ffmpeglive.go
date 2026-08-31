@@ -320,21 +320,27 @@ func encodeQP(ctx context.Context, input, output string, totalFrames, qp int, de
 		NVENC: *nvenc,
 		GPUID: gpu,
 		// Reporting
-		Debug:             debugPrint,
-		RuntimeError:      runtimeError,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
 		FFMPEGStatsReport: progress,
 	}); err != nil {
 		return
 	}
 	duration := time.Since(start)
 	// Done
-	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "GOP encoded in %s\n", duration.Round(time.Second))
+	if debug {
+		fmt.Fprintf(liveprogress.Bypass(), "DEBUG: GOP encoded in %s\n", duration.Round(time.Second))
 	}
 	return
 }
 
-func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats bool) (
+func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRate string, totalFrames int, ultraHD, timeStats, debug bool) (
 	vmaf ffmpeg.VMAFStats, err error) {
 	// live progress
 	var bar *liveprogress.Bar
@@ -388,8 +394,14 @@ func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRat
 		VMAFCuda:          *vmafcuda,
 		GPUID:             gpu,
 		// Reporting
-		Debug:             debugPrint,
-		RuntimeError:      runtimeError,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
 		FFMPEGStatsReport: progress,
 	})
 	if err != nil {
@@ -398,8 +410,8 @@ func computeVMAF(ctx context.Context, distorted, reference, reportPath, frameRat
 	duration := time.Since(start)
 	// Done
 	vmaf = report.GetStats()
-	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "VMAF computed in %s\n", duration.Round(time.Second))
+	if debug {
+		fmt.Fprintf(liveprogress.Bypass(), "DEBUG: VMAF computed in %s\n", duration.Round(time.Second))
 	}
 	return
 }

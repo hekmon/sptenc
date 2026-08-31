@@ -190,7 +190,7 @@ func findSegmentQP(ctx context.Context, workingDir string, inputPath string, seg
 	}
 	if finalQP, nbAttempts, bestEffort, err = searchSegmentQP(ctx, input, workingDir, segment, totalFrames, meanAvg, stdDevAvg,
 		encoderQPMin, encoderQPMax, auditor, videoTrack, results, debug); err != nil {
-		err = fmt.Errorf("failed to search GOP QP: %w", err)
+		err = fmt.Errorf("failed to search segment QP: %w", err)
 		return
 	}
 	if bestEffort {
@@ -416,7 +416,7 @@ func segmentQP(ctx context.Context, input, output, vmafReportPath, frameRate str
 		return
 	}
 	// Compute VMAF
-	if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, totalFrames, ultraHD, false); err != nil {
+	if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, totalFrames, ultraHD, false, debug); err != nil {
 		err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
 		return
 	}
