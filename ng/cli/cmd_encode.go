@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hekmon/sptenc/ng/core"
@@ -226,11 +227,12 @@ var encodeCommand = &cli.Command{
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
+		bypass := liveprogress.Bypass()
 
 		// create a temporary directory
 		workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
 		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(liveprogress.Bypass(), "DEBUG: Creating temporary working directory %s\n",
+			fmt.Fprintf(bypass, "DEBUG: Creating temporary working directory %s\n",
 				shellescape.Quote(workingDir),
 			)
 		}
@@ -241,12 +243,12 @@ var encodeCommand = &cli.Command{
 		}
 		defer func() {
 			if err != nil || cmd.Bool(debugFlagName) {
-				fmt.Fprintf(liveprogress.Bypass(), "Temporary directory left for inspection: %s\n",
+				fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
 					shellescape.Quote(workingDir),
 				)
 			} else {
 				if removeErr := os.RemoveAll(workingDir); removeErr != nil {
-					fmt.Fprintf(liveprogress.Bypass(), "Failed to delete temporary working directory %s: %s\n",
+					fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
 						shellescape.Quote(workingDir), removeErr,
 					)
 				}
@@ -270,7 +272,7 @@ var encodeCommand = &cli.Command{
 		}
 		defer func() {
 			if saveErr := statsCache.SaveStats(); err != nil {
-				fmt.Fprintf(liveprogress.Bypass(), "ERROR: failed to save stats cache: %s\n", saveErr)
+				fmt.Fprintf(bypass, "ERROR: failed to save stats cache: %s\n", saveErr)
 			}
 		}()
 
@@ -285,7 +287,7 @@ var encodeCommand = &cli.Command{
 			totalDuration time.Duration
 		)
 		if !inputInfos.IsDir() {
-			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of %s (%s)\n",
+			fmt.Fprintf(bypass, "Start encoding of %s (%s)\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				cunits.ImportInBytes(float64(inputInfos.Size())),
 			)
@@ -298,7 +300,7 @@ var encodeCommand = &cli.Command{
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// analyze
-			fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with threshold above %s...\n",
+			fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
 				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 			)
 			var scenes []ffmpeg.Scene
@@ -306,11 +308,11 @@ var encodeCommand = &cli.Command{
 			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
-			fmt.Fprintf(liveprogress.Bypass(), "\tDetected %d scenes in %s\n",
+			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
 			// split
-			fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes...\n")
+			fmt.Fprintf(bypass, "Splitting scenes...\n")
 			segmentsDir := filepath.Join(workingDir, "segments")
 			if err = os.MkdirAll(segmentsDir, 0755); err != nil {
 				return fmt.Errorf("failed to create segments directory: %w", err)
@@ -319,7 +321,7 @@ var encodeCommand = &cli.Command{
 			if err = liveSplitScenes(ctx, masterFile, segmentsDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
-			fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %w",
+			fmt.Fprintf(bypass, "\tSplit %d scenes in %w",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
 			if segmentPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
@@ -333,7 +335,7 @@ var encodeCommand = &cli.Command{
 			}
 			totalDuration = stats.Format.Duration
 		} else {
-			fmt.Fprintf(liveprogress.Bypass(), "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
+			fmt.Fprintf(bypass, "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				shellescape.Quote(filepath.Base(cmd.String("originalfile"))),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
@@ -347,24 +349,24 @@ var encodeCommand = &cli.Command{
 				err = fmt.Errorf("No segment files found in input directory")
 				return
 			}
-			fmt.Fprintf(liveprogress.Bypass(), "Found %d segments in directory\n", len(segmentPaths))
+			fmt.Fprintf(bypass, "Found %d segments in directory\n", len(segmentPaths))
 			// get stream infos (from first segment)
 			if stats, err = getStreamsInfos(ctx, segmentPaths[0], cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("Failed to probe segment file: %w", err)
 				return
 			}
 			// Calculate total duration of all segments for accurate progress bar
-			fmt.Fprintln(liveprogress.Bypass(), "Calculating total duration of segments...")
+			fmt.Fprintln(bypass, "Calculating total duration of segments...")
 			if totalDuration, err = getSegmentsTotalDuration(ctx, segmentPaths, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("Failed to calculate total duration: %w", err)
 				return
 			}
-			fmt.Fprintf(liveprogress.Bypass(), "\tTotal duration of segments: %s\n", totalDuration)
+			fmt.Fprintf(bypass, "\tTotal duration of segments: %s\n", totalDuration)
 		}
 
-		// Step 2 - Encode segments
+		// Step 2 - Encode segments (old, to remove)
 		meanAvg, stdDevAvg := statsCache.GetMeanStdDev()
-		fmt.Fprintf(liveprogress.Bypass(),
+		fmt.Fprintf(bypass,
 			"Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
 			meanAvg, stdDevAvg,
 		)
@@ -378,8 +380,182 @@ var encodeCommand = &cli.Command{
 			return
 		}
 
+		// Step 2 - Encode segments (new)
+		tobs := &TerminalObserver{
+			debug: cmd.Bool(debugFlagName),
+		}
+		tobs.Start(len(segmentPaths), totalDuration)
+		results, err := core.FindAllSegmentsQP(ctx, tobs,
+			core.QPSearchConfig{
+				SegmentPaths: segmentPaths,
+				Auditor:      vmafAuditor,
+				WorkingDir:   workingDir,
+				StatsCache:   statsCache,
+				Encoder:      ffmpeg.Encoder(cmd.String("encoder")),
+			},
+		)
+		if err != nil {
+			tobs.Stop()
+			err = fmt.Errorf("Failed to encode segments: %w", err)
+			return
+		}
+		tobs.Stop()
+		fmt.Fprintf(bypass, "Segments QPs: %+v\n", results.QPs)
+		fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
+			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentPaths), results.TotalSegmentsFrames,
+		)
+		fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentPaths)))
+		fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames))
+		segmentQPmean, segmentQPstddev := statsCache.AddRun(results.QPs)
+		fmt.Fprintf(bypass, "Segment QP mean is %s with a standard deviation of %s.\n",
+			strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
+		)
+		fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(results.GlobalWeightedQP, 'f', -1, 64))
+		if results.NbBestEfforts > 0 {
+			fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
+				results.NbBestEfforts,
+			)
+		}
+		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", results.SearchDuration.Round(time.Second))
+
 		// Step 3 - Merging
 		// TODO
 		return
 	},
+}
+
+// TerminalObserver received and process search progress signals to translate them as terminal UI progress
+// it implements the core.SearchCallbacks interface required by core.FindAllSegmentsQP()
+type TerminalObserver struct {
+	debug bool
+	// Global progress
+	globalProgressBar    *liveprogress.Bar
+	globalNbSegmentsDone int
+	globalAllSegmentSize cunits.Bits
+	// Segment progress
+	segmentCurrent          int
+	segmentStatusLine       *liveprogress.CustomLine
+	segmentCandidates       []string
+	segmentCandidatesAccess sync.Mutex
+	// File analysis
+	analysisProgressBar *liveprogress.Bar
+}
+
+func (to *TerminalObserver) Start(totalSegments int, globalDuration time.Duration) {
+	to.globalProgressBar = liveprogress.SetMainLineAsBar(
+		liveprogress.WithTotal(uint64(globalDuration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Global | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | %d/%d segments done | %s",
+				to.globalNbSegmentsDone, totalSegments, to.globalAllSegmentSize,
+			)
+		}),
+	)
+}
+
+func (to *TerminalObserver) Stop() {
+	if to.globalProgressBar == nil {
+		return
+	}
+	liveprogress.RemoveBar(to.globalProgressBar)
+	to.globalProgressBar = nil
+}
+
+func (to *TerminalObserver) Debug(format string, a ...any) {
+	if to.debug {
+		fmt.Fprintln(liveprogress.Bypass(), "DEBUG: "+fmt.Sprintf(format, a...))
+	}
+}
+
+func (to *TerminalObserver) Warning(format string, a ...any) {
+	fmt.Fprintln(liveprogress.Bypass(), "WARNING: "+fmt.Sprintf(format, a...))
+}
+
+func (to *TerminalObserver) Error(err error) {
+	fmt.Fprintln(liveprogress.Bypass(), "ERROR: "+err.Error())
+}
+
+func (to *TerminalObserver) OnSegmentStart(segmentIndex int, segmentPath string) {
+	to.segmentCurrent = segmentIndex
+	if to.segmentCandidates != nil {
+		to.segmentCandidatesAccess.Lock()
+		to.segmentCandidates = to.segmentCandidates[:0] // reset while keeping cap
+		to.segmentCandidatesAccess.Unlock()
+	}
+	if to.segmentStatusLine != nil {
+		liveprogress.RemoveCustomLine(to.segmentStatusLine)
+	}
+	to.segmentStatusLine = liveprogress.AddCustomLine(func() string {
+		to.segmentCandidatesAccess.Lock()
+		defer to.segmentCandidatesAccess.Unlock()
+		return fmt.Sprintf("   Segment | #%d - Searching for QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
+	})
+}
+
+func (to *TerminalObserver) OnSegmentNewCandidate(qpCandidate int) {
+	to.segmentCandidatesAccess.Lock()
+	to.segmentCandidates = append(to.segmentCandidates, strconv.Itoa(qpCandidate))
+	to.segmentCandidatesAccess.Unlock()
+}
+
+func (to *TerminalObserver) OnSegmentAnalysisStart(filePath string, fileSize int64) {
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+	}
+	to.analysisProgressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(fileSize)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "   Analyze | "
+		}),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %s/%s",
+				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
+			)
+		}),
+	)
+}
+
+func (to *TerminalObserver) OnSegmentAnalysisProgress(bytesRead int) {
+	if to.analysisProgressBar != nil {
+		to.analysisProgressBar.CurrentAdd(uint64(bytesRead))
+	}
+}
+
+func (to *TerminalObserver) OnSegmentAnalysisStop() {
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+		to.analysisProgressBar = nil
+	}
+}
+
+func (to *TerminalObserver) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
+	// Remove bars
+	if to.globalProgressBar == nil {
+		return
+	}
+	// TODO check others in case of error returning midflight
+	// Finished segment data
+	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
+		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
+	)
+	if to.segmentStatusLine != nil {
+		liveprogress.RemoveCustomLine(to.segmentStatusLine)
+		to.segmentStatusLine = nil
+	}
+	// Global progress
+	to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
+	to.globalNbSegmentsDone++
+	to.globalAllSegmentSize = currentTotalSize
 }
