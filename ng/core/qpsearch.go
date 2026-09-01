@@ -179,7 +179,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	segment int, segmentPath string, videoTrack *ffmpeg.FFProbeBinaryStream) (
-	finalQP int, nbattempts int, bestEffort bool, testedQPs []int, err error) {
+	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, err error) {
 	// Keep track of tested QPs
 	qpMin, qpMax, found := ffmpeg.GetEncoderQPRange(config.Encoder)
 	if !found {
@@ -191,12 +191,12 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	defer func() {
 		scb.Debug("QPs tested: %+v", testedQPs)
 	}()
-	defer func() {
-		// Just in case, to be sure
-		if finalQP == qpMin && !config.Auditor.Validate(results[qpMin]) {
-			bestEffort = true
-		}
-	}()
+	// defer func() {
+	// 	// Just in case, to be sure
+	// 	if finalQP == qpMin && !config.Auditor.Validate(results[qpMin]) {
+	// 		bestEffort = true
+	// 	}
+	// }()
 	// Search loop
 	var (
 		candidateQP                                          int
@@ -324,7 +324,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
-		nbattempts++
+		nbAttempts++
 		results[candidateQP] = vmafStats
 		if config.Auditor.Validate(vmafStats) {
 			bestValid = candidateQP
