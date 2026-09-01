@@ -152,16 +152,11 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		scb.Debug("Final segment has %d frames, as original GOP.", segmentFrames)
 	}()
 	// Search
-	qpMin, qpMax, found := ffmpeg.GetEncoderQPRange(config.Encoder)
-	if !found {
-		err = fmt.Errorf("failed to get QP range for encoder %s", config.Encoder)
-		return
-	}
-	results := make(map[int]ffmpeg.VMAFStats, qpMax-qpMin+1)
+	var testedQPs []int
 	if !config.KeepInvalidQP {
 		// Delete invalid QPs once finished
 		defer func() {
-			for testedQP := range results {
+			for _, testedQP := range testedQPs {
 				if testedQP == finalQP {
 					continue
 				}
@@ -172,26 +167,27 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 			}
 		}()
 	}
-	if finalQP, nbAttempts, bestEffort, err = searchSegmentQP(ctx, scb, config, segment, segmentPath, videoTrack, results); err != nil {
+	if finalQP, nbAttempts, bestEffort, testedQPs, err = searchSegmentQP(ctx, scb, config, segment, segmentPath, videoTrack); err != nil {
 		err = fmt.Errorf("failed to search segment QP: %w", err)
 		return
 	}
 	if bestEffort {
-		scb.Warning("Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway:\n%s", results[qpMin])
+		scb.Warning("Segment #%d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment)
 	}
 	return
 }
 
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	segment int, segmentPath string, videoTrack *ffmpeg.FFProbeBinaryStream, results map[int]ffmpeg.VMAFStats) (
-	finalQP int, nbattempts int, bestEffort bool, err error) {
+	segment int, segmentPath string, videoTrack *ffmpeg.FFProbeBinaryStream) (
+	finalQP int, nbattempts int, bestEffort bool, testedQPs []int, err error) {
 	// Keep track of tested QPs
 	qpMin, qpMax, found := ffmpeg.GetEncoderQPRange(config.Encoder)
 	if !found {
 		err = fmt.Errorf("failed to get QP range for encoder %s", config.Encoder)
 		return
 	}
-	testedQPs := make([]int, 0, qpMax-qpMin+1)
+	testedQPs = make([]int, 0, qpMax-qpMin+1) // ordered
+	results := make(map[int]ffmpeg.VMAFStats, qpMax-qpMin+1)
 	defer func() {
 		scb.Debug("QPs tested: %+v", testedQPs)
 	}()
