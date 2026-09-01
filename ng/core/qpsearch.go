@@ -243,7 +243,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			}
 		} else {
 			// Step 3: the range is closed — narrow it with interpolation.
-			if candidateQP, err = interpolateCandidate(config, bestValid, firstInvalid, qpMin, qpMax, results); err != nil {
+			if candidateQP, err = interpolateCandidate(scb, config, bestValid, firstInvalid, qpMin, qpMax, results); err != nil {
 				err = fmt.Errorf("failed to find candidate: %w", err)
 				return
 			}
@@ -333,4 +333,38 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		}
 		testedQPs = append(testedQPs, candidateQP)
 	}
+}
+
+func interpolateCandidate(logging QPSearchCallbacksLogging, config QPSearchConfig,
+	bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]ffmpeg.VMAFStats) (
+	candidateQP int, err error) {
+	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, logging.Debug)
+	if err != nil {
+		err = fmt.Errorf("failed to create predicator: %w", err)
+		return
+	}
+	// Walk the bracket from the invalid side down to the valid side.
+	// Prefer real results; predict only when missing.
+	// Return the first candidate that validates.
+	var (
+		candidateResults ffmpeg.VMAFStats
+		exists           bool
+	)
+	for candidateQP = firstInvalid; candidateQP > bestValid; candidateQP-- {
+		if candidateResults, exists = existingResults[candidateQP]; !exists {
+			if candidateResults, err = predicator.Predict(candidateQP); err != nil {
+				err = fmt.Errorf("failed to predict QP %d (within %d-%d): %w", candidateQP, bestValid, firstInvalid, err)
+				return
+			}
+			// Predicted result will be validated below
+		}
+		if config.Auditor.Validate(candidateResults) {
+			// Found a validating candidate within the bracket, either a real result or a forecast.
+			// Return it for the search loop to handle.
+			return
+		}
+	}
+	// Nothing in the bracket validated, fall back to the known-good bestValid.
+	logging.Debug("No candidate found in range %d-%d, returning %d", bestValid, firstInvalid, candidateQP)
+	return
 }

@@ -8,7 +8,7 @@ import (
 	"gonum.org/v1/gonum/interp"
 )
 
-func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, debug func(msg string)) (p Predicator, err error) {
+func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predicator, err error) {
 	// Spawn the interpolators
 	p.minInterpolator = new(interp.FritschButland)
 	p.p1Interpolator = new(interp.FritschButland)
@@ -46,8 +46,8 @@ func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, d
 	}
 	p.debug = debug
 	if p.debug != nil {
-		p.debug(fmt.Sprintf("Initializing FritschButland predicator with %d points: %+v",
-			len(existingResults), p.qps))
+		p.debug("Initializing FritschButland predicator with %d points: %+v",
+			len(existingResults), p.qps)
 	}
 	// Init with known points
 	defer func() {
@@ -85,7 +85,7 @@ type Predicator struct {
 	hmeanInterpolator   interp.FittablePredictor
 	means               []float64
 	meanInterpolator    interp.FittablePredictor
-	debug               func(msg string)
+	debug               func(format string, a ...any)
 }
 
 func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats, err error) {
@@ -163,8 +163,9 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 			// For the first half, we return the pre value (VMAFMaxValue)
 			adaptedValue = ys[preIndex]
 			if p.debug != nil {
-				p.debug(fmt.Sprintf("Adapting predicted value for first half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
-					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex]))
+				p.debug("Adapting predicted value for first half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
+					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex],
+				)
 			}
 			return
 		}
@@ -193,8 +194,9 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 		_ = predicator.Fit(newqps, newValues)
 		adaptedValue = predicator.Predict(float64(predictedForQP))
 		if p.debug != nil {
-			p.debug(fmt.Sprintf("Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
-				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex]))
+			p.debug("Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
+				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex],
+			)
 		}
 		return
 	}
