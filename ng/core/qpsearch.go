@@ -195,91 +195,88 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	defer func() {
 		scb.Debug("QPs tested: %+v", testedQPs)
 	}()
-	var (
-		candidateQP                               int
-		alreadyComputed, minComputed, maxComputed bool
-		segmentQPOutput, report                   string
-		vmafStats                                 ffmpeg.VMAFStats
-	)
-	min := qpMin
-	max := qpMax
 	defer func() {
 		// Just in case, to be sure
 		if finalQP == qpMin && !config.Auditor.Validate(results[qpMin]) {
 			bestEffort = true
 		}
 	}()
+	// Search loop
+	var (
+		candidateQP                                          int
+		alreadyComputed, bestValidTested, firstInvalidTested bool
+		segmentQPOutput, report                              string
+		vmafStats                                            ffmpeg.VMAFStats
+	)
+	bestValid := qpMin
+	firstInvalid := qpMax
+	mean, stddev := config.StatsCache.GetMeanStdDev()
 	for {
-		_, minComputed = results[min]
-		_, maxComputed = results[max]
+		// Find a candidate
+		_, bestValidTested = results[bestValid]
+		_, firstInvalidTested = results[firstInvalid]
 		if len(testedQPs) == 0 {
-			// quick search
-			candidateQP = meanAvg
-			if debug {
-				fmt.Fprintf(bypass, "DEBUG: Searching for QP in range [%d, %d] with candidate %d\n", min, max, candidateQP)
-			}
-		} else if !(minComputed && maxComputed) {
-			// Use standard deviation avg to slowy expand range while maximizing our chances to find the best QP
-			if min == encoderQPMin {
-				// Starting at round 2, if we have still a lowest minimum, use increment of the standard deviation average toward minimum
-				// to maximize the chance to find a better candidate while still keeping the range as small as possible
-				if candidateQP = meanAvg - len(results)*stdDevAvg; candidateQP < encoderQPMin {
-					if _, alreadyComputed = results[encoderQPMin]; alreadyComputed {
-						finalQP = encoderQPMin
+			// Step 1: test the mean as the starting point to determine the search direction.
+			candidateQP = mean
+			scb.Debug("Searching for QP in range [%d, %d] with %d as first candidate", bestValid, firstInvalid, candidateQP)
+		} else if !(bestValidTested && firstInvalidTested) {
+			// Step 2: close the range. A valid result raises bestValid; an invalid one lowers firstInvalid.
+			// This leaves one bound at its original extreme, signaling which direction to search.
+			// Step from the mean in stddev increments until we bracket the threshold.
+			if bestValid == qpMin {
+				if candidateQP = mean - len(results)*stddev; candidateQP < qpMin {
+					if _, alreadyComputed = results[qpMin]; alreadyComputed {
+						finalQP = qpMin
 						bestEffort = true
 						return
 					}
-					candidateQP = encoderQPMin
+					candidateQP = qpMin
 				}
-			} else if max == encoderQPMax {
-				// Starting at round 2, if we have still a highest maximum, use increment of the standard deviation average toward maximum
-				// to maximize the chance to find a better candidate while still keeping the range as small as possible
-				if candidateQP = meanAvg + len(results)*stdDevAvg; candidateQP > encoderQPMax {
-					if _, alreadyComputed = results[encoderQPMax]; alreadyComputed {
-						finalQP = encoderQPMax
+			} else if firstInvalid == qpMax {
+				if candidateQP = mean + len(results)*stddev; candidateQP > qpMax {
+					if _, alreadyComputed = results[qpMax]; alreadyComputed {
+						finalQP = qpMax
 						return
 					}
-					candidateQP = encoderQPMax
+					candidateQP = qpMax
 				}
 			} else {
 				// should not happen
-				err = fmt.Errorf("invalid devstdinterpol state: minComputed=%t (%d), maxComputed=%t (%d)", minComputed, min, maxComputed, max)
+				err = fmt.Errorf("invalid devstdinterpol state: bestValidTested=%t (%d), firstInvalidTested=%t (%d)", bestValidTested, bestValid, firstInvalidTested, firstInvalid)
 				return
 			}
 		} else {
-			// switch to interpolation once we have a closed range
-			if candidateQP, err = findCandidate(min, max, encoderQPMin, encoderQPMax, results, auditor, debug); err != nil {
+			// Step 3: the range is closed — narrow it with interpolation.
+			if candidateQP, err = interpolateCandidate(config, bestValid, firstInvalid, qpMin, qpMax, results); err != nil {
 				err = fmt.Errorf("failed to find candidate: %w", err)
 				return
 			}
 			// Handle predicted candidate
 			if vmafStats, found = results[candidateQP]; found {
-				if debug {
-					fmt.Fprintf(bypass, "DEBUG: Predicted candidate %d already computed (valid: %t)\n", candidateQP, auditor.Validate(vmafStats))
-				}
-				// we already computed this candidate, let's think this thru
-				if auditor.Validate(vmafStats) {
-					// Are we sure that next higher candidate does not validate ?
-					if candidateQP == encoderQPMax {
+				scb.Debug("Predicted candidate %d already computed (valid: %t)", candidateQP, config.Auditor.Validate(vmafStats))
+				// We already computed this candidate, let's think this thru
+				if config.Auditor.Validate(vmafStats) {
+					if candidateQP == qpMax {
+						// Can not go higher, we are done
 						finalQP = candidateQP
 						return
 					}
-					for i := candidateQP + 1; i <= encoderQPMax; i++ {
+					// Are we sure that next higher candidate does not validate ?
+					for i := candidateQP + 1; i <= qpMax; i++ {
 						if vmafStats, found = results[i]; found {
-							if i == encoderQPMax {
+							// we already computed this candidate
+							if i == qpMax {
+								// we reached qp max, which is already computed, we are done
 								finalQP = i
 								return
 							}
-							// we already computed this candidate
-							if !auditor.Validate(vmafStats) {
+							if !config.Auditor.Validate(vmafStats) {
 								// Invalid, previous was the last valid
 								finalQP = i - 1
 								return
 							}
 							// else continue to go up
-							if debug {
-								fmt.Fprintf(bypass, "DEBUG: Looking up: candidate %d already computed (valid: %t)\n", i, true)
-							}
+							scb.Debug("Looking up: candidate %d already computed (valid: %t)", i, true)
 						} else {
 							// we found a candidate for smaller size that we did not compute yet
 							candidateQP = i
@@ -287,31 +284,30 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 						}
 					}
 				} else {
-					// else, this candidate does not validate
-					if candidateQP == encoderQPMin {
-						// but we can not make it better
+					// the predicted candidate is already computed and it does not validate
+					if candidateQP == qpMin {
+						// can not go lower, and does not validate: we are done (best effort)
 						finalQP = candidateQP
 						bestEffort = true
 						return
 					}
-					// Let's take a candidate with better quality
-					for i := candidateQP - 1; i >= encoderQPMin; i-- {
+					// Let's go down one by one until it validates
+					for i := candidateQP - 1; i >= qpMin; i-- {
 						if vmafStats, found = results[i]; found {
-							if i == encoderQPMin {
+							// we already computed this candidate
+							if i == qpMin {
+								// we reached qp min, which is already computed, we are done (best effort)
 								finalQP = i
 								bestEffort = true
 								return
 							}
-							// we already computed this candidate
-							if auditor.Validate(vmafStats) {
-								// So if it is valid, this is the one we need as all previous are invalid
+							if config.Auditor.Validate(vmafStats) {
+								// This already computed lower QP is valid, no need to go lower
 								finalQP = i
 								return
 							}
 							// else continue to go down
-							if debug {
-								fmt.Fprintf(bypass, "DEBUG: Looking down: candidate %d already computed (valid: %t)\n", i, false)
-							}
+							scb.Debug("Looking down: candidate %d already computed (valid: %t)", i, false)
 						} else {
 							// we found a candidate for better quality that we did not compute yet
 							candidateQP = i
@@ -319,30 +315,26 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 						}
 					}
 				}
-			} else if debug {
-				fmt.Fprintf(bypass, "DEBUG: Predicted candidate %d selected for computation\n", candidateQP)
+			} else {
+				scb.Debug("Predicted candidate %d selected for computation", candidateQP)
 			}
 		}
-		// Test candidate
-		testedQPsAccess.Lock()
-		testedQPs = append(testedQPs, candidateQP)
-		testedQPsAccess.Unlock()
-		if vmafStats, alreadyComputed = results[candidateQP]; !alreadyComputed {
-			// Encode with candidateQP
-			segmentQPOutput = filepath.Join(workingDir, fmt.Sprintf(segEncodedOutputFormat, segment, candidateQP))
-			report = segmentQPOutput + "_vmaf.json"
-			ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
-			if vmafStats, err = segmentQP(ctx, input, segmentQPOutput, report, videoTrack.RFrameRate, totalFrames, segment, candidateQP, ultraHD, debug); err != nil {
-				err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
-				return
-			}
-			nbattempts++
-			results[candidateQP] = vmafStats
-		} // else we might be within the second pass with the alternate auditor and have encountered an already encoded candidate during the first pass
-		if auditor.Validate(vmafStats) {
-			min = candidateQP
+		// Test candidate and narrow the search
+		scb.OnSegmentNewCandidate(candidateQP)
+		segmentQPOutput = filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, candidateQP))
+		report = segmentQPOutput + "_vmaf.json"
+		ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
+		if vmafStats, err = segmentQP(ctx, input, segmentQPOutput, report, videoTrack.RFrameRate, totalFrames, segment, candidateQP, ultraHD, debug); err != nil {
+			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
+			return
+		}
+		nbattempts++
+		results[candidateQP] = vmafStats
+		if config.Auditor.Validate(vmafStats) {
+			bestValid = candidateQP
 		} else {
-			max = candidateQP
+			firstInvalid = candidateQP
 		}
+		testedQPs = append(testedQPs, candidateQP)
 	}
 }
