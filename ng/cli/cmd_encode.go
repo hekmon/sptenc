@@ -432,13 +432,15 @@ type TerminalObserver struct {
 	globalProgressBar    *liveprogress.Bar
 	globalNbSegmentsDone int
 	globalAllSegmentSize cunits.Bits
-	// Segment progress
+	// Segment progress (title + qp candidates listing)
 	segmentCurrent          int
 	segmentStatusLine       *liveprogress.CustomLine
 	segmentCandidates       []string
 	segmentCandidatesAccess sync.Mutex
 	// File analysis
 	analysisProgressBar *liveprogress.Bar
+	// Encode
+	encodeProgressBar *liveprogress.Bar
 }
 
 func (to *TerminalObserver) Start(totalSegments int, globalDuration time.Duration) {
@@ -540,22 +542,62 @@ func (to *TerminalObserver) OnSegmentAnalysisStop() {
 	}
 }
 
-func (to *TerminalObserver) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
-	// Remove bars
-	if to.globalProgressBar == nil {
-		return
+func (to *TerminalObserver) QPSearchCallbackEncodeStart(totalFrames int) {
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
 	}
-	// TODO check others in case of error returning midflight
-	// Finished segment data
-	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
-		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
+	to.encodeProgressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Encode | "
+		}),
+		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
 	)
+}
+
+func (to *TerminalObserver) QPSearchCallbackEncodeProgress(currentFrame int) {
+	if to.encodeProgressBar != nil {
+		to.encodeProgressBar.CurrentSet(uint64(currentFrame))
+	}
+}
+
+func (to *TerminalObserver) QPSearchCallbackEncodeStop(duration time.Duration) {
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
+		to.encodeProgressBar = nil
+	}
+}
+
+func (to *TerminalObserver) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
+	// Clean up possible orphans child status
 	if to.segmentStatusLine != nil {
 		liveprogress.RemoveCustomLine(to.segmentStatusLine)
 		to.segmentStatusLine = nil
 	}
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+		to.analysisProgressBar = nil
+	}
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
+		to.encodeProgressBar = nil
+	}
+	// Finished segment data
+	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
+		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
+	)
 	// Global progress
-	to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
+	if to.globalProgressBar != nil {
+		to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
+	}
 	to.globalNbSegmentsDone++
 	to.globalAllSegmentSize = currentTotalSize
 }

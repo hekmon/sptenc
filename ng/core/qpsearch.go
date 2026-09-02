@@ -20,24 +20,19 @@ const (
 // QPSearchCallbacks is implemented by the caller to observe and present the search process.
 type QPSearchCallbacks interface {
 	// Logging
-	QPSearchCallbacksLogging
-	// Segment lifecycle
-	OnSegmentStart(segmentIndex int, segmentPath string)
-	OnSegmentNewCandidate(qpCandidate int)
-	QPSearchCallbacksAnalysis
-	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits)
-}
-
-type QPSearchCallbacksLogging interface {
 	Debug(format string, a ...any)
 	Warning(format string, a ...any)
 	Error(err error)
-}
-
-type QPSearchCallbacksAnalysis interface {
+	// Segment lifecycle
+	OnSegmentStart(segmentIndex int, segmentPath string)
+	OnSegmentNewCandidate(qpCandidate int)
 	OnSegmentAnalysisStart(filePath string, fileSize int64) // fileSize in bytes
 	OnSegmentAnalysisProgress(bytesRead int)                // additional bytes read since last call
 	OnSegmentAnalysisStop()
+	QPSearchCallbackEncodeStart(totalFrames int)
+	QPSearchCallbackEncodeProgress(currentFrame int)
+	QPSearchCallbackEncodeStop(duration time.Duration)
+	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits)
 }
 
 // QPSearchConfig holds the invariants for a QP search run.
@@ -113,7 +108,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	finalQP, segmentFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
 	scb.Debug("Segment %d: Search for the right QP", segment)
 	// Prepare
-	segmentInfos, err := getStreamsInfosCF(ctx, segmentPath, scb, scb)
+	segmentInfos, err := getStreamsInfosCF(ctx, scb, segmentPath)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
@@ -139,7 +134,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		}
 		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, finalQP))
 		var finalSegmentInfos ffmpeg.FFProbeStats
-		if finalSegmentInfos, err = getStreamsInfosCF(ctx, finalQPSegmentPath, scb, scb); err != nil {
+		if finalSegmentInfos, err = getStreamsInfosCF(ctx, scb, finalQPSegmentPath); err != nil {
 			// make findSegmentQP return an error
 			err = fmt.Errorf("failed to get streams infos of final segment: %w", err)
 			return
@@ -175,6 +170,32 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		scb.Warning("Segment #%d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment)
 	}
 	return
+}
+
+func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath string) (
+	stats ffmpeg.FFProbeStats, err error) {
+	// Recover size
+	fileInfos, err := os.Stat(filePath)
+	if err != nil {
+		err = fmt.Errorf("failed to stat the file: %w", err)
+		return
+	}
+	// Prepare signals
+	scb.OnSegmentAnalysisStart(filePath, fileInfos.Size())
+	defer scb.OnSegmentAnalysisStop()
+	// Start analysis
+	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
+		GetStreamsInfosConfig: ffmpeg.GetStreamsInfosConfig{
+			// Input
+			Path: filePath,
+			// Reporting
+			Debug: func(s string) {
+				scb.Debug(s)
+			},
+			RuntimeError: scb.Error,
+		},
+		ReadBytesReport: scb.OnSegmentAnalysisProgress,
+	})
 }
 
 // searchSegmentQP finds the highest valid QP (smallest file) for a segment.
@@ -333,7 +354,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		// Test candidate and narrow the search
 		scb.OnSegmentNewCandidate(candidateQP)
 		segmentQPOutput = filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, candidateQP))
-		if vmafStats, err = segmentQP(ctx, segmentPath, segmentQPOutput, segment, candidateQP, videoTrack, scb); err != nil {
+		if vmafStats, err = segmentQP(ctx, scb, config, segmentPath, segmentQPOutput, segment, candidateQP, videoTrack); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
@@ -348,10 +369,10 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	}
 }
 
-func interpolateCandidate(logging QPSearchCallbacksLogging, config QPSearchConfig,
+func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]ffmpeg.VMAFStats) (
 	candidateQP int, err error) {
-	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, logging.Debug)
+	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, scb.Debug)
 	if err != nil {
 		err = fmt.Errorf("failed to create predicator: %w", err)
 		return
@@ -378,27 +399,43 @@ func interpolateCandidate(logging QPSearchCallbacksLogging, config QPSearchConfi
 		}
 	}
 	// Nothing in the bracket validated, fall back to the known-good bestValid.
-	logging.Debug("No candidate found in range %d-%d, returning %d", bestValid, firstInvalid, candidateQP)
+	scb.Debug("No candidate found in range %d-%d, returning %d", bestValid, firstInvalid, candidateQP)
 	return
 }
 
-func segmentQP(ctx context.Context, input, output string, segment, qp int, videoTrack *ffmpeg.FFProbeBinaryStream, logging QPSearchCallbacksLogging) (
+func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
+	input, output string, segment, qp int, videoTrack *ffmpeg.FFProbeBinaryStream) (
 	vmafStats ffmpeg.VMAFStats, err error) {
-	// Prepare data
-	vmafReportPath := output + "_vmaf.json"
-	frameRate := videoTrack.RFrameRate
-	ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
-	totalFrames := videoTrack.NbReadFrames
 	// Encode
-	if err = encodeQP(ctx, input, output, totalFrames, qp, debug); err != nil {
+	if err = encodeQP(ctx, scb, config, input, output, qp, videoTrack.NbReadFrames); err != nil {
 		err = fmt.Errorf("failed to encode segment: %w", err)
 		return
 	}
 	// Compute VMAF
-	if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, totalFrames, ultraHD, false, debug); err != nil {
+	vmafReportPath := output + "_vmaf.json"
+	frameRate := videoTrack.RFrameRate
+	ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
+	if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, videoTrack.NbReadFrames, ultraHD, false, debug); err != nil {
 		err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
 		return
 	}
-	logging.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
+	scb.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
+	return
+}
+
+func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, input, output string, qp, totalFrames int) (err error) {
+	scb.QPSearchCallbackEncodeStart(totalFrames)
+	var encodeDuration time.Duration
+	defer func() {
+		scb.QPSearchCallbackEncodeStop(encodeDuration)
+	}()
+	// Execute the requested encoder
+	start := time.Now()
+	switch config.Encoder {
+	// TODO
+	}
+	encodeDuration = time.Since(start)
+	// Done
+	scb.Debug("Segment encoded in %s", encodeDuration.Round(time.Second))
 	return
 }
