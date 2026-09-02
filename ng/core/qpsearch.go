@@ -177,6 +177,15 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	return
 }
 
+// searchSegmentQP finds the highest valid QP (smallest file) for a segment.
+//
+// The algorithm intentionally keeps each phase (bracketing, interpolation,
+// boundary walks) explicit and inline. Edge-case handling is subtle;
+// resist collapsing into generic helpers — readability trumps brevity here.
+//
+// The QP→VMAF relationship is empirically monotonic (lower QP = higher VMAF).
+// This has held across 2+ years of production encoding; non-monotonic edge cases
+// have not been observed in practice.
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	segment int, segmentPath string, videoTrack *ffmpeg.FFProbeBinaryStream) (
 	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, err error) {
@@ -201,7 +210,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	var (
 		candidateQP                                          int
 		alreadyComputed, bestValidTested, firstInvalidTested bool
-		segmentQPOutput, report                              string
+		segmentQPOutput                                      string
 		vmafStats                                            ffmpeg.VMAFStats
 	)
 	bestValid := qpMin
@@ -213,12 +222,16 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		_, firstInvalidTested = results[firstInvalid]
 		if len(testedQPs) == 0 {
 			// Step 1: test the mean as the starting point to determine the search direction.
+			// If stats are out of the encoder range, the encode fails fast. Rotten data is
+			// caught cheaply — no need to defensively clamp.
 			candidateQP = mean
 			scb.Debug("Searching for QP in range [%d, %d] with %d as first candidate", bestValid, firstInvalid, candidateQP)
 		} else if !(bestValidTested && firstInvalidTested) {
 			// Step 2: close the range. A valid result raises bestValid; an invalid one lowers firstInvalid.
 			// This leaves one bound at its original extreme, signaling which direction to search.
 			// Step from the mean in stddev increments until we bracket the threshold.
+			// Once both sides are known, interpolation walks from invalid toward valid to find
+			// the highest valid QP — the one that yields the smallest file.
 			if bestValid == qpMin {
 				if candidateQP = mean - len(results)*stddev; candidateQP < qpMin {
 					if _, alreadyComputed = results[qpMin]; alreadyComputed {
@@ -247,7 +260,9 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				err = fmt.Errorf("failed to find candidate: %w", err)
 				return
 			}
-			// Handle predicted candidate
+			// Handle predicted candidate.
+			// A valid QP is not optimal until the next higher QP is confirmed invalid.
+			// The boundary must be found, not just any valid point.
 			if vmafStats, found = results[candidateQP]; found {
 				scb.Debug("Predicted candidate %d already computed (valid: %t)", candidateQP, config.Auditor.Validate(vmafStats))
 				// We already computed this candidate, let's think this thru
@@ -318,9 +333,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		// Test candidate and narrow the search
 		scb.OnSegmentNewCandidate(candidateQP)
 		segmentQPOutput = filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, candidateQP))
-		report = segmentQPOutput + "_vmaf.json"
-		ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
-		if vmafStats, err = segmentQP(ctx, input, segmentQPOutput, report, videoTrack.RFrameRate, totalFrames, segment, candidateQP, ultraHD, debug); err != nil {
+		if vmafStats, err = segmentQP(ctx, segmentPath, segmentQPOutput, segment, candidateQP, videoTrack, scb); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
@@ -366,5 +379,26 @@ func interpolateCandidate(logging QPSearchCallbacksLogging, config QPSearchConfi
 	}
 	// Nothing in the bracket validated, fall back to the known-good bestValid.
 	logging.Debug("No candidate found in range %d-%d, returning %d", bestValid, firstInvalid, candidateQP)
+	return
+}
+
+func segmentQP(ctx context.Context, input, output string, segment, qp int, videoTrack *ffmpeg.FFProbeBinaryStream, logging QPSearchCallbacksLogging) (
+	vmafStats ffmpeg.VMAFStats, err error) {
+	// Prepare data
+	vmafReportPath := output + "_vmaf.json"
+	frameRate := videoTrack.RFrameRate
+	ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
+	totalFrames := videoTrack.NbReadFrames
+	// Encode
+	if err = encodeQP(ctx, input, output, totalFrames, qp, debug); err != nil {
+		err = fmt.Errorf("failed to encode segment: %w", err)
+		return
+	}
+	// Compute VMAF
+	if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, totalFrames, ultraHD, false, debug); err != nil {
+		err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
+		return
+	}
+	logging.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
 	return
 }
