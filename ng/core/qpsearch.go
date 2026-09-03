@@ -221,17 +221,10 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	defer func() {
 		scb.Debug("QPs tested: %+v", testedQPs)
 	}()
-	// defer func() {
-	// 	// Just in case, to be sure
-	// 	if finalQP == qpMin && !config.Auditor.Validate(results[qpMin]) {
-	// 		bestEffort = true
-	// 	}
-	// }()
 	// Search loop
 	var (
 		candidateQP                                          int
 		alreadyComputed, bestValidTested, firstInvalidTested bool
-		segmentQPOutput                                      string
 		vmafStats                                            ffmpeg.VMAFStats
 	)
 	bestValid := qpMin
@@ -353,8 +346,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		}
 		// Test candidate and narrow the search
 		scb.OnSegmentNewCandidate(candidateQP)
-		segmentQPOutput = filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, candidateQP))
-		if vmafStats, err = segmentQP(ctx, scb, config, segmentPath, segmentQPOutput, segment, candidateQP, videoTrack); err != nil {
+		if vmafStats, err = segmentQP(ctx, scb, config, segmentPath, segment, candidateQP, videoTrack); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
@@ -404,8 +396,9 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 }
 
 func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	input, output string, segment, qp int, videoTrack *ffmpeg.FFProbeBinaryStream) (
+	input string, segment, qp int, videoTrack *ffmpeg.FFProbeBinaryStream) (
 	vmafStats ffmpeg.VMAFStats, err error) {
+	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	// Encode
 	if err = encodeQP(ctx, scb, config, input, output, qp, videoTrack.NbReadFrames); err != nil {
 		err = fmt.Errorf("failed to encode segment: %w", err)
@@ -423,7 +416,8 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 	return
 }
 
-func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, input, output string, qp, totalFrames int) (err error) {
+func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
+	input, output string, qp, totalFrames int) (err error) {
 	scb.QPSearchCallbackEncodeStart(totalFrames)
 	var encodeDuration time.Duration
 	defer func() {
@@ -432,10 +426,20 @@ func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	// Execute the requested encoder
 	start := time.Now()
 	switch config.Encoder {
-	// TODO
+	case ffmpeg.HEVCEncoderLibx265:
+		err = encoreQPHEVCLibx265(ctx, scb, config, input, output, qp)
+	default:
+		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
 	}
 	encodeDuration = time.Since(start)
 	// Done
-	scb.Debug("Segment encoded in %s", encodeDuration.Round(time.Second))
+	if err == nil {
+		scb.Debug("Segment encoded in %s", encodeDuration.Round(time.Second))
+	}
+	return
+}
+
+func encoreQPHEVCLibx265(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, input, output string, qp int) (err error) {
+	// TODO
 	return
 }
