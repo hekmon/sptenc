@@ -50,9 +50,9 @@ type HEVCLibx265EncodeConfig struct {
 	// Input
 	Input string
 	// Output
-	Preset         Libx265EncodingPreset // if unset it will be set automatically to slow for x265
-	Quantization   int
-	OutputFilePath string
+	Preset       Libx265EncodingPreset // if unset it will be set automatically to slow for x265
+	Quantization int
+	Output       string
 	// Reporting
 	Debug             func(msg string)
 	RuntimeError      func(err error) // non fatal errors
@@ -102,7 +102,7 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 	//// end with output
 	args = append(args,
 		"-max_interleave_delta", "0", // disable interleave buffering limit to avoid issues with large lossless packets
-		config.OutputFilePath,
+		config.Output,
 	)
 	// Prepare command
 	if config.Debug != nil {

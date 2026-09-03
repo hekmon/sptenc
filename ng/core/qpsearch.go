@@ -420,19 +420,18 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 
 func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	input, output string, qp, totalFrames int) (err error) {
+	// Signal start & stop
 	scb.QPSearchCallbackEncodeStart(totalFrames)
-	defer func() {
-		scb.QPSearchCallbackEncodeStop()
-	}()
+	defer scb.QPSearchCallbackEncodeStop()
 	// Execute the requested encoder
 	start := time.Now()
 	switch config.Encoder {
 	case ffmpeg.HEVCEncoderLibx265:
 		err = ffmpeg.HEVCLibx265Encode(ctx, ffmpeg.HEVCLibx265EncodeConfig{
-			Input:          input,
-			Preset:         ffmpeg.Libx265PresetSlow,
-			Quantization:   qp,
-			OutputFilePath: output,
+			Input:        input,
+			Preset:       ffmpeg.Libx265PresetSlow,
+			Quantization: qp,
+			Output:       output,
 			Debug: func(msg string) {
 				scb.Debug(msg)
 			},
