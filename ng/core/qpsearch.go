@@ -402,7 +402,7 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 	vmafStats ffmpeg.VMAFStats, err error) {
 	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	// Encode
-	if err = encodeQP(ctx, scb, config, input, output, qp, videoTrack.NbReadFrames); err != nil {
+	if err = segmentQPEncode(ctx, scb, config, input, output, qp, videoTrack.NbReadFrames); err != nil {
 		err = fmt.Errorf("failed to encode segment: %w", err)
 		return
 	}
@@ -418,10 +418,9 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 	return
 }
 
-func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
+func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	input, output string, qp, totalFrames int) (err error) {
 	scb.QPSearchCallbackEncodeStart(totalFrames)
-	var encodeDuration time.Duration
 	defer func() {
 		scb.QPSearchCallbackEncodeStop()
 	}()
@@ -443,10 +442,9 @@ func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	default:
 		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
 	}
-	encodeDuration = time.Since(start)
 	// Done
 	if err == nil {
-		scb.Debug("Segment encoded in %s", encodeDuration.Round(time.Second))
+		scb.Debug("Segment encoded in %s", time.Since(start).Round(time.Second))
 	}
 	return
 }
