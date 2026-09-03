@@ -26,12 +26,12 @@ type QPSearchCallbacks interface {
 	// Segment lifecycle
 	OnSegmentStart(segmentIndex int, segmentPath string)
 	OnSegmentNewCandidate(qpCandidate int)
-	OnSegmentAnalysisStart(filePath string, fileSize int64) // fileSize in bytes
-	OnSegmentAnalysisProgress(bytesRead int)                // additional bytes read since last call
+	OnSegmentAnalysisStart(filePath string, fileSize cunits.Bits)
+	OnSegmentAnalysisProgress(newRead cunits.Bits)
 	OnSegmentAnalysisStop()
 	QPSearchCallbackEncodeStart(totalFrames int)
-	QPSearchCallbackEncodeProgress(currentFrame int)
-	QPSearchCallbackEncodeStop(duration time.Duration)
+	QPSearchCallbackEncodeProgress(stats ffmpeg.ProgressStats)
+	QPSearchCallbackEncodeStop()
 	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits)
 }
 
@@ -181,7 +181,7 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 		return
 	}
 	// Prepare signals
-	scb.OnSegmentAnalysisStart(filePath, fileInfos.Size())
+	scb.OnSegmentAnalysisStart(filePath, cunits.ImportInBytes(float64(fileInfos.Size())))
 	defer scb.OnSegmentAnalysisStop()
 	// Start analysis
 	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
@@ -194,7 +194,9 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 			},
 			RuntimeError: scb.Error,
 		},
-		ReadBytesReport: scb.OnSegmentAnalysisProgress,
+		ReadBytesReport: func(bytesRead int) {
+			scb.OnSegmentAnalysisProgress(cunits.ImportInBytes(float64(bytesRead)))
+		},
 	})
 }
 
@@ -421,13 +423,23 @@ func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	scb.QPSearchCallbackEncodeStart(totalFrames)
 	var encodeDuration time.Duration
 	defer func() {
-		scb.QPSearchCallbackEncodeStop(encodeDuration)
+		scb.QPSearchCallbackEncodeStop()
 	}()
 	// Execute the requested encoder
 	start := time.Now()
 	switch config.Encoder {
 	case ffmpeg.HEVCEncoderLibx265:
-		err = encoreQPHEVCLibx265(ctx, scb, config, input, output, qp)
+		err = ffmpeg.HEVCLibx265Encode(ctx, ffmpeg.HEVCLibx265EncodeConfig{
+			Input:          input,
+			Preset:         ffmpeg.Libx265PresetSlow,
+			Quantization:   qp,
+			OutputFilePath: output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
 	default:
 		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
 	}
@@ -436,10 +448,5 @@ func encodeQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	if err == nil {
 		scb.Debug("Segment encoded in %s", encodeDuration.Round(time.Second))
 	}
-	return
-}
-
-func encoreQPHEVCLibx265(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, input, output string, qp int) (err error) {
-	// TODO
 	return
 }

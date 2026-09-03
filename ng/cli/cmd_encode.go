@@ -508,7 +508,7 @@ func (to *TerminalObserver) OnSegmentNewCandidate(qpCandidate int) {
 	to.segmentCandidatesAccess.Unlock()
 }
 
-func (to *TerminalObserver) OnSegmentAnalysisStart(filePath string, fileSize int64) {
+func (to *TerminalObserver) OnSegmentAnalysisStart(filePath string, fileSize cunits.Bits) {
 	if to.analysisProgressBar != nil {
 		liveprogress.RemoveBar(to.analysisProgressBar)
 	}
@@ -529,9 +529,9 @@ func (to *TerminalObserver) OnSegmentAnalysisStart(filePath string, fileSize int
 	)
 }
 
-func (to *TerminalObserver) OnSegmentAnalysisProgress(bytesRead int) {
+func (to *TerminalObserver) OnSegmentAnalysisProgress(newRead cunits.Bits) {
 	if to.analysisProgressBar != nil {
-		to.analysisProgressBar.CurrentAdd(uint64(bytesRead))
+		to.analysisProgressBar.CurrentAdd(uint64(newRead))
 	}
 }
 
@@ -563,13 +563,13 @@ func (to *TerminalObserver) QPSearchCallbackEncodeStart(totalFrames int) {
 	)
 }
 
-func (to *TerminalObserver) QPSearchCallbackEncodeProgress(currentFrame int) {
+func (to *TerminalObserver) QPSearchCallbackEncodeProgress(stats ffmpeg.ProgressStats) {
 	if to.encodeProgressBar != nil {
-		to.encodeProgressBar.CurrentSet(uint64(currentFrame))
+		to.encodeProgressBar.CurrentSet(uint64(stats.CurrentFrame))
 	}
 }
 
-func (to *TerminalObserver) QPSearchCallbackEncodeStop(duration time.Duration) {
+func (to *TerminalObserver) QPSearchCallbackEncodeStop() {
 	if to.encodeProgressBar != nil {
 		liveprogress.RemoveBar(to.encodeProgressBar)
 		to.encodeProgressBar = nil
