@@ -190,9 +190,9 @@ const (
 	// HEVCNVEncLossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
 	HEVCNVEncLossless = -1
 
-	nvEncSpatialAQ  = 1  // Enable spatial adaptive quantization
-	nvEncTemporalAQ = 1  // Enable temporal adaptive quantization
-	nvEncLookahead  = 32 // Maximum lookahead for best quality
+	nvEncSpatialAQ  = 1  // enable spatial adaptive quantization
+	nvEncTemporalAQ = 1  // enable temporal adaptive quantization
+	nvEncLookahead  = 32 // max frames buffered for adaptive I/B decisions (iadapt/badapt): in constqp this is a pure compression win, same QP for smaller files (verified effective even in lossless: at 0 the driver falls back to all-intra)
 )
 
 // HEVCNVEncEncodeQPConfig holds the configuration for HEVC encoding using NVIDIA NVENC.
