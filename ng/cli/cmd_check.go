@@ -64,6 +64,7 @@ var checkCommand = &cli.Command{
 					{ffmpeg.HEVCEncoderLibx265, encoders.Has(string(ffmpeg.HEVCEncoderLibx265))},
 					{ffmpeg.HEVCEncoderNVEnc, encoders.Has(string(ffmpeg.HEVCEncoderNVEnc))},
 					{ffmpeg.HEVCEncoderVAAPI, encoders.Has(string(ffmpeg.HEVCEncoderVAAPI))},
+					{ffmpeg.HEVCEncoderD3D12VA, encoders.Has(string(ffmpeg.HEVCEncoderD3D12VA))},
 				}
 				for _, e := range hevcEncoders {
 					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("HEVC: %s", e.name), boolToEmoji(e.has)})
@@ -77,6 +78,7 @@ var checkCommand = &cli.Command{
 					has  bool
 				}{
 					{ffmpeg.AV1EncoderLibaom, encoders.Has(string(ffmpeg.AV1EncoderLibaom))},
+					{ffmpeg.AV1EncoderSVTAV1, encoders.Has(string(ffmpeg.AV1EncoderSVTAV1))},
 					{ffmpeg.AV1EncoderNVEnc, encoders.Has(string(ffmpeg.AV1EncoderNVEnc))},
 					{ffmpeg.AV1EncoderVAAPI, encoders.Has(string(ffmpeg.AV1EncoderVAAPI))},
 				}

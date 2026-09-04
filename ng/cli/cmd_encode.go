@@ -25,8 +25,8 @@ var encoders = []string{
 	string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc),
 	string(ffmpeg.HEVCEncoderVAAPI), string(ffmpeg.HEVCEncoderD3D12VA),
 	// AV1
-	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderNVEnc),
-	string(ffmpeg.AV1EncoderVAAPI),
+	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderSVTAV1),
+	string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
 }
 
 var encodeCommand = &cli.Command{
@@ -48,21 +48,21 @@ var encodeCommand = &cli.Command{
 		},
 		&cli.IntFlag{
 			Name:     "nvidiagpuindex",
-			Usage:    fmt.Sprintf("GPU to use when --encoder is set to %q or %q", ffmpeg.HEVCEncoderNVEnc, ffmpeg.AV1EncoderNVEnc),
+			Usage:    "GPU to use when --encoder is an NVIDIA NVENC encoder",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
 			Category: "Encoding",
 		},
 		&cli.StringFlag{
 			Name:     "vaapirendererpath",
-			Usage:    fmt.Sprintf("Direct Rendering Manager render node to use when --encoder is set to %q or %q", ffmpeg.HEVCEncoderVAAPI, ffmpeg.AV1EncoderVAAPI),
+			Usage:    "Direct Rendering Manager render node to use when --encoder is a VA-API encoder",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
 			Category: "Encoding",
 		},
 		&cli.IntFlag{
 			Name:     "d3d12vagpuindex",
-			Usage:    fmt.Sprintf("GPU to use when --encoder is set to %q", ffmpeg.HEVCEncoderD3D12VA),
+			Usage:    "GPU to use when --encoder is a D3D12VA encoder",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
 			Category: "Encoding",
