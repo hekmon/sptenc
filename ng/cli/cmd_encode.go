@@ -389,27 +389,12 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tTotal duration of segments: %s\n", totalDuration)
 		}
 
-		// Step 2 - Encode segments (old, to remove)
-		meanAvg, stdDevAvg := statsCache.GetMeanStdDev()
-		fmt.Fprintf(bypass,
-			"Searching the right QP for each GOP using %d as starting QP and %d as standard deviation range increment...\n",
-			meanAvg, stdDevAvg,
-		)
-		var (
-			segmentsQP []int
-			statsQP    QPStats
-		)
-		if segmentsQP, statsQP, err = findAllSegmentsQP(ctx, workingDir, segmentPaths, meanAvg, stdDevAvg,
-			totalDuration, vmafAuditor, statsCache, ffmpeg.Encoder(cmd.String("encoder")), cmd.Bool(debugFlagName)); err != nil {
-			err = fmt.Errorf("Failed to encode segments: %w", err)
-			return
-		}
-
-		// Step 2 - Encode segments (new)
+		// Step 2 - Encode segments
 		tobs := &TerminalObserver{
 			debug: cmd.Bool(debugFlagName),
 		}
 		tobs.Start(len(segmentPaths), totalDuration)
+		start := time.Now()
 		results, err := core.FindAllSegmentsQP(ctx, tobs,
 			core.QPSearchConfig{
 				SegmentPaths:      segmentPaths,
@@ -428,7 +413,9 @@ var encodeCommand = &cli.Command{
 			err = fmt.Errorf("Failed to encode segments: %w", err)
 			return
 		}
+		duration := time.Since(start)
 		tobs.Stop()
+		// Print stats
 		fmt.Fprintf(bypass, "Segments QPs: %+v\n", results.QPs)
 		fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
 			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentPaths), results.TotalSegmentsFrames,
@@ -449,7 +436,7 @@ var encodeCommand = &cli.Command{
 				results.NbBestEfforts,
 			)
 		}
-		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", results.SearchDuration.Round(time.Second))
+		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", duration.Round(time.Second))
 
 		// Step 3 - Merging
 		// TODO
