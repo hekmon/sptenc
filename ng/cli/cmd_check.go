@@ -99,7 +99,7 @@ var checkCommand = &cli.Command{
 		renderCheckTable("🔍  ffprobe", ffprobeRows, maxLabelWidth)
 		renderCheckTable("🎬  ffmpeg", ffmpegRows, maxLabelWidth)
 		// Determine status
-		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasAnyHEVC || hasAnyAV1, hasAnyHEVC && hasAnyAV1 && hasLibvmafCUDA)
+		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasAnyHEVC || hasAnyAV1)
 		fmt.Printf("\n  Status: %s %s\n\n", statusEmoji, status)
 		if status == "not ok" {
 			return fmt.Errorf("one or more required tools are missing or misconfigured")
@@ -108,14 +108,11 @@ var checkCommand = &cli.Command{
 	},
 }
 
-func computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasAnyEncoder, hasAllOptional bool) (status, emoji string) {
+func computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasAnyEncoder bool) (status, emoji string) {
 	if !ffprobeOK || !ffmpegOK || !hasLibvmaf || !hasAnyEncoder {
 		return "not ok", "❌"
 	}
-	if hasAllOptional {
-		return "full ok", "✅"
-	}
-	return "partial ok", "⚠️"
+	return "ok", "✅"
 }
 
 func buildTableRows(version string, checkErr error, details [][2]string) [][2]string {

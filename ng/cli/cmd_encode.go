@@ -44,28 +44,28 @@ var encodeCommand = &cli.Command{
 			OnlyOnce:         true,
 			Validator:        encoderValidator,
 			ValidateDefaults: true,
-			Category:         "Encoding",
 		},
+		// GPU Accelerated Encoders
 		&cli.IntFlag{
 			Name:     "nvidiagpuindex",
 			Usage:    "GPU to use when --encoder is an NVIDIA NVENC encoder",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
-			Category: "Encoding",
+			Category: "GPU Accelerated Encoders",
 		},
 		&cli.StringFlag{
 			Name:     "vaapirendererpath",
 			Usage:    "Direct Rendering Manager render node to use when --encoder is a VA-API encoder",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
-			Category: "Encoding",
+			Category: "GPU Accelerated Encoders",
 		},
 		&cli.IntFlag{
 			Name:     "d3d12vagpuindex",
 			Usage:    "GPU to use when --encoder is a D3D12VA encoder",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
-			Category: "Encoding",
+			Category: "GPU Accelerated Encoders",
 		},
 		// directories
 		&cli.StringFlag{
@@ -87,7 +87,7 @@ var encodeCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:             "tmpdir",
 			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used for intermediate files if needed",
+			Usage:            "Temporary directory location that will be used for intermediate files",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,

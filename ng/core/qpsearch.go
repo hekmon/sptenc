@@ -428,14 +428,14 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 		err = fmt.Errorf("failed to encode segment: %w", err)
 		return
 	}
-	// Compute VMAF
-	vmafReportPath := output + "_vmaf.json"
-	frameRate := videoTrack.RFrameRate
-	ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
-	if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, videoTrack.NbReadFrames, ultraHD, false, debug); err != nil {
-		err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
-		return
-	}
+	// // Compute VMAF
+	// vmafReportPath := output + "_vmaf.json"
+	// frameRate := videoTrack.RFrameRate
+	// ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
+	// if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, videoTrack.NbReadFrames, ultraHD, false, debug); err != nil {
+	// 	err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
+	// 	return
+	// }
 	scb.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
 	return
 }
