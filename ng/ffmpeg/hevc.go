@@ -50,7 +50,7 @@ type HEVCLibx265EncodeConfig struct {
 	// Input
 	Input string
 	// Output
-	Preset       Libx265EncodingPreset // if unset it will be set automatically to slow for x265
+	Preset       Libx265EncodingPreset // if unset it will be set automatically to Libx265PresetSlow
 	Quantization int
 	Output       string
 	// Reporting
@@ -64,10 +64,10 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 	if config.Input == "" {
 		return errors.New("input path cannot be empty")
 	}
-	if config.OutputFilePath == "" {
+	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if config.Quantization < HEVCQPMin || (config.Quantization > HEVCQPMax && config.Quantization != HEVCLossless) {
+	if (config.Quantization < HEVCQPMin && config.Quantization > HEVCQPMax) && config.Quantization != HEVCLossless {
 		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d", HEVCQPMin, HEVCQPMax, HEVCLossless, config.Quantization)
 	}
 	if config.Preset == "" {
