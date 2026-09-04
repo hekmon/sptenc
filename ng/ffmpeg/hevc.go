@@ -164,40 +164,14 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
  * ffmpeg -h encoder=hevc_nvenc
  */
 
-// NVEncEncodingPreset represents the encoding preset for the NVIDIA NVENC HEVC encoder.
-// The p1-p7 presets trade encoding speed for compression efficiency.
-type NVEncEncodingPreset string
-
 const (
 	// HEVCEncoderNVEnc is the FFmpeg encoder name for NVIDIA NVENC HEVC hardware encoding.
 	HEVCEncoderNVEnc Encoder = "hevc_nvenc"
-
-	// NVEncPresetP1 is the fastest preset with the lowest compression efficiency.
-	NVEncPresetP1 NVEncEncodingPreset = "p1"
-	// NVEncPresetP2 offers very fast encoding at the cost of file size.
-	NVEncPresetP2 NVEncEncodingPreset = "p2"
-	// NVEncPresetP3 provides fast encoding with moderate compression.
-	NVEncPresetP3 NVEncEncodingPreset = "p3"
-	// NVEncPresetP4 is the default preset balancing speed and compression.
-	NVEncPresetP4 NVEncEncodingPreset = "p4"
-	// NVEncPresetP5 is slower than the default with slightly better compression.
-	NVEncPresetP5 NVEncEncodingPreset = "p5"
-	// NVEncPresetP6 provides significantly better compression than p5.
-	NVEncPresetP6 NVEncEncodingPreset = "p6"
-	// NVEncPresetP7 is the slowest preset with the best compression efficiency.
-	NVEncPresetP7 NVEncEncodingPreset = "p7"
 
 	// HEVCNVEncQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCNVEncQPMin = 0
 	// HEVCNVEncQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCNVEncQPMax = 51
-
-	// CUDADefaultDevice is the default CUDA device index.
-	CUDADefaultDevice = 0
-
-	nvEncSpatialAQ  = 1  // enable spatial adaptive quantization
-	nvEncTemporalAQ = 1  // enable temporal adaptive quantization
-	nvEncLookahead  = 32 // max frames buffered for adaptive I/B decisions (iadapt/badapt): in constqp this is a pure compression win, same QP for smaller files (verified effective even in lossless: at 0 the driver falls back to all-intra)
 )
 
 // HEVCNVEncEncodeQPConfig holds the configuration for HEVC encoding using NVIDIA NVENC.
@@ -292,7 +266,7 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 			"-temporal_aq", strconv.Itoa(nvEncTemporalAQ),
 		)
 	}
-	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncLookahead))
+	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncMaxLookahead))
 	//// end with output
 	args = append(args,
 		"-max_interleave_delta", "0",

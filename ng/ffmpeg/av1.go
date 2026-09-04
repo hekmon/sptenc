@@ -38,8 +38,8 @@ const (
 	AV1LibaomCPUUsedMin = 1
 	// AV1LibaomCPUUsedMax is the fastest and least efficient speed setting.
 	AV1LibaomCPUUsedMax = 8
-	// AV1LibaomCPUUsedDefault balances speed and compression; the encoder default (1) is impractically slow.
-	AV1LibaomCPUUsedDefault = 4
+	// AV1LibaomCPUUsedDefault corresponds to the libx265 "slow" preset, recommended for final encoding.
+	AV1LibaomCPUUsedDefault = 2
 )
 
 // AV1LibaomEncodeQPConfig holds the configuration for AV1 encoding using libaom.
@@ -158,8 +158,8 @@ const (
 	AV1SVTAV1PresetMin = 1
 	// AV1SVTAV1PresetMax is the fastest preset.
 	AV1SVTAV1PresetMax = 13
-	// AV1SVTAV1PresetDefault is where the size-versus-time curve stops paying off (VOD sweet spot).
-	AV1SVTAV1PresetDefault = 4
+	// AV1SVTAV1PresetDefault corresponds to the libx265 "slow" preset, recommended for final encoding.
+	AV1SVTAV1PresetDefault = 3
 )
 
 // AV1SVTAV1EncodeQPConfig holds the configuration for AV1 encoding using SVT-AV1.
@@ -259,7 +259,7 @@ func AV1SVTAV1EncodeQP(ctx context.Context, config AV1SVTAV1EncodeQPConfig) (err
  * AV1 NVEnc
  * ffmpeg -h encoder=av1_nvenc
  * Requires an Ada Lovelace (RTX 40 series) or newer GPU: AV1 has no NVENC before that.
- * Presets, AQ/lookahead constants and device handling are shared with HEVC NVENC (see hevc.go).
+ * Presets, AQ/lookahead constants and device handling are shared with HEVC NVENC (see encoders.go).
  */
 
 const (
@@ -322,7 +322,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 		"-init_hw_device", fmt.Sprintf("cuda=nv:%d", config.Device),
 		"-filter_hw_device", "nv",
 	}
-	// // nvdec ?
+	//// nvdec ?
 	if config.NVDec {
 		args = append(args,
 			"-hwaccel", "cuda",
@@ -336,17 +336,18 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 	} else {
 		args = append(args, "-vf", "hwupload,scale_cuda=format=p010le") // perform the 10bits conversion in CUDA for performance (as we are going to use nvenc)
 	}
-	// // flux selection
+	//// flux selection
 	args = append(args,
 		"-map", "0",
 		"-c", "copy",
 	)
-	// // nvenc
+	//// nvenc
 	args = append(args,
 		"-c:v", "av1_nvenc",
-		"-preset", string(preset), // no -profile: AV1 has a single profile (main) covering 8/10bit
+		// no -profile: AV1 has a single profile (main) covering 8/10bit
+		"-preset", string(preset),
 	)
-	// // quality
+	//// quality
 	args = append(args,
 		"-tune", "hq",
 		"-rc", "constqp",
@@ -355,7 +356,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 		"-spatial_aq", strconv.Itoa(nvEncSpatialAQ),
 		"-temporal_aq", strconv.Itoa(nvEncTemporalAQ),
 	)
-	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncLookahead))
+	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncMaxLookahead))
 	// // end with output
 	args = append(args,
 		"-max_interleave_delta", "0",

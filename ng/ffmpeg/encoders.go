@@ -13,6 +13,39 @@ import (
 // Encoder is an FFmpeg encoder identifier (e.g. "libx265").
 type Encoder string
 
+/*
+ * NVENC shared resources
+ * Used by both HEVC and AV1 hardware encoders.
+ */
+
+// NVEncEncodingPreset represents the encoding preset for NVIDIA NVENC encoders.
+// The p1-p7 presets trade encoding speed for compression efficiency.
+type NVEncEncodingPreset string
+
+const (
+	// NVEncPresetP1 is the fastest preset with the lowest compression efficiency.
+	NVEncPresetP1 NVEncEncodingPreset = "p1"
+	// NVEncPresetP2 offers very fast encoding at the cost of file size.
+	NVEncPresetP2 NVEncEncodingPreset = "p2"
+	// NVEncPresetP3 provides fast encoding with moderate compression.
+	NVEncPresetP3 NVEncEncodingPreset = "p3"
+	// NVEncPresetP4 is the default preset balancing speed and compression.
+	NVEncPresetP4 NVEncEncodingPreset = "p4"
+	// NVEncPresetP5 is slower than the default with slightly better compression.
+	NVEncPresetP5 NVEncEncodingPreset = "p5"
+	// NVEncPresetP6 provides significantly better compression than p5.
+	NVEncPresetP6 NVEncEncodingPreset = "p6"
+	// NVEncPresetP7 is the slowest preset with the best compression efficiency.
+	NVEncPresetP7 NVEncEncodingPreset = "p7"
+
+	// CUDADefaultDevice is the default CUDA device index.
+	CUDADefaultDevice = 0
+
+	nvEncSpatialAQ    = 1  // enable spatial adaptive quantization
+	nvEncTemporalAQ   = 1  // enable temporal adaptive quantization
+	nvEncMaxLookahead = 32 // max frames buffered for adaptive I/B decisions (iadapt/badapt): in constqp this is a pure compression win, same QP for smaller files (verified effective even in lossless: at 0 the driver falls back to all-intra)
+)
+
 // GetEncoders runs ffmpeg -encoders and parses its output.
 func GetEncoders(ctx context.Context) (info EncodersInfo, err error) {
 	args := []string{"-encoders"}
