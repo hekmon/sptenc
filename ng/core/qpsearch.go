@@ -46,10 +46,20 @@ type QPSearchConfig struct {
 	WorkingDir string
 	// StatsCache holds previous QP search statistics to guide and accelerate the search.
 	StatsCache *StatsCacheHistory
-	// Encoder is the FFmpeg encoder to use for test encodes.
-	Encoder ffmpeg.Encoder
 	// KeepInvalidQP, if true, retains encoded segments with non-selected QPs instead of deleting them.
 	KeepInvalidQP bool
+
+	// Encoder is the FFmpeg encoder to use for test encodes.
+	Encoder ffmpeg.Encoder
+	// NVIDIAGPUIndex is the CUDA device index to use for NVIDIA NVENC encoding.
+	// If unset, it defaults to 0.
+	NVIDIAGPUIndex int
+	// VAAPIRendererPath is the DRM render node path to use for VA-API encoding.
+	// If unset, it defaults to "/dev/dri/renderD128".
+	VAAPIRendererPath string
+	// D3D12VAGPUIndex is the Direct3D 12 adapter index to use for D3D12VA encoding.
+	// If unset, it defaults to 0.
+	D3D12VAGPUIndex int
 }
 
 // QPSearchResults holds the outcome of a QP search across all segments.
@@ -453,6 +463,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	case ffmpeg.HEVCEncoderNVEnc:
 		err = ffmpeg.HEVCNVEncEncodeQP(ctx, ffmpeg.HEVCNVEncEncodeQPConfig{
 			Input:        input,
+			Device:       config.NVIDIAGPUIndex,
 			Preset:       ffmpeg.NVEncPresetP7,
 			Quantization: qp,
 			Output:       output,
@@ -463,7 +474,29 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
 		})
 	case ffmpeg.HEVCEncoderVAAPI:
-		return errors.New("not yet implemented")
+		err = ffmpeg.HEVCVAAPIEncodeQP(ctx, ffmpeg.HEVCVAAPIEncodeQPConfig{
+			Input:        input,
+			Device:       config.VAAPIRendererPath,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
+	case ffmpeg.HEVCEncoderD3D12VA:
+		err = ffmpeg.HEVCD3D12VAEncodeQP(ctx, ffmpeg.HEVCD3D12VAEncodeQPConfig{
+			Input:        input,
+			Device:       config.D3D12VAGPUIndex,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
 	case ffmpeg.AV1EncoderLibaom:
 		return errors.New("not yet implemented")
 	case ffmpeg.AV1EncoderNVEnc:

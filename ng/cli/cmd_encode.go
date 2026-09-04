@@ -35,6 +35,7 @@ var encodeCommand = &cli.Command{
 	Usage:       "Encode video segments to meet perceptual quality targets at minimal file size",
 	Description: fmt.Sprintf("The input path can be provided in two forms:\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: []cli.Flag{
+		// encoding
 		&cli.StringFlag{
 			Name:             "encoder",
 			Aliases:          []string{"e"},
@@ -43,6 +44,28 @@ var encodeCommand = &cli.Command{
 			OnlyOnce:         true,
 			Validator:        encoderValidator,
 			ValidateDefaults: true,
+			Category:         "Encoding",
+		},
+		&cli.IntFlag{
+			Name:     "nvidiagpuindex",
+			Usage:    fmt.Sprintf("GPU to use when --encoder is set to %q or %q", ffmpeg.HEVCEncoderNVEnc, ffmpeg.AV1EncoderNVEnc),
+			Value:    ffmpeg.CUDADefaultDevice,
+			OnlyOnce: true,
+			Category: "Encoding",
+		},
+		&cli.StringFlag{
+			Name:     "vaapirendererpath",
+			Usage:    fmt.Sprintf("Direct Rendering Manager render node to use when --encoder is set to %q or %q", ffmpeg.HEVCEncoderVAAPI, ffmpeg.AV1EncoderVAAPI),
+			Value:    ffmpeg.VAAPIDefaultDevice,
+			OnlyOnce: true,
+			Category: "Encoding",
+		},
+		&cli.IntFlag{
+			Name:     "d3d12vagpuindex",
+			Usage:    fmt.Sprintf("GPU to use when --encoder is set to %q", ffmpeg.HEVCEncoderD3D12VA),
+			Value:    ffmpeg.D3D12VADefaultDevice,
+			OnlyOnce: true,
+			Category: "Encoding",
 		},
 		// directories
 		&cli.StringFlag{
@@ -387,11 +410,15 @@ var encodeCommand = &cli.Command{
 		tobs.Start(len(segmentPaths), totalDuration)
 		results, err := core.FindAllSegmentsQP(ctx, tobs,
 			core.QPSearchConfig{
-				SegmentPaths: segmentPaths,
-				Auditor:      vmafAuditor,
-				WorkingDir:   workingDir,
-				StatsCache:   statsCache,
-				Encoder:      ffmpeg.Encoder(cmd.String("encoder")),
+				SegmentPaths:      segmentPaths,
+				Auditor:           vmafAuditor,
+				WorkingDir:        workingDir,
+				StatsCache:        statsCache,
+				KeepInvalidQP:     cmd.Bool(debugFlagName),
+				Encoder:           ffmpeg.Encoder(cmd.String("encoder")),
+				NVIDIAGPUIndex:    cmd.Int("nvidiagpuindex"),
+				VAAPIRendererPath: cmd.String("vaapirendererpath"),
+				D3D12VAGPUIndex:   cmd.Int("d3d12vagpuindex"),
 			},
 		)
 		if err != nil {
