@@ -192,6 +192,9 @@ const (
 	// HEVCNVEncQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCNVEncQPMax = 51
 
+	// CUDADefaultDevice is the default CUDA device index.
+	CUDADefaultDevice = 0
+
 	nvEncSpatialAQ  = 1  // enable spatial adaptive quantization
 	nvEncTemporalAQ = 1  // enable temporal adaptive quantization
 	nvEncLookahead  = 32 // max frames buffered for adaptive I/B decisions (iadapt/badapt): in constqp this is a pure compression win, same QP for smaller files (verified effective even in lossless: at 0 the driver falls back to all-intra)
@@ -200,8 +203,9 @@ const (
 // HEVCNVEncEncodeQPConfig holds the configuration for HEVC encoding using NVIDIA NVENC.
 type HEVCNVEncEncodeQPConfig struct {
 	// Input
-	Input string
-	NVDec bool // decode in GPU, codec must be supported
+	Input  string
+	NVDec  bool // decode in GPU, codec must be supported
+	Device int  // NVIDIA GPU index, see CUDADefaultDevice
 	// Output
 	Preset       NVEncEncodingPreset // if unset it will be set automatically to NVEncPresetP4
 	Quantization int
@@ -241,17 +245,15 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	args := []string{
 		"-y",
 		"-loglevel", "error", "-stats",
+		"-init_hw_device", fmt.Sprintf("cuda=nv:%d", config.Device),
+		"-filter_hw_device", "nv",
 	}
 	//// nvdec ?
 	if config.NVDec {
 		args = append(args,
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
-		)
-	} else {
-		args = append(args,
-			"-init_hw_device", "cuda=nv:0",
-			"-filter_hw_device", "nv",
+			"-hwaccel_device", "nv",
 		)
 	}
 	args = append(args, "-i", config.Input)
@@ -490,7 +492,7 @@ type HEVCD3D12VAEncodeQPConfig struct {
 	// Input
 	Input    string
 	D3D12Dec bool // decode on GPU, codec must be supported
-	Device   int  // Direct3D 12 adapter index, if unset it will be set automatically to D3D12VADefaultDevice
+	Device   int  // Direct3D 12 adapter index, see D3D12VADefaultDevice
 	// Output
 	Quantization int    // HEVCLossless is not supported by hevc_d3d12va and will return an error
 	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
