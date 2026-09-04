@@ -54,23 +54,26 @@ const (
 	// Libx265PresetPlacebo is the slowest preset with marginal gains over veryslow.
 	Libx265PresetPlacebo Libx265EncodingPreset = "placebo"
 
-	libx265HEVCAQ = 1 // Enable HEVC AQ - https://x265.readthedocs.io/en/latest/cli.html#cmdoption-hevc-aq
 	libx265AQMode = 3 // AQ enabled with auto-variance and bias to dark scenes - https://x265.readthedocs.io/en/latest/cli.html#cmdoption-aq-mode
 )
 
+// HEVCLibx265EncodeConfig holds the configuration for HEVC encoding using libx265.
 type HEVCLibx265EncodeConfig struct {
 	// Input
 	Input string
 	// Output
-	Preset       Libx265EncodingPreset // if unset it will be set automatically to Libx265PresetMedium 
+	Preset       Libx265EncodingPreset // if unset it will be set automatically to Libx265PresetMedium
 	Quantization int
-	Output       string
+	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
 	// Reporting
 	Debug             func(msg string)
-	RuntimeError      func(err error) // non fatal errors
+	RuntimeError      func(err error) // stderr error output, stats output will be send in FFMPEGStatsReport
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
+// HEVCLibx265Encode encodes a video file to HEVC/H.265 using the libx265 encoder via FFmpeg.
+// This is a CPU-based software encoder; it is slower than GPU encoding (e.g. NVENC or VA-API)
+// but produces significantly smaller files, making it recommended for final encoding.
 func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
@@ -79,7 +82,7 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if (config.Quantization < HEVCQPMin && config.Quantization > HEVCQPMax) && config.Quantization != HEVCLossless {
+	if (config.Quantization < HEVCQPMin || config.Quantization > HEVCQPMax) && config.Quantization != HEVCLossless {
 		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d", HEVCQPMin, HEVCQPMax, HEVCLossless, config.Quantization)
 	}
 	switch config.Preset {
@@ -97,17 +100,13 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 		"-y",
 		"-loglevel", "error", "-stats",
 		"-i", config.Input,
-		// copy anything that is not a video
-		"-c:a", "copy", // copy (not convert) if audio
-		"-c:s", "copy", // copy (not convert) if subtitles
-		"-c:d", "copy", // copy (not convert) if data
-		"-c:t", "copy", // copy (not convert) if attachments
-		// encode video
+		"-map", "0", // "-map", "-0:d?",
+		"-c", "copy",
 		"-c:v", "libx265",
 		"-profile:v", "main10",
-		"-preset", string(config.Preset), // preset defines lookahead
+		"-preset", string(config.Preset),
 	}
-	//// libx265 params
+	//// quality
 	if config.Quantization == HEVCLossless {
 		args = append(args,
 			"-x265-params", "lossless=1",
@@ -115,7 +114,7 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 	} else {
 		args = append(args,
 			"-qp", strconv.Itoa(config.Quantization),
-			"-x265-params", fmt.Sprintf("hevc-aq=%d:aq-mode=%d", libx265HEVCAQ, libx265AQMode),
+			"-x265-params", fmt.Sprintf("aq-mode=%d", libx265AQMode),
 		)
 	}
 	//// end with output
@@ -158,6 +157,7 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 
 /*
  * HEVC NVEnc
+ * ffmpeg -h encoder=hevc_nvenc
  */
 
 const (
@@ -167,6 +167,7 @@ const (
 
 /*
  * HEVC VA API
+ * ffmpeg -h encoder=hevc_vaapi
  */
 
 const (
