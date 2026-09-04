@@ -96,9 +96,11 @@ var encodeCommand = &cli.Command{
 		},
 		// single video file
 		&cli.Float64Flag{
-			Name:      "threshold",
-			Aliases:   []string{"T"},
-			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value for your video with the split command.", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
+			Name:    "threshold",
+			Aliases: []string{"T"},
+			Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value for your video with the split command.",
+				ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
+			),
 			Value:     10,
 			OnlyOnce:  true,
 			Category:  "Single Video File",
