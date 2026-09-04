@@ -22,9 +22,11 @@ import (
 
 var encoders = []string{
 	// HEVC
-	string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc), string(ffmpeg.HEVCEncoderVAAPI),
+	string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc),
+	string(ffmpeg.HEVCEncoderVAAPI), string(ffmpeg.HEVCEncoderD3D12VA),
 	// AV1
-	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
+	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderNVEnc),
+	string(ffmpeg.AV1EncoderVAAPI),
 }
 
 var encodeCommand = &cli.Command{

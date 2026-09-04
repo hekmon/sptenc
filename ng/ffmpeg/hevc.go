@@ -331,6 +331,7 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 
 /*
  * HEVC VA-API
+ * Linux only, vendor-agnostic (Intel/AMD).
  * ffmpeg -h encoder=hevc_vaapi
  * https://ffmpeg.org/ffmpeg-codecs.html#VAAPI-encoders
  */
@@ -339,8 +340,9 @@ const (
 	// HEVCEncoderVAAPI is the FFmpeg encoder name for VA-API HEVC hardware encoding.
 	HEVCEncoderVAAPI Encoder = "hevc_vaapi"
 
-	// HEVCVAAPIQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
-	// Should be 0, but not all drivers honors it, stopping at 1.
+	// HEVCVAAPIQPMin is the minimum QP value usable with hevc_vaapi.
+	// 0 is FFmpeg's "unset" sentinel: explicit_qp is only set when qp > 0
+	// (vaapi_encode_h265.c), so 0 cannot actually be requested.
 	HEVCVAAPIQPMin = 1
 	// HEVCVAAPIQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCVAAPIQPMax = 52
@@ -416,6 +418,137 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	//// vaapi
 	args = append(args,
 		"-c:v", "hevc_vaapi",
+		"-profile:v", "main10",
+	)
+	//// quality
+	args = append(args,
+		"-rc_mode", "CQP", // constant QP: the QP asked is the QP applied, deterministic for the per-scene quality loop
+		"-qp", strconv.Itoa(config.Quantization),
+	)
+	//// end with output
+	args = append(args,
+		"-max_interleave_delta", "0",
+		config.Output,
+	)
+	// Prepare command
+	if config.Debug != nil {
+		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
+	}
+	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	// Prepare output handling
+	outputPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
+		return
+	}
+	// Start program
+	if err = cmd.Start(); err != nil {
+		err = fmt.Errorf("error starting %s: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
+	progressDone := make(chan struct{})
+	go func() {
+		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		close(progressDone)
+	}()
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
+	}
+	<-progressDone
+	if err = cmd.Wait(); err != nil {
+		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	return
+}
+
+/*
+ * HEVC D3D12VA
+ * ffmpeg -h encoder=hevc_d3d12va
+ * Windows only, vendor-agnostic (Intel/AMD/NVIDIA).
+ * Requires FFmpeg >= 8.1 (scale_d3d12 filter, used for on-GPU 10-bit conversion).
+ */
+
+const (
+	// HEVCEncoderD3D12VA is the FFmpeg encoder name for D3D12VA HEVC hardware encoding.
+	HEVCEncoderD3D12VA Encoder = "hevc_d3d12va"
+
+	// HEVCD3D12VAQPMin is the minimum QP value usable with hevc_d3d12va.
+	// 0 is FFmpeg's "unset" sentinel (same explicit_qp semantics as VAAPI),
+	// so 1 is the lowest value actually requestable.
+	HEVCD3D12VAQPMin = 1
+	// HEVCD3D12VAQPMax is the maximum QP value accepted by hevc_d3d12va.
+	HEVCD3D12VAQPMax = 52
+
+	// D3D12VADefaultDevice is the default Direct3D 12 adapter index (first GPU).
+	D3D12VADefaultDevice = 0
+)
+
+// HEVCD3D12VAEncodeQPConfig holds the configuration for HEVC encoding using D3D12VA.
+type HEVCD3D12VAEncodeQPConfig struct {
+	// Input
+	Input    string
+	D3D12Dec bool // decode on GPU, codec must be supported
+	Device   int  // Direct3D 12 adapter index, if unset it will be set automatically to D3D12VADefaultDevice
+	// Output
+	Quantization int    // HEVCLossless is not supported by hevc_d3d12va and will return an error
+	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
+	// Reporting
+	Debug             func(msg string)
+	RuntimeError      func(err error) // stderr error output, stats output will be send in FFMPEGStatsReport
+	FFMPEGStatsReport func(stats ProgressStats)
+}
+
+// HEVCD3D12VAEncodeQP encodes a video file to HEVC/H.265 using the D3D12VA hardware encoder via FFmpeg.
+// Requires FFmpeg >= 8.1 (scale_d3d12). The encoder only accepts hardware frames
+// ("Supported pixel formats: d3d12"), so hwupload is mandatory on the software decode path.
+// WARNING: currently untested
+func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) (err error) {
+	// Validate inputs
+	if config.Input == "" {
+		return errors.New("input path cannot be empty")
+	}
+	if config.Output == "" {
+		return errors.New("output file path cannot be empty")
+	}
+	if config.Quantization == HEVCLossless {
+		// D3D12VA HEVC has no lossless mode
+		return errors.New("hevc_d3d12va does not support lossless encoding")
+	}
+	if config.Quantization < HEVCD3D12VAQPMin || config.Quantization > HEVCD3D12VAQPMax {
+		return fmt.Errorf("quantization must be %d-%d, got %d", HEVCD3D12VAQPMin, HEVCD3D12VAQPMax, config.Quantization)
+	}
+	// Prepare
+	args := []string{
+		"-y",
+		"-loglevel", "error", "-stats",
+		// named device shared by decoder, filters and encoder: same GPU guaranteed
+		"-init_hw_device", "d3d12va=d12:" + strconv.Itoa(config.Device),
+		"-filter_hw_device", "d12",
+	}
+	//// d3d12 decoding ?
+	if config.D3D12Dec {
+		args = append(args,
+			"-hwaccel", "d3d12va",
+			"-hwaccel_output_format", "d3d12",
+			"-hwaccel_device", "d12", // reuse the named device
+		)
+	}
+	args = append(args, "-i", config.Input)
+	if config.D3D12Dec {
+		args = append(args, "-vf", "scale_d3d12=format=p010le") // convert to 10bits if necessary while staying on the GPU between decode and encode
+	} else {
+		args = append(args, "-vf", "hwupload,scale_d3d12=format=p010le") // perform the 10bits conversion on GPU for performance (as we are going to use d3d12va encode)
+	}
+	//// flux selection
+	args = append(args,
+		"-map", "0",
+		"-c", "copy",
+	)
+	//// d3d12va
+	args = append(args,
+		"-c:v", "hevc_d3d12va",
 		"-profile:v", "main10",
 	)
 	//// quality
