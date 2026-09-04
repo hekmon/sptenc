@@ -43,7 +43,7 @@ func GetEncoderQPRange(encoder Encoder) (qpMin, qpMax int, found bool) {
 	case AV1EncoderLibaom:
 		return AV1LibaomQPMin, AV1LibaomQPMax, true
 	case AV1EncoderNVEnc:
-		return AV1NVENCQPMin, AV1NVENCQPMax, true
+		return AV1NVEncQPMin, AV1NVEncQPMax, true
 	case AV1EncoderVAAPI:
 		return AV1VAAPIQPMin, AV1VAAPIQPMax, true
 	default:
