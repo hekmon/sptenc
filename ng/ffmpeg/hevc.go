@@ -10,15 +10,6 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
-const (
-	// HEVCQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
-	HEVCQPMin = 0
-	// HEVCQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
-	HEVCQPMax = 51
-	// HEVCLossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
-	HEVCLossless = -1
-)
-
 /*
  * Libx265
  * ffmpeg -h encoder=libx265
@@ -32,6 +23,13 @@ type Libx265EncodingPreset string
 const (
 	// HEVCEncoderLibx265 is the FFmpeg encoder name for libx265 (HEVC software encoding).
 	HEVCEncoderLibx265 Encoder = "libx265"
+
+	// HEVCLibx265QPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCLibx265QPMin = 0
+	// HEVCLibx265QPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCLibx265QPMax = 51
+	// HEVCLibx265Lossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
+	HEVCLibx265Lossless = -1
 
 	// Libx265PresetUltrafast is the fastest preset with the lowest compression efficiency.
 	Libx265PresetUltrafast Libx265EncodingPreset = "ultrafast"
@@ -82,8 +80,10 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if (config.Quantization < HEVCQPMin || config.Quantization > HEVCQPMax) && config.Quantization != HEVCLossless {
-		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d", HEVCQPMin, HEVCQPMax, HEVCLossless, config.Quantization)
+	if (config.Quantization < HEVCLibx265QPMin || config.Quantization > HEVCLibx265QPMax) && config.Quantization != HEVCLibx265Lossless {
+		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d",
+			HEVCLibx265QPMin, HEVCLibx265QPMax, HEVCLibx265Lossless, config.Quantization,
+		)
 	}
 	switch config.Preset {
 	case Libx265PresetUltrafast, Libx265PresetSuperfast, Libx265PresetVeryfast,
@@ -107,7 +107,7 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 		"-preset", string(config.Preset),
 	}
 	//// quality
-	if config.Quantization == HEVCLossless {
+	if config.Quantization == HEVCLibx265Lossless {
 		args = append(args,
 			"-x265-params", "lossless=1",
 		)
@@ -168,6 +168,13 @@ const (
 	// HEVCEncoderNVEnc is the FFmpeg encoder name for NVIDIA NVENC HEVC hardware encoding.
 	HEVCEncoderNVEnc Encoder = "hevc_nvenc"
 
+	// HEVCNVEncQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCNVEncQPMin = 0
+	// HEVCNVEncQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCNVEncQPMax = 51
+	// HEVCNVEncLossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
+	HEVCNVEncLossless = -1
+
 	// NVEncPresetP1 is the fastest preset with the lowest compression efficiency.
 	NVEncPresetP1 NVEncEncodingPreset = "p1"
 	// NVEncPresetP2 offers very fast encoding at the cost of file size.
@@ -214,8 +221,10 @@ func HEVCNVEncEncode(ctx context.Context, config HEVCNVEncEncodeConfig) (err err
 	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if (config.Quantization < HEVCQPMin || config.Quantization > HEVCQPMax) && config.Quantization != HEVCLossless {
-		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d", HEVCQPMin, HEVCQPMax, HEVCLossless, config.Quantization)
+	if (config.Quantization < HEVCNVEncQPMin || config.Quantization > HEVCNVEncQPMax) && config.Quantization != HEVCNVEncLossless {
+		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d",
+			HEVCNVEncQPMin, HEVCNVEncQPMax, HEVCNVEncLossless, config.Quantization,
+		)
 	}
 	// Preset validation and default
 	preset := config.Preset
@@ -263,7 +272,7 @@ func HEVCNVEncEncode(ctx context.Context, config HEVCNVEncEncodeConfig) (err err
 		"-preset", string(preset),
 	)
 	//// quality
-	if config.Quantization == HEVCLossless {
+	if config.Quantization == HEVCNVEncLossless {
 		args = append(args,
 			"-tune", "lossless",
 		)
@@ -321,11 +330,134 @@ func HEVCNVEncEncode(ctx context.Context, config HEVCNVEncEncodeConfig) (err err
 }
 
 /*
- * HEVC VA API
+ * HEVC VA-API
  * ffmpeg -h encoder=hevc_vaapi
+ * https://ffmpeg.org/ffmpeg-codecs.html#VAAPI-encoders
  */
 
 const (
 	// HEVCEncoderVAAPI is the FFmpeg encoder name for VA-API HEVC hardware encoding.
 	HEVCEncoderVAAPI Encoder = "hevc_vaapi"
+
+	// HEVCVAAPIQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
+	// Should be 0, but not all drivers honors it, stopping at 1.
+	HEVCVAAPIQPMin = 1
+	// HEVCVAAPIQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCVAAPIQPMax = 52
+
+	// VAAPIDefaultDevice is the default DRM render node (first GPU)
+	VAAPIDefaultDevice = "/dev/dri/renderD128"
 )
+
+// HEVCVAAPIEncodeConfig holds the configuration for HEVC encoding using VA-API.
+type HEVCVAAPIEncodeConfig struct {
+	// Input
+	Input  string
+	VADec  bool   // decode on GPU, codec must be supported
+	Device string // DRM render node, if unset it will be set automatically to VAAPIDefaultDevice
+	// Output
+	Quantization int    // HEVCLossless is not supported by hevc_vaapi and will return an error
+	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
+	// Reporting
+	Debug             func(msg string)
+	RuntimeError      func(err error) // stderr error output, stats output will be send in FFMPEGStatsReport
+	FFMPEGStatsReport func(stats ProgressStats)
+}
+
+// HEVCVAAPIEncode encodes a video file to HEVC/H.265 using the VA-API hardware encoder via FFmpeg.
+//
+// WARNING: currently untested
+func HEVCVAAPIEncode(ctx context.Context, config HEVCVAAPIEncodeConfig) (err error) {
+	// Validate inputs
+	if config.Input == "" {
+		return errors.New("input path cannot be empty")
+	}
+	if config.Output == "" {
+		return errors.New("output file path cannot be empty")
+	}
+	if config.Quantization == HEVCNVEncLossless {
+		// VA-API HEVC has no lossless mode; qp 0 is not even guaranteed to be honored by drivers
+		return errors.New("hevc_vaapi does not support lossless encoding")
+	}
+	if config.Quantization < HEVCVAAPIQPMin || config.Quantization > HEVCVAAPIQPMax {
+		return fmt.Errorf("quantization must be %d-%d, got %d", HEVCVAAPIQPMin, HEVCVAAPIQPMax, config.Quantization)
+	}
+	if config.Device == "" {
+		config.Device = VAAPIDefaultDevice
+	}
+	// Prepare
+	args := []string{
+		"-y",
+		"-loglevel", "error", "-stats",
+	}
+	//// vaapi decoding ?
+	if config.VADec {
+		args = append(args,
+			"-hwaccel", "vaapi",
+			"-hwaccel_output_format", "vaapi",
+			"-hwaccel_device", config.Device,
+		)
+	} else {
+		args = append(args,
+			"-init_hw_device", "vaapi=va:"+config.Device,
+			"-filter_hw_device", "va",
+		)
+	}
+	args = append(args, "-i", config.Input)
+	if config.VADec {
+		args = append(args, "-vf", "scale_vaapi=format=p010le") // convert to 10bits if necessary while staying on the GPU between decode and encode
+	} else {
+		args = append(args, "-vf", "hwupload,scale_vaapi=format=p010le") // perform the 10bits conversion on GPU for performance (as we are going to use vaapi encode)
+	}
+	//// flux selection
+	args = append(args,
+		"-map", "0",
+		"-c", "copy",
+	)
+	//// vaapi
+	args = append(args,
+		"-c:v", "hevc_vaapi",
+		"-profile:v", "main10",
+	)
+	//// quality
+	args = append(args,
+		"-rc_mode", "CQP", // constant QP: the QP asked is the QP applied, deterministic for the per-scene quality loop
+		"-qp", strconv.Itoa(config.Quantization),
+	)
+	//// end with output
+	args = append(args,
+		"-max_interleave_delta", "0",
+		config.Output,
+	)
+	// Prepare command
+	if config.Debug != nil {
+		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
+	}
+	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	// Prepare output handling
+	outputPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
+		return
+	}
+	// Start program
+	if err = cmd.Start(); err != nil {
+		err = fmt.Errorf("error starting %s: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
+	progressDone := make(chan struct{})
+	go func() {
+		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		close(progressDone)
+	}()
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
+	}
+	<-progressDone
+	if err = cmd.Wait(); err != nil {
+		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	return
+}

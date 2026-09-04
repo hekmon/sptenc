@@ -38,8 +38,12 @@ func getPrintableCMDLine(program string, args []string) string {
 // GetEncoderQPRange returns the QP range for the given encoder
 func GetEncoderQPRange(encoder Encoder) (qpMin, qpMax int, found bool) {
 	switch encoder {
-	case HEVCEncoderLibx265, HEVCEncoderNVEnc, HEVCEncoderVAAPI:
-		return HEVCQPMin, HEVCQPMax, true
+	case HEVCEncoderLibx265:
+		return HEVCLibx265QPMin, HEVCLibx265QPMax, true
+	case HEVCEncoderNVEnc:
+		return HEVCNVEncQPMin, HEVCNVEncQPMax, true
+	case HEVCEncoderVAAPI:
+		return HEVCVAAPIQPMin, HEVCVAAPIQPMax, true
 	case AV1EncoderLibaom:
 		return AV1LibaomQPMin, AV1LibaomQPMax, true
 	case AV1EncoderNVEnc:
