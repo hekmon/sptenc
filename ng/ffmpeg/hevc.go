@@ -142,8 +142,8 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
  */
 
 const (
-	// HEVCEncoderNVENC is the FFmpeg encoder name for NVIDIA NVENC HEVC hardware encoding.
-	HEVCEncoderNVENC Encoder = "hevc_nvenc"
+	// HEVCEncoderNVEnc is the FFmpeg encoder name for NVIDIA NVENC HEVC hardware encoding.
+	HEVCEncoderNVEnc Encoder = "hevc_nvenc"
 )
 
 /*

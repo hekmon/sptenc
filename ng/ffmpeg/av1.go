@@ -23,7 +23,7 @@ const (
 	// ffmpeg -h encoder=av1_nvenc
 
 	// AV1EncoderNVENC is the FFmpeg encoder name for NVIDIA NVENC AV1 hardware encoding.
-	AV1EncoderNVENC Encoder = "av1_nvenc"
+	AV1EncoderNVEnc Encoder = "av1_nvenc"
 
 	// AV1NVENCQPMin is the minimum Quantization Parameter (QP) value for av1_nvenc.
 	AV1NVENCQPMin = 0

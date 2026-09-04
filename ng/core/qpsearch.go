@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -438,6 +439,16 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			RuntimeError:      scb.Error,
 			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
 		})
+	case ffmpeg.HEVCEncoderNVENC:
+		return errors.New("not yet implemented")
+	case ffmpeg.HEVCEncoderVAAPI:
+		return errors.New("not yet implemented")
+	case ffmpeg.AV1EncoderLibaom:
+		return errors.New("not yet implemented")
+	case ffmpeg.AV1EncoderNVEnc:
+		return errors.New("not yet implemented")
+	case ffmpeg.AV1EncoderVAAPI:
+		return errors.New("not yet implemented")
 	default:
 		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
 	}
