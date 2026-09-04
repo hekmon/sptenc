@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"sync"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 
@@ -28,17 +29,18 @@ func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFChecke
 		err = fmt.Errorf("unsupported encoder %s", encoder)
 		return
 	}
-	err = sch.LoadStats()
+	err = sch.loadStats()
 	return
 }
 
 // StatsCacheHistory persists and aggregates QP statistics across encoding runs
 // for a specific encoder and VMAF profile.
 type StatsCacheHistory struct {
-	path  string
-	stats []runStats
-	qpMin int
-	qpMax int
+	path   string
+	stats  []runStats
+	qpMin  int
+	qpMax  int
+	access sync.RWMutex
 }
 
 // runStats represents the statistical summary of a single encoding run.
@@ -53,38 +55,16 @@ func (sch *StatsCacheHistory) GetPath() string {
 	return sch.path
 }
 
-// LoadStats reads the cache from disk. A missing file is treated as an empty cache.
-func (sch *StatsCacheHistory) LoadStats() (err error) {
-	fd, err := os.Open(sch.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			sch.stats = make([]runStats, 0, 1)
-			err = nil
-		}
-		return
-	}
-	defer fd.Close()
-	return json.NewDecoder(fd).Decode(&sch.stats)
-}
-
-// SaveStats writes the current cache to disk as indented JSON.
-func (sch *StatsCacheHistory) SaveStats() error {
-	// Create or truncate file
-	fd, err := os.Create(sch.path)
-	if err != nil {
-		return err
-	}
-	defer fd.Close()
-	// Make it human readable
-	enc := json.NewEncoder(fd)
-	enc.SetIndent("", "  ")
-	// Dump data
-	return enc.Encode(sch.stats)
-}
-
 // AddRun records a new set of QP values and returns their mean and standard deviation.
 // Duplicate runs (same mean, stddev, and weight) are ignored.
-func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64) {
+func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error) {
+	sch.access.Lock()
+	defer sch.access.Unlock()
+	// Load last version of the cached file (another encode may have added a run since)
+	if err = sch.loadStats(); err != nil {
+		err = fmt.Errorf("failed to reload stats from disk: %w", err)
+		return
+	}
 	// Convert to float64
 	qpf := make([]float64, len(qps))
 	for i, q := range qps {
@@ -109,6 +89,8 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64) {
 // GetMeanStdDev returns the weighted mean and standard deviation of all recorded runs.
 // If no runs have been recorded, it returns a heuristic estimate based on the encoder's QP range.
 func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
+	sch.access.RLock()
+	defer sch.access.RUnlock()
 	// If we do not have stats yet, set data like a quick sort/search
 	if len(sch.stats) == 0 {
 		mean = (sch.qpMax - sch.qpMin + 1) / 2
@@ -131,6 +113,35 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 	mean = int(math.Round(meanf))
 	stddev = max(1, int(math.Round(stddevf)))
 	return
+}
+
+// LoadStats reads the cache from disk. A missing file is treated as an empty cache.
+func (sch *StatsCacheHistory) loadStats() (err error) {
+	fd, err := os.Open(sch.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			sch.stats = make([]runStats, 0, 1)
+			err = nil
+		}
+		return
+	}
+	defer fd.Close()
+	return json.NewDecoder(fd).Decode(&sch.stats)
+}
+
+// SaveStats writes the current cache to disk as indented JSON.
+func (sch *StatsCacheHistory) saveStats() error {
+	// Create or truncate file
+	fd, err := os.Create(sch.path)
+	if err != nil {
+		return err
+	}
+	defer fd.Close()
+	// Make it human readable
+	enc := json.NewEncoder(fd)
+	enc.SetIndent("", "  ")
+	// Dump data
+	return enc.Encode(sch.stats)
 }
 
 func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) string {

@@ -62,7 +62,7 @@ var checkCommand = &cli.Command{
 					has  bool
 				}{
 					{ffmpeg.HEVCEncoderLibx265, encoders.Has(string(ffmpeg.HEVCEncoderLibx265))},
-					{ffmpeg.HEVCEncoderNVENC, encoders.Has(string(ffmpeg.HEVCEncoderNVENC))},
+					{ffmpeg.HEVCEncoderNVEnc, encoders.Has(string(ffmpeg.HEVCEncoderNVEnc))},
 					{ffmpeg.HEVCEncoderVAAPI, encoders.Has(string(ffmpeg.HEVCEncoderVAAPI))},
 				}
 				for _, e := range hevcEncoders {
@@ -77,7 +77,7 @@ var checkCommand = &cli.Command{
 					has  bool
 				}{
 					{ffmpeg.AV1EncoderLibaom, encoders.Has(string(ffmpeg.AV1EncoderLibaom))},
-					{ffmpeg.AV1EncoderNVENC, encoders.Has(string(ffmpeg.AV1EncoderNVENC))},
+					{ffmpeg.AV1EncoderNVEnc, encoders.Has(string(ffmpeg.AV1EncoderNVEnc))},
 					{ffmpeg.AV1EncoderVAAPI, encoders.Has(string(ffmpeg.AV1EncoderVAAPI))},
 				}
 				for _, e := range av1Encoders {

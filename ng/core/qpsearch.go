@@ -38,23 +38,36 @@ type QPSearchCallbacks interface {
 
 // QPSearchConfig holds the invariants for a QP search run.
 type QPSearchConfig struct {
-	SegmentPaths  []string
-	Auditor       VMAFChecker
-	WorkingDir    string
-	StatsCache    *StatsCacheHistory
-	Encoder       ffmpeg.Encoder
+	// SegmentPaths contains the file paths of the video segments to search for optimal QP.
+	SegmentPaths []string
+	// Auditor validates whether a candidate QP meets the target quality (e.g. via VMAF).
+	Auditor VMAFChecker
+	// WorkingDir is the directory where temporary encoded segments and VMAF reports are written during the search.
+	WorkingDir string
+	// StatsCache holds previous QP search statistics to guide and accelerate the search.
+	StatsCache *StatsCacheHistory
+	// Encoder is the FFmpeg encoder to use for test encodes.
+	Encoder ffmpeg.Encoder
+	// KeepInvalidQP, if true, retains encoded segments with non-selected QPs instead of deleting them.
 	KeepInvalidQP bool
 }
 
+// QPSearchResults holds the outcome of a QP search across all segments.
 type QPSearchResults struct {
+	// EncodedSegmentsPaths contains the file paths of the encoded segments that met the quality target.
 	EncodedSegmentsPaths []string
-	QPs                  []int
-	SearchDuration       time.Duration
-	GlobalWeightedQP     float64
-	TotalNbAttempts      int
-	TotalSegmentsFrames  int
-	TotalEncodedFrames   int
-	NbBestEfforts        int
+	// QPs contains the selected QP value for each segment (aligned with EncodedSegmentsPaths).
+	QPs []int
+	// GlobalWeightedQP is the average QP across all segments, weighted by each segment's frame count.
+	GlobalWeightedQP float64
+	// TotalNbAttempts is the total number of encode attempts made during the search.
+	TotalNbAttempts int
+	// TotalSegmentsFrames is the sum of frame counts across all source segments.
+	TotalSegmentsFrames int
+	// TotalEncodedFrames is the sum of frame counts across all encode attempts (even from non selected qp encodes).
+	TotalEncodedFrames int
+	// NbBestEfforts is the number of segments that stop at the minimum QP without reaching the target VMAF profile.
+	NbBestEfforts int
 }
 
 // FindAllSegmentsQP searches for the optimal QP for each segment.
@@ -71,7 +84,6 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	results.EncodedSegmentsPaths = make([]string, len(config.SegmentPaths))
 	results.QPs = make([]int, len(config.SegmentPaths))
 	// Go
-	start := time.Now()
 	for segment, segmentPath := range config.SegmentPaths {
 		scb.OnSegmentStart(segment, segmentPath)
 		// Find this segment QP
@@ -99,7 +111,6 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 		// Done
 		scb.OnSegmentDone(segmentQP, segmentFrames, segmentNbAttempts, doneDuration, allSegmentSize)
 	}
-	results.SearchDuration = time.Since(start)
 	results.GlobalWeightedQP = float64(segmentWeights) / float64(results.TotalSegmentsFrames)
 	return
 }
@@ -439,7 +450,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			RuntimeError:      scb.Error,
 			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
 		})
-	case ffmpeg.HEVCEncoderNVENC:
+	case ffmpeg.HEVCEncoderNVEnc:
 		return errors.New("not yet implemented")
 	case ffmpeg.HEVCEncoderVAAPI:
 		return errors.New("not yet implemented")

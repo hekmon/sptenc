@@ -22,9 +22,9 @@ import (
 
 var encoders = []string{
 	// HEVC
-	string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVENC), string(ffmpeg.HEVCEncoderVAAPI),
+	string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc), string(ffmpeg.HEVCEncoderVAAPI),
 	// AV1
-	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderNVENC), string(ffmpeg.AV1EncoderVAAPI),
+	string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
 }
 
 var encodeCommand = &cli.Command{
@@ -270,11 +270,9 @@ var encodeCommand = &cli.Command{
 			err = fmt.Errorf("failed to create stats cache: %w", err)
 			return
 		}
-		defer func() {
-			if saveErr := statsCache.SaveStats(); err != nil {
-				fmt.Fprintf(bypass, "ERROR: failed to save stats cache: %s\n", saveErr)
-			}
-		}()
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
+		}
 
 		/*
 		 * Execute process
@@ -406,7 +404,11 @@ var encodeCommand = &cli.Command{
 		)
 		fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentPaths)))
 		fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames))
-		segmentQPmean, segmentQPstddev := statsCache.AddRun(results.QPs)
+		segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
+		if err != nil {
+			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
+			err = nil
+		}
 		fmt.Fprintf(bypass, "Segment QP mean is %s with a standard deviation of %s.\n",
 			strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
 		)
