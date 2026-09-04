@@ -10,6 +10,12 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
+const (
+	// HEVCLossless is a special QP value accepted by HEVC encode configs to request lossless mode.
+	// Rejected by encoders that do not support it (hevc_vaapi).
+	HEVCLossless = -1
+)
+
 /*
  * Libx265
  * ffmpeg -h encoder=libx265
@@ -49,8 +55,6 @@ const (
 	HEVCLibx265QPMin = 0
 	// HEVCLibx265QPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCLibx265QPMax = 51
-	// HEVCLibx265Lossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
-	HEVCLibx265Lossless = -1
 
 	libx265AQMode = 3 // AQ enabled with auto-variance and bias to dark scenes - https://x265.readthedocs.io/en/latest/cli.html#cmdoption-aq-mode
 )
@@ -80,9 +84,9 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if (config.Quantization < HEVCLibx265QPMin || config.Quantization > HEVCLibx265QPMax) && config.Quantization != HEVCLibx265Lossless {
+	if (config.Quantization < HEVCLibx265QPMin || config.Quantization > HEVCLibx265QPMax) && config.Quantization != HEVCLossless {
 		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d",
-			HEVCLibx265QPMin, HEVCLibx265QPMax, HEVCLibx265Lossless, config.Quantization,
+			HEVCLibx265QPMin, HEVCLibx265QPMax, HEVCLossless, config.Quantization,
 		)
 	}
 	switch config.Preset {
@@ -107,7 +111,7 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 		"-preset", string(config.Preset),
 	}
 	//// quality
-	if config.Quantization == HEVCLibx265Lossless {
+	if config.Quantization == HEVCLossless {
 		args = append(args,
 			"-x265-params", "lossless=1",
 		)
@@ -187,8 +191,6 @@ const (
 	HEVCNVEncQPMin = 0
 	// HEVCNVEncQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCNVEncQPMax = 51
-	// HEVCNVEncLossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
-	HEVCNVEncLossless = -1
 
 	nvEncSpatialAQ  = 1  // enable spatial adaptive quantization
 	nvEncTemporalAQ = 1  // enable temporal adaptive quantization
@@ -211,8 +213,6 @@ type HEVCNVEncEncodeQPConfig struct {
 }
 
 // HEVCNVEncEncodeQP encodes a video file to HEVC/H.265 using the NVIDIA NVENC hardware encoder via FFmpeg.
-// This is a GPU-based hardware encoder; it is significantly faster than CPU encoding (e.g. libx265)
-// but produces larger files at the same quality level, making it recommended for draft or preview encoding.
 func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
@@ -221,9 +221,9 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if (config.Quantization < HEVCNVEncQPMin || config.Quantization > HEVCNVEncQPMax) && config.Quantization != HEVCNVEncLossless {
+	if (config.Quantization < HEVCNVEncQPMin || config.Quantization > HEVCNVEncQPMax) && config.Quantization != HEVCLossless {
 		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d",
-			HEVCNVEncQPMin, HEVCNVEncQPMax, HEVCNVEncLossless, config.Quantization,
+			HEVCNVEncQPMin, HEVCNVEncQPMax, HEVCLossless, config.Quantization,
 		)
 	}
 	// Preset validation and default
@@ -272,7 +272,7 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 		"-preset", string(preset),
 	)
 	//// quality
-	if config.Quantization == HEVCNVEncLossless {
+	if config.Quantization == HEVCLossless {
 		args = append(args,
 			"-tune", "lossless",
 		)
@@ -374,7 +374,7 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	if config.Output == "" {
 		return errors.New("output file path cannot be empty")
 	}
-	if config.Quantization == HEVCNVEncLossless {
+	if config.Quantization == HEVCLossless {
 		// VA-API HEVC has no lossless mode; qp 0 is not even guaranteed to be honored by drivers
 		return errors.New("hevc_vaapi does not support lossless encoding")
 	}
