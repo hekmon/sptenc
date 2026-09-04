@@ -451,7 +451,17 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
 		})
 	case ffmpeg.HEVCEncoderNVEnc:
-		return errors.New("not yet implemented")
+		err = ffmpeg.HEVCNVEncEncode(ctx, ffmpeg.HEVCNVEncEncodeConfig{
+			Input:        input,
+			Preset:       ffmpeg.NVEncPresetP7,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
 	case ffmpeg.HEVCEncoderVAAPI:
 		return errors.New("not yet implemented")
 	case ffmpeg.AV1EncoderLibaom:

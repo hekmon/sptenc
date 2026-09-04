@@ -130,7 +130,7 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
 	// Prepare output handling
 	outputPipe, err := cmd.StderrPipe()
 	if err != nil {
-		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
 	}
 	// Start program
@@ -160,10 +160,160 @@ func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err
  * ffmpeg -h encoder=hevc_nvenc
  */
 
+// NVEncEncodingPreset represents the encoding preset for the NVIDIA NVENC HEVC encoder.
+// The p1-p7 presets trade encoding speed for compression efficiency.
+type NVEncEncodingPreset string
+
 const (
 	// HEVCEncoderNVEnc is the FFmpeg encoder name for NVIDIA NVENC HEVC hardware encoding.
 	HEVCEncoderNVEnc Encoder = "hevc_nvenc"
+
+	// NVEncPresetP1 is the fastest preset with the lowest compression efficiency.
+	NVEncPresetP1 NVEncEncodingPreset = "p1"
+	// NVEncPresetP2 offers very fast encoding at the cost of file size.
+	NVEncPresetP2 NVEncEncodingPreset = "p2"
+	// NVEncPresetP3 provides fast encoding with moderate compression.
+	NVEncPresetP3 NVEncEncodingPreset = "p3"
+	// NVEncPresetP4 is the default preset balancing speed and compression.
+	NVEncPresetP4 NVEncEncodingPreset = "p4"
+	// NVEncPresetP5 is slower than the default with slightly better compression.
+	NVEncPresetP5 NVEncEncodingPreset = "p5"
+	// NVEncPresetP6 provides significantly better compression than p5.
+	NVEncPresetP6 NVEncEncodingPreset = "p6"
+	// NVEncPresetP7 is the slowest preset with the best compression efficiency.
+	NVEncPresetP7 NVEncEncodingPreset = "p7"
+
+	nvEncSpatialAQ  = 1  // Enable spatial adaptive quantization
+	nvEncTemporalAQ = 1  // Enable temporal adaptive quantization
+	nvEncLookahead  = 32 // Maximum lookahead for best quality
 )
+
+// HEVCNVEncEncodeConfig holds the configuration for HEVC encoding using NVIDIA NVENC.
+type HEVCNVEncEncodeConfig struct {
+	// Input
+	Input string
+	NVDec bool // decode in GPU, codec must be supported
+	// Output
+	Preset       NVEncEncodingPreset // if unset it will be set automatically to NVEncPresetP4
+	Quantization int
+	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
+	// Reporting
+	Debug             func(msg string)
+	RuntimeError      func(err error) // stderr error output, stats output will be send in FFMPEGStatsReport
+	FFMPEGStatsReport func(stats ProgressStats)
+}
+
+// HEVCNVEncEncode encodes a video file to HEVC/H.265 using the NVIDIA NVENC hardware encoder via FFmpeg.
+// This is a GPU-based hardware encoder; it is significantly faster than CPU encoding (e.g. libx265)
+// but produces larger files at the same quality level, making it recommended for draft or preview encoding.
+func HEVCNVEncEncode(ctx context.Context, config HEVCNVEncEncodeConfig) (err error) {
+	// Validate inputs
+	if config.Input == "" {
+		return errors.New("input path cannot be empty")
+	}
+	if config.Output == "" {
+		return errors.New("output file path cannot be empty")
+	}
+	if (config.Quantization < HEVCQPMin || config.Quantization > HEVCQPMax) && config.Quantization != HEVCLossless {
+		return fmt.Errorf("quantization must be %d-%d or %d for lossless, got %d", HEVCQPMin, HEVCQPMax, HEVCLossless, config.Quantization)
+	}
+	// Preset validation and default
+	preset := config.Preset
+	switch preset {
+	case NVEncPresetP1, NVEncPresetP2, NVEncPresetP3, NVEncPresetP4,
+		NVEncPresetP5, NVEncPresetP6, NVEncPresetP7:
+		// valid, continue
+	case "":
+		preset = NVEncPresetP4
+	default:
+		return fmt.Errorf("invalid preset: %q", preset)
+	}
+	// Prepare
+	args := []string{
+		"-y",
+		"-loglevel", "error", "-stats",
+	}
+	//// nvdec ?
+	if config.NVDec {
+		args = append(args,
+			"-hwaccel", "cuda",
+			"-hwaccel_output_format", "cuda",
+		)
+	} else {
+		args = append(args,
+			"-init_hw_device", "cuda=nv:0",
+			"-filter_hw_device", "nv",
+		)
+	}
+	args = append(args, "-i", config.Input)
+	if config.NVDec {
+		args = append(args, "-vf", "scale_cuda=format=p010le") // convert to 10bits if necessary while staying on CUDA device between nvdec and nvenc
+	} else {
+		args = append(args, "-vf", "hwupload,scale_cuda=format=p010le") // perform the 10bits conversion in CUDA for performance (as we are going to use nvenc)
+	}
+	//// flux selection
+	args = append(args,
+		"-map", "0",
+		"-c", "copy",
+	)
+	//// nvenc
+	args = append(args,
+		"-c:v", "hevc_nvenc",
+		"-profile:v", "main10",
+		"-preset", string(preset),
+	)
+	//// quality
+	if config.Quantization == HEVCLossless {
+		args = append(args,
+			"-tune", "lossless",
+		)
+	} else {
+		args = append(args,
+			"-tune", "hq",
+			"-rc", "constqp",
+			"-qp", strconv.Itoa(config.Quantization),
+			"-spatial_aq", strconv.Itoa(nvEncSpatialAQ),
+			"-temporal_aq", strconv.Itoa(nvEncTemporalAQ),
+		)
+	}
+	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncLookahead))
+	//// end with output
+	args = append(args,
+		"-max_interleave_delta", "0",
+		config.Output,
+	)
+	// Prepare command
+	if config.Debug != nil {
+		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
+	}
+	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	// Prepare output handling
+	outputPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
+		return
+	}
+	// Start program
+	if err = cmd.Start(); err != nil {
+		err = fmt.Errorf("error starting %s: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
+	progressDone := make(chan struct{})
+	go func() {
+		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		close(progressDone)
+	}()
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
+	}
+	<-progressDone
+	if err = cmd.Wait(); err != nil {
+		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	return
+}
 
 /*
  * HEVC VA API
