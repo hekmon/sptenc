@@ -439,7 +439,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	start := time.Now()
 	switch config.Encoder {
 	case ffmpeg.HEVCEncoderLibx265:
-		err = ffmpeg.HEVCLibx265Encode(ctx, ffmpeg.HEVCLibx265EncodeConfig{
+		err = ffmpeg.HEVCLibx265EncodeQP(ctx, ffmpeg.HEVCLibx265EncodeQPConfig{
 			Input:        input,
 			Preset:       ffmpeg.Libx265PresetSlow,
 			Quantization: qp,
@@ -451,7 +451,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
 		})
 	case ffmpeg.HEVCEncoderNVEnc:
-		err = ffmpeg.HEVCNVEncEncode(ctx, ffmpeg.HEVCNVEncEncodeConfig{
+		err = ffmpeg.HEVCNVEncEncodeQP(ctx, ffmpeg.HEVCNVEncEncodeQPConfig{
 			Input:        input,
 			Preset:       ffmpeg.NVEncPresetP7,
 			Quantization: qp,

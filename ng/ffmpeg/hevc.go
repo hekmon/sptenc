@@ -24,13 +24,6 @@ const (
 	// HEVCEncoderLibx265 is the FFmpeg encoder name for libx265 (HEVC software encoding).
 	HEVCEncoderLibx265 Encoder = "libx265"
 
-	// HEVCLibx265QPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
-	HEVCLibx265QPMin = 0
-	// HEVCLibx265QPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
-	HEVCLibx265QPMax = 51
-	// HEVCLibx265Lossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
-	HEVCLibx265Lossless = -1
-
 	// Libx265PresetUltrafast is the fastest preset with the lowest compression efficiency.
 	Libx265PresetUltrafast Libx265EncodingPreset = "ultrafast"
 	// Libx265PresetSuperfast offers very fast encoding at the cost of file size.
@@ -52,11 +45,18 @@ const (
 	// Libx265PresetPlacebo is the slowest preset with marginal gains over veryslow.
 	Libx265PresetPlacebo Libx265EncodingPreset = "placebo"
 
+	// HEVCLibx265QPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCLibx265QPMin = 0
+	// HEVCLibx265QPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCLibx265QPMax = 51
+	// HEVCLibx265Lossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
+	HEVCLibx265Lossless = -1
+
 	libx265AQMode = 3 // AQ enabled with auto-variance and bias to dark scenes - https://x265.readthedocs.io/en/latest/cli.html#cmdoption-aq-mode
 )
 
-// HEVCLibx265EncodeConfig holds the configuration for HEVC encoding using libx265.
-type HEVCLibx265EncodeConfig struct {
+// HEVCLibx265EncodeQPConfig holds the configuration for HEVC encoding using libx265.
+type HEVCLibx265EncodeQPConfig struct {
 	// Input
 	Input string
 	// Output
@@ -69,10 +69,10 @@ type HEVCLibx265EncodeConfig struct {
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
-// HEVCLibx265Encode encodes a video file to HEVC/H.265 using the libx265 encoder via FFmpeg.
+// HEVCLibx265EncodeQP encodes a video file to HEVC/H.265 using the libx265 encoder via FFmpeg.
 // This is a CPU-based software encoder; it is slower than GPU encoding (e.g. NVENC or VA-API)
 // but produces significantly smaller files, making it recommended for final encoding.
-func HEVCLibx265Encode(ctx context.Context, config HEVCLibx265EncodeConfig) (err error) {
+func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
 		return errors.New("input path cannot be empty")
@@ -168,13 +168,6 @@ const (
 	// HEVCEncoderNVEnc is the FFmpeg encoder name for NVIDIA NVENC HEVC hardware encoding.
 	HEVCEncoderNVEnc Encoder = "hevc_nvenc"
 
-	// HEVCNVEncQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
-	HEVCNVEncQPMin = 0
-	// HEVCNVEncQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
-	HEVCNVEncQPMax = 51
-	// HEVCNVEncLossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
-	HEVCNVEncLossless = -1
-
 	// NVEncPresetP1 is the fastest preset with the lowest compression efficiency.
 	NVEncPresetP1 NVEncEncodingPreset = "p1"
 	// NVEncPresetP2 offers very fast encoding at the cost of file size.
@@ -190,13 +183,20 @@ const (
 	// NVEncPresetP7 is the slowest preset with the best compression efficiency.
 	NVEncPresetP7 NVEncEncodingPreset = "p7"
 
+	// HEVCNVEncQPMin is the minimum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCNVEncQPMin = 0
+	// HEVCNVEncQPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
+	HEVCNVEncQPMax = 51
+	// HEVCNVEncLossless is a special QP value to switch from QP encoding to lossless HEVC encoding mode.
+	HEVCNVEncLossless = -1
+
 	nvEncSpatialAQ  = 1  // Enable spatial adaptive quantization
 	nvEncTemporalAQ = 1  // Enable temporal adaptive quantization
 	nvEncLookahead  = 32 // Maximum lookahead for best quality
 )
 
-// HEVCNVEncEncodeConfig holds the configuration for HEVC encoding using NVIDIA NVENC.
-type HEVCNVEncEncodeConfig struct {
+// HEVCNVEncEncodeQPConfig holds the configuration for HEVC encoding using NVIDIA NVENC.
+type HEVCNVEncEncodeQPConfig struct {
 	// Input
 	Input string
 	NVDec bool // decode in GPU, codec must be supported
@@ -210,10 +210,10 @@ type HEVCNVEncEncodeConfig struct {
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
-// HEVCNVEncEncode encodes a video file to HEVC/H.265 using the NVIDIA NVENC hardware encoder via FFmpeg.
+// HEVCNVEncEncodeQP encodes a video file to HEVC/H.265 using the NVIDIA NVENC hardware encoder via FFmpeg.
 // This is a GPU-based hardware encoder; it is significantly faster than CPU encoding (e.g. libx265)
 // but produces larger files at the same quality level, making it recommended for draft or preview encoding.
-func HEVCNVEncEncode(ctx context.Context, config HEVCNVEncEncodeConfig) (err error) {
+func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
 		return errors.New("input path cannot be empty")
@@ -349,8 +349,8 @@ const (
 	VAAPIDefaultDevice = "/dev/dri/renderD128"
 )
 
-// HEVCVAAPIEncodeConfig holds the configuration for HEVC encoding using VA-API.
-type HEVCVAAPIEncodeConfig struct {
+// HEVCVAAPIEncodeQPConfig holds the configuration for HEVC encoding using VA-API.
+type HEVCVAAPIEncodeQPConfig struct {
 	// Input
 	Input  string
 	VADec  bool   // decode on GPU, codec must be supported
@@ -364,10 +364,9 @@ type HEVCVAAPIEncodeConfig struct {
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
-// HEVCVAAPIEncode encodes a video file to HEVC/H.265 using the VA-API hardware encoder via FFmpeg.
-//
+// HEVCVAAPIEncodeQP encodes a video file to HEVC/H.265 using the VA-API hardware encoder via FFmpeg.
 // WARNING: currently untested
-func HEVCVAAPIEncode(ctx context.Context, config HEVCVAAPIEncodeConfig) (err error) {
+func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
 		return errors.New("input path cannot be empty")
