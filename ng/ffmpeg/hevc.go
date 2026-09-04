@@ -272,6 +272,11 @@ func HEVCNVEncEncode(ctx context.Context, config HEVCNVEncEncodeConfig) (err err
 			"-tune", "hq",
 			"-rc", "constqp",
 			"-qp", strconv.Itoa(config.Quantization),
+			// AQ flags are believed inert under constqp: NVIDIA documents constqp as
+			// "the entire frame is encoded using QP specified in constQP", leaving no
+			// room for per-block QP modulation (unlike x265, where AQ is an offset layer
+			// on the base QP and stays active in CQP). FFmpeg forwards the flags without
+			// warning. Kept as best-effort: no cost if ignored, gain if the driver honors them.
 			"-spatial_aq", strconv.Itoa(nvEncSpatialAQ),
 			"-temporal_aq", strconv.Itoa(nvEncTemporalAQ),
 		)
