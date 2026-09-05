@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -448,6 +447,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	// Execute the requested encoder
 	start := time.Now()
 	switch config.Encoder {
+	// HEVC
 	case ffmpeg.HEVCEncoderLibx265:
 		err = ffmpeg.HEVCLibx265EncodeQP(ctx, ffmpeg.HEVCLibx265EncodeQPConfig{
 			Input:        input,
@@ -497,12 +497,56 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			RuntimeError:      scb.Error,
 			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
 		})
+	// AV1
 	case ffmpeg.AV1EncoderLibaom:
-		return errors.New("not yet implemented")
+		err = ffmpeg.AV1LibaomEncodeQP(ctx, ffmpeg.AV1LibaomEncodeQPConfig{
+			Input:        input,
+			CPUUsed:      ffmpeg.AV1LibaomCPUUsedDefault,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
+	case ffmpeg.AV1EncoderSVTAV1:
+		err = ffmpeg.AV1SVTAV1EncodeQP(ctx, ffmpeg.AV1SVTAV1EncodeQPConfig{
+			Input:        input,
+			Preset:       ffmpeg.AV1SVTAV1PresetDefault,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
 	case ffmpeg.AV1EncoderNVEnc:
-		return errors.New("not yet implemented")
+		err = ffmpeg.AV1NVEncEncodeQP(ctx, ffmpeg.AV1NVEncEncodeQPConfig{
+			Input:        input,
+			Device:       config.NVIDIAGPUIndex,
+			Preset:       ffmpeg.NVEncPresetP7,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
 	case ffmpeg.AV1EncoderVAAPI:
-		return errors.New("not yet implemented")
+		err = ffmpeg.AV1VAAPIEncodeQP(ctx, ffmpeg.AV1VAAPIEncodeQPConfig{
+			Input:        input,
+			Device:       config.VAAPIRendererPath,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+		})
 	default:
 		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
 	}
