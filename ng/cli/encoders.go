@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
@@ -13,14 +14,17 @@ import (
 )
 
 var (
-	encoders = []string{
+	encodersHEVC = []string{
 		// HEVC
 		string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc),
 		string(ffmpeg.HEVCEncoderVAAPI), string(ffmpeg.HEVCEncoderD3D12VA),
+	}
+	encodersAV1 = []string{
 		// AV1
 		string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderSVTAV1),
 		string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
 	}
+	allEncoders = append(encodersHEVC, encodersAV1...)
 	tableConfig = tablewriter.Config{
 		Header: tw.CellConfig{
 			Formatting: tw.CellFormatting{
@@ -86,4 +90,11 @@ func renderAV1EncodersTable() string {
 	})
 	table.Render()
 	return buff.String()
+}
+
+func encoderValidator(e string) error {
+	if !slices.Contains(allEncoders, e) {
+		return fmt.Errorf("invalid encoder %q, valid values are: %s", e, strings.Join(allEncoders, ", "))
+	}
+	return nil
 }

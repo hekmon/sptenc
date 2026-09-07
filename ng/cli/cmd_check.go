@@ -57,34 +57,18 @@ var checkCommand = &cli.Command{
 				ffmpegErr = fmt.Errorf("failed to list encoders: %w", encErr)
 			} else {
 				// HEVC
-				hevcEncoders := []struct {
-					name ffmpeg.Encoder
-					has  bool
-				}{
-					{ffmpeg.HEVCEncoderLibx265, encoders.Has(string(ffmpeg.HEVCEncoderLibx265))},
-					{ffmpeg.HEVCEncoderNVEnc, encoders.Has(string(ffmpeg.HEVCEncoderNVEnc))},
-					{ffmpeg.HEVCEncoderVAAPI, encoders.Has(string(ffmpeg.HEVCEncoderVAAPI))},
-					{ffmpeg.HEVCEncoderD3D12VA, encoders.Has(string(ffmpeg.HEVCEncoderD3D12VA))},
-				}
-				for _, e := range hevcEncoders {
-					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("HEVC: %s", e.name), boolToEmoji(e.has)})
-					if e.has {
+				for _, e := range encodersHEVC {
+					has := encoders.Has(e)
+					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("HEVC: %s", e), boolToEmoji(has)})
+					if has {
 						hasAnyHEVC = true
 					}
 				}
 				// AV1
-				av1Encoders := []struct {
-					name ffmpeg.Encoder
-					has  bool
-				}{
-					{ffmpeg.AV1EncoderLibaom, encoders.Has(string(ffmpeg.AV1EncoderLibaom))},
-					{ffmpeg.AV1EncoderSVTAV1, encoders.Has(string(ffmpeg.AV1EncoderSVTAV1))},
-					{ffmpeg.AV1EncoderNVEnc, encoders.Has(string(ffmpeg.AV1EncoderNVEnc))},
-					{ffmpeg.AV1EncoderVAAPI, encoders.Has(string(ffmpeg.AV1EncoderVAAPI))},
-				}
-				for _, e := range av1Encoders {
-					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("AV1: %s", e.name), boolToEmoji(e.has)})
-					if e.has {
+				for _, e := range encodersAV1 {
+					has := encoders.Has(e)
+					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("AV1: %s", e), boolToEmoji(has)})
+					if has {
 						hasAnyAV1 = true
 					}
 				}

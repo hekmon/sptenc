@@ -30,7 +30,7 @@ var encodeCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:             "encoder",
 			Aliases:          []string{"e"},
-			Usage:            fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(encoders, ", ")),
+			Usage:            fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(allEncoders, ", ")),
 			Value:            string(ffmpeg.HEVCEncoderLibx265),
 			OnlyOnce:         true,
 			Validator:        encoderValidator,

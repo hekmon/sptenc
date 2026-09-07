@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
@@ -60,13 +59,6 @@ func validateTmpDir(path string) error {
 		return fmt.Errorf("the temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows\n"+
 			"Please use a path with only ASCII characters (no accents or special characters).\n"+
 			"Current path: %s", path)
-	}
-	return nil
-}
-
-func encoderValidator(e string) error {
-	if !slices.Contains(encoders, e) {
-		return fmt.Errorf("invalid encoder %q, valid values are: %s", e, strings.Join(encoders, ", "))
 	}
 	return nil
 }
