@@ -8,97 +8,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hekmon/sptenc/ng/core"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 
 	"al.essio.dev/pkg/shellescape"
-	"github.com/fatih/color"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
-	"github.com/olekukonko/tablewriter"
-	"github.com/olekukonko/tablewriter/renderer"
-	"github.com/olekukonko/tablewriter/tw"
 	"github.com/urfave/cli/v3"
 )
-
-var (
-	encoders = []string{
-		// HEVC
-		string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc),
-		string(ffmpeg.HEVCEncoderVAAPI), string(ffmpeg.HEVCEncoderD3D12VA),
-		// AV1
-		string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderSVTAV1),
-		string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
-	}
-	tableConfig = tablewriter.Config{
-		Header: tw.CellConfig{
-			Formatting: tw.CellFormatting{
-				AutoFormat: tw.Off,
-			},
-			Alignment: tw.CellAlignment{
-				PerColumn: []tw.Align{
-					tw.AlignLeft, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter,
-				},
-			},
-		},
-		Row: tw.CellConfig{
-			Alignment: tw.CellAlignment{
-				PerColumn: []tw.Align{
-					tw.AlignRight, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter,
-				},
-			},
-		},
-	}
-	tableColorCfg = renderer.ColorizedConfig{
-		Header: renderer.Tint{
-			FG: renderer.Colors{color.Bold},
-			Columns: []renderer.Tint{
-				{FG: renderer.Colors{color.Underline, color.Bold}}, // column 0
-			},
-		},
-		Column: renderer.Tint{
-			Columns: []renderer.Tint{
-				{FG: renderer.Colors{color.Bold}}, // column 0
-			},
-		},
-	}
-)
-
-func renderHEVCEncodersTable() string {
-	var buff strings.Builder
-	table := tablewriter.NewTable(&buff,
-		tablewriter.WithConfig(tableConfig),
-		tablewriter.WithRenderer(renderer.NewColorized(tableColorCfg)),
-	)
-	table.Header("HEVC", "CPU", "NVIDIA", "AMD", "Intel")
-	table.Bulk([][]string{
-		{"Linux", string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc), string(ffmpeg.HEVCEncoderVAAPI), string(ffmpeg.HEVCEncoderVAAPI)},
-		{"Windows", string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc), string(ffmpeg.HEVCEncoderD3D12VA), string(ffmpeg.HEVCEncoderD3D12VA)},
-		{"MacOS", string(ffmpeg.HEVCEncoderLibx265), "n/a", "n/a", "n/a"},
-	})
-	table.Render()
-	return buff.String()
-}
-
-func renderAV1EncodersTable() string {
-	var buff strings.Builder
-	table := tablewriter.NewTable(&buff,
-		tablewriter.WithConfig(tableConfig),
-		tablewriter.WithRenderer(renderer.NewColorized(tableColorCfg)),
-	)
-	table.Header("AV1", "CPU", "NVIDIA", "AMD", "Intel")
-	av1CPUEncoders := fmt.Sprintf("%s (ref) / %s (faster)", ffmpeg.AV1EncoderLibaom, ffmpeg.AV1EncoderSVTAV1)
-	table.Bulk([][]string{
-		{"Linux", av1CPUEncoders, string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI), string(ffmpeg.AV1EncoderVAAPI)},
-		{"Windows", av1CPUEncoders, string(ffmpeg.AV1EncoderNVEnc), "unsupported", "unsupported"},
-		{"MacOS", av1CPUEncoders, "n/a", "n/a", "n/a"},
-	})
-	table.Render()
-	return buff.String()
-}
 
 var encodeCommand = &cli.Command{
 	Name:    "encode",
@@ -462,12 +381,12 @@ var encodeCommand = &cli.Command{
 		}
 
 		// Step 2 - Encode segments
-		tobs := &TerminalObserver{
+		lqps := &LiveQPSearch{
 			debug: cmd.Bool(debugFlagName),
 		}
-		tobs.Start(len(segmentPaths), totalDuration)
+		lqps.Start(len(segmentPaths), totalDuration)
 		start := time.Now()
-		results, err := core.FindAllSegmentsQP(ctx, tobs,
+		results, err := core.FindAllSegmentsQP(ctx, lqps,
 			core.QPSearchConfig{
 				SegmentPaths:      segmentPaths,
 				Auditor:           vmafAuditor,
@@ -483,12 +402,12 @@ var encodeCommand = &cli.Command{
 			},
 		)
 		if err != nil {
-			tobs.Stop()
+			lqps.Stop()
 			err = fmt.Errorf("Failed to encode segments: %w", err)
 			return
 		}
 		duration := time.Since(start)
-		tobs.Stop()
+		lqps.Stop()
 		// Print stats
 		fmt.Fprintf(bypass, "Segments QPs: %+v\n", results.QPs)
 		fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
@@ -526,220 +445,4 @@ var encodeCommand = &cli.Command{
 		// TODO
 		return
 	},
-}
-
-// TerminalObserver received and process search progress signals to translate them as terminal UI progress
-// it implements the core.SearchCallbacks interface required by core.FindAllSegmentsQP()
-type TerminalObserver struct {
-	debug bool
-	// Global progress
-	globalProgressBar    *liveprogress.Bar
-	globalNbSegmentsDone int
-	globalAllSegmentSize cunits.Bits
-	// Segment progress (title + qp candidates listing)
-	segmentCurrent          int
-	segmentStatusLine       *liveprogress.CustomLine
-	segmentCandidates       []string
-	segmentCandidatesAccess sync.Mutex
-	// File analysis
-	analysisProgressBar *liveprogress.Bar
-	// Encode
-	encodeProgressBar *liveprogress.Bar
-	// VMAF
-	vmafProgressBar *liveprogress.Bar
-}
-
-func (to *TerminalObserver) Start(totalSegments int, globalDuration time.Duration) {
-	to.globalProgressBar = liveprogress.SetMainLineAsBar(
-		liveprogress.WithTotal(uint64(globalDuration)),
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Global | "
-		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d/%d segments done | %s",
-				to.globalNbSegmentsDone, totalSegments, to.globalAllSegmentSize,
-			)
-		}),
-	)
-}
-
-func (to *TerminalObserver) Stop() {
-	if to.globalProgressBar == nil {
-		return
-	}
-	liveprogress.RemoveBar(to.globalProgressBar)
-	to.globalProgressBar = nil
-}
-
-func (to *TerminalObserver) Debug(format string, a ...any) {
-	if to.debug {
-		fmt.Fprintln(liveprogress.Bypass(), "DEBUG: "+fmt.Sprintf(format, a...))
-	}
-}
-
-func (to *TerminalObserver) Warning(format string, a ...any) {
-	fmt.Fprintln(liveprogress.Bypass(), "WARNING: "+fmt.Sprintf(format, a...))
-}
-
-func (to *TerminalObserver) Error(err error) {
-	fmt.Fprintln(liveprogress.Bypass(), "ERROR: "+err.Error())
-}
-
-func (to *TerminalObserver) OnSegmentStart(segmentIndex int, segmentPath string) {
-	to.segmentCurrent = segmentIndex
-	if to.segmentCandidates != nil {
-		to.segmentCandidatesAccess.Lock()
-		to.segmentCandidates = to.segmentCandidates[:0] // reset while keeping cap
-		to.segmentCandidatesAccess.Unlock()
-	}
-	if to.segmentStatusLine != nil {
-		liveprogress.RemoveCustomLine(to.segmentStatusLine)
-	}
-	to.segmentStatusLine = liveprogress.AddCustomLine(func() string {
-		to.segmentCandidatesAccess.Lock()
-		defer to.segmentCandidatesAccess.Unlock()
-		return fmt.Sprintf("   Segment | #%d - Searching for QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
-	})
-}
-
-func (to *TerminalObserver) OnSegmentNewCandidate(qpCandidate int) {
-	to.segmentCandidatesAccess.Lock()
-	to.segmentCandidates = append(to.segmentCandidates, strconv.Itoa(qpCandidate))
-	to.segmentCandidatesAccess.Unlock()
-}
-
-func (to *TerminalObserver) OnSegmentAnalysisStart(fileSize cunits.Bits) {
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
-	}
-	to.analysisProgressBar = liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(fileSize)),
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "   Analyze | "
-		}),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %s/%s",
-				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
-			)
-		}),
-	)
-}
-
-func (to *TerminalObserver) OnSegmentAnalysisProgress(newRead cunits.Bits) {
-	if to.analysisProgressBar != nil {
-		to.analysisProgressBar.CurrentAdd(uint64(newRead))
-	}
-}
-
-func (to *TerminalObserver) OnSegmentAnalysisStop() {
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
-		to.analysisProgressBar = nil
-	}
-}
-
-func (to *TerminalObserver) OnSegmentEncodeStart(totalFrames int) {
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
-	}
-	to.encodeProgressBar = liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(totalFrames)),
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Encode | "
-		}),
-		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
-		}),
-	)
-}
-
-func (to *TerminalObserver) OnSegmentEncodeProgress(stats ffmpeg.ProgressStats) {
-	if to.encodeProgressBar != nil {
-		to.encodeProgressBar.CurrentSet(uint64(stats.CurrentFrame))
-	}
-}
-
-func (to *TerminalObserver) OnSegmentEncodeStop() {
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
-		to.encodeProgressBar = nil
-	}
-}
-
-func (to *TerminalObserver) OnSegmentVMAFStart(totalFrames int) {
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
-	}
-	to.vmafProgressBar = liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(totalFrames)),
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "      VMAF | "
-		}),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
-		}),
-	)
-}
-
-func (to *TerminalObserver) OnSegmentVMAFProgress(stats ffmpeg.ProgressStats) {
-	if to.vmafProgressBar != nil {
-		to.vmafProgressBar.CurrentSet(uint64(stats.CurrentFrame))
-	}
-}
-
-func (to *TerminalObserver) OnSegmentVMAFStop() {
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
-		to.vmafProgressBar = nil
-	}
-}
-
-func (to *TerminalObserver) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
-	// Clean up possible orphans child status
-	if to.segmentStatusLine != nil {
-		liveprogress.RemoveCustomLine(to.segmentStatusLine)
-		to.segmentStatusLine = nil
-	}
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
-		to.analysisProgressBar = nil
-	}
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
-		to.encodeProgressBar = nil
-	}
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
-		to.vmafProgressBar = nil
-	}
-	// Finished segment data
-	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
-		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
-	)
-	// Global progress
-	if to.globalProgressBar != nil {
-		to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
-	}
-	to.globalNbSegmentsDone++
-	to.globalAllSegmentSize = currentTotalSize
 }

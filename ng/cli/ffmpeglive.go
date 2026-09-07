@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
@@ -272,4 +275,220 @@ func getStreamsInfosCF(ctx context.Context, path string, debug bool) (stats ffmp
 		},
 		ReadBytesReport: progress,
 	})
+}
+
+// LiveQPSearch received and process search progress signals to translate them as terminal UI progress
+// it implements the core.SearchCallbacks interface required by core.FindAllSegmentsQP()
+type LiveQPSearch struct {
+	debug bool
+	// Global progress
+	globalProgressBar    *liveprogress.Bar
+	globalNbSegmentsDone int
+	globalAllSegmentSize cunits.Bits
+	// Segment progress (title + qp candidates listing)
+	segmentCurrent          int
+	segmentStatusLine       *liveprogress.CustomLine
+	segmentCandidates       []string
+	segmentCandidatesAccess sync.Mutex
+	// File analysis
+	analysisProgressBar *liveprogress.Bar
+	// Encode
+	encodeProgressBar *liveprogress.Bar
+	// VMAF
+	vmafProgressBar *liveprogress.Bar
+}
+
+func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
+	to.globalProgressBar = liveprogress.SetMainLineAsBar(
+		liveprogress.WithTotal(uint64(globalDuration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Global | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | %d/%d segments done | %s",
+				to.globalNbSegmentsDone, totalSegments, to.globalAllSegmentSize,
+			)
+		}),
+	)
+}
+
+func (to *LiveQPSearch) Stop() {
+	if to.globalProgressBar == nil {
+		return
+	}
+	liveprogress.RemoveBar(to.globalProgressBar)
+	to.globalProgressBar = nil
+}
+
+func (to *LiveQPSearch) Debug(format string, a ...any) {
+	if to.debug {
+		fmt.Fprintln(liveprogress.Bypass(), "DEBUG: "+fmt.Sprintf(format, a...))
+	}
+}
+
+func (to *LiveQPSearch) Warning(format string, a ...any) {
+	fmt.Fprintln(liveprogress.Bypass(), "WARNING: "+fmt.Sprintf(format, a...))
+}
+
+func (to *LiveQPSearch) Error(err error) {
+	fmt.Fprintln(liveprogress.Bypass(), "ERROR: "+err.Error())
+}
+
+func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
+	to.segmentCurrent = segmentIndex
+	if to.segmentCandidates != nil {
+		to.segmentCandidatesAccess.Lock()
+		to.segmentCandidates = to.segmentCandidates[:0] // reset while keeping cap
+		to.segmentCandidatesAccess.Unlock()
+	}
+	if to.segmentStatusLine != nil {
+		liveprogress.RemoveCustomLine(to.segmentStatusLine)
+	}
+	to.segmentStatusLine = liveprogress.AddCustomLine(func() string {
+		to.segmentCandidatesAccess.Lock()
+		defer to.segmentCandidatesAccess.Unlock()
+		return fmt.Sprintf("   Segment | #%d - Searching for QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
+	})
+}
+
+func (to *LiveQPSearch) OnSegmentNewCandidate(qpCandidate int) {
+	to.segmentCandidatesAccess.Lock()
+	to.segmentCandidates = append(to.segmentCandidates, strconv.Itoa(qpCandidate))
+	to.segmentCandidatesAccess.Unlock()
+}
+
+func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize cunits.Bits) {
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+	}
+	to.analysisProgressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(fileSize)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "   Analyze | "
+		}),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %s/%s",
+				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
+			)
+		}),
+	)
+}
+
+func (to *LiveQPSearch) OnSegmentAnalysisProgress(newRead cunits.Bits) {
+	if to.analysisProgressBar != nil {
+		to.analysisProgressBar.CurrentAdd(uint64(newRead))
+	}
+}
+
+func (to *LiveQPSearch) OnSegmentAnalysisStop() {
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+		to.analysisProgressBar = nil
+	}
+}
+
+func (to *LiveQPSearch) OnSegmentEncodeStart(totalFrames int) {
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
+	}
+	to.encodeProgressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Encode | "
+		}),
+		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		// liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	)
+}
+
+func (to *LiveQPSearch) OnSegmentEncodeProgress(stats ffmpeg.ProgressStats) {
+	if to.encodeProgressBar != nil {
+		to.encodeProgressBar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+}
+
+func (to *LiveQPSearch) OnSegmentEncodeStop() {
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
+		to.encodeProgressBar = nil
+	}
+}
+
+func (to *LiveQPSearch) OnSegmentVMAFStart(totalFrames int) {
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+	}
+	to.vmafProgressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "      VMAF | "
+		}),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	)
+}
+
+func (to *LiveQPSearch) OnSegmentVMAFProgress(stats ffmpeg.ProgressStats) {
+	if to.vmafProgressBar != nil {
+		to.vmafProgressBar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+}
+
+func (to *LiveQPSearch) OnSegmentVMAFStop() {
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+		to.vmafProgressBar = nil
+	}
+}
+
+func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
+	// Clean up possible orphans child status
+	if to.segmentStatusLine != nil {
+		liveprogress.RemoveCustomLine(to.segmentStatusLine)
+		to.segmentStatusLine = nil
+	}
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+		to.analysisProgressBar = nil
+	}
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
+		to.encodeProgressBar = nil
+	}
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+		to.vmafProgressBar = nil
+	}
+	// Finished segment data
+	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
+		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
+	)
+	// Global progress
+	if to.globalProgressBar != nil {
+		to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
+	}
+	to.globalNbSegmentsDone++
+	to.globalAllSegmentSize = currentTotalSize
 }
