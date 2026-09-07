@@ -87,9 +87,8 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		err = errors.New("report path cannot be empty")
 		return
 	}
-	if !config.VMAFCuda && config.InputFrameRate == "" {
-		err = errors.New("input frame rate must be set when not using VMAF CUDA")
-		return
+	if config.InputFrameRate == "" {
+		return VMAFReport{}, errors.New("input frame rate must be set")
 	}
 	version := VMAFModel(config.UltraHD, config.NoEnhancementGain)
 	// Build up ffmpeg args

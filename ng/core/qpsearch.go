@@ -26,12 +26,12 @@ type QPSearchCallbacks interface {
 	// Segment lifecycle
 	OnSegmentStart(segmentIndex int, segmentPath string)
 	OnSegmentNewCandidate(qpCandidate int)
-	OnSegmentAnalysisStart(filePath string, fileSize cunits.Bits)
-	OnSegmentAnalysisProgress(newRead cunits.Bits)
+	OnSegmentAnalysisStart(fileSize cunits.Bits)
+	OnSegmentAnalysisProgress(read cunits.Bits) // not total, additionnal
 	OnSegmentAnalysisStop()
-	QPSearchCallbackEncodeStart(totalFrames int)
-	QPSearchCallbackEncodeProgress(stats ffmpeg.ProgressStats)
-	QPSearchCallbackEncodeStop()
+	OnSegmentEncodeStart(totalFrames int)
+	OnSegmentEncodeProgress(stats ffmpeg.ProgressStats)
+	OnSegmentEncodeStop()
 	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits)
 }
 
@@ -202,7 +202,7 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 		return
 	}
 	// Prepare signals
-	scb.OnSegmentAnalysisStart(filePath, cunits.ImportInBytes(float64(fileInfos.Size())))
+	scb.OnSegmentAnalysisStart(cunits.ImportInBytes(float64(fileInfos.Size())))
 	defer scb.OnSegmentAnalysisStop()
 	// Start analysis
 	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
@@ -442,8 +442,8 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	input, output string, qp, totalFrames int) (err error) {
 	// Signal start & stop
-	scb.QPSearchCallbackEncodeStart(totalFrames)
-	defer scb.QPSearchCallbackEncodeStop()
+	scb.OnSegmentEncodeStart(totalFrames)
+	defer scb.OnSegmentEncodeStop()
 	// Execute the requested encoder
 	start := time.Now()
 	switch config.Encoder {
@@ -458,7 +458,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	case ffmpeg.HEVCEncoderNVEnc:
 		err = ffmpeg.HEVCNVEncEncodeQP(ctx, ffmpeg.HEVCNVEncEncodeQPConfig{
@@ -471,7 +471,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	case ffmpeg.HEVCEncoderVAAPI:
 		err = ffmpeg.HEVCVAAPIEncodeQP(ctx, ffmpeg.HEVCVAAPIEncodeQPConfig{
@@ -483,7 +483,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	case ffmpeg.HEVCEncoderD3D12VA:
 		err = ffmpeg.HEVCD3D12VAEncodeQP(ctx, ffmpeg.HEVCD3D12VAEncodeQPConfig{
@@ -495,7 +495,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	// AV1
 	case ffmpeg.AV1EncoderLibaom:
@@ -508,7 +508,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	case ffmpeg.AV1EncoderSVTAV1:
 		err = ffmpeg.AV1SVTAV1EncodeQP(ctx, ffmpeg.AV1SVTAV1EncodeQPConfig{
@@ -520,7 +520,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	case ffmpeg.AV1EncoderNVEnc:
 		err = ffmpeg.AV1NVEncEncodeQP(ctx, ffmpeg.AV1NVEncEncodeQPConfig{
@@ -533,7 +533,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	case ffmpeg.AV1EncoderVAAPI:
 		err = ffmpeg.AV1VAAPIEncodeQP(ctx, ffmpeg.AV1VAAPIEncodeQPConfig{
@@ -545,7 +545,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				scb.Debug(msg)
 			},
 			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.QPSearchCallbackEncodeProgress,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
 	default:
 		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
