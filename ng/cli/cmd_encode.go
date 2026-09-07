@@ -505,6 +505,16 @@ var encodeCommand = &cli.Command{
 			strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
 		)
 		fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(results.GlobalWeightedQP, 'f', -1, 64))
+		minQP, maxQP := results.QPs[0], results.QPs[0]
+		for _, qp := range results.QPs[1:] {
+			if qp < minQP {
+				minQP = qp
+			}
+			if qp > maxQP {
+				maxQP = qp
+			}
+		}
+		fmt.Fprintf(bypass, "Segment QP range: %d - %d\n", minQP, maxQP)
 		if results.NbBestEfforts > 0 {
 			fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
 				results.NbBestEfforts,

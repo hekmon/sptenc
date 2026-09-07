@@ -585,6 +585,6 @@ func segmentVMAF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConf
 			scb.Debug(msg)
 		},
 		RuntimeError:      scb.Error,
-		FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
+		FFMPEGStatsReport: scb.OnSegmentVMAFProgress,
 	})
 }
