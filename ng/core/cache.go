@@ -83,6 +83,10 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error
 	}
 	// Add it to the list
 	sch.stats = append(sch.stats, rs)
+	// Save it to disk
+	if err = sch.saveStats(); err != nil {
+		err = fmt.Errorf("failed to save stats to disk: %w", err)
+	}
 	return
 }
 
