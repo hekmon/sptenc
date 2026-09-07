@@ -6,6 +6,7 @@ replace github.com/hekmon/ffmpegutils => ../ffmpegutils
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.0
+	github.com/fatih/color v1.19.0
 	github.com/hekmon/cunits/v3 v3.0.0
 	github.com/hekmon/ffmpegutils v1.0.0
 	github.com/hekmon/liveprogress/v2 v2.2.1
@@ -23,7 +24,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.10.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/ebitengine/purego v0.10.2 // indirect
-	github.com/fatih/color v1.19.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
