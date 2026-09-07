@@ -27,15 +27,6 @@ const (
 	UltraHDHeight           = 2160
 )
 
-// VMAF percentile constants for statistics calculation.
-const (
-	VMAFPercentile1  = 1
-	VMAFPercentile5  = 5
-	VMAFPercentile10 = 10
-	VMAFPercentile25 = 25
-	VMAFPercentile50 = 50 // Median
-)
-
 // VMAFModel returns the VMAF model name to use based on the desired resolution
 // and whether the No-Enhancement-Gain (NEG) variant is requested.
 func VMAFModel(ultraHD, neg bool) string {
@@ -88,7 +79,8 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	if config.InputFrameRate == "" {
-		return VMAFReport{}, errors.New("input frame rate must be set")
+		err = errors.New("input frame rate must be set")
+		return
 	}
 	version := VMAFModel(config.UltraHD, config.NoEnhancementGain)
 	// Build up ffmpeg args
@@ -201,6 +193,15 @@ type VMAFReport struct {
 	AggregateMetrics struct{}          `json:"aggregate_metrics"`
 }
 
+// VMAF percentile constants for statistics calculation.
+const (
+	vmafPercentile1  = 1
+	vmafPercentile5  = 5
+	vmafPercentile10 = 10
+	vmafPercentile25 = 25
+	vmafPercentile50 = 50 // Median
+)
+
 // GetStats extracts summary statistics from the VMAF report, including
 // percentiles that are not present in the raw pooled metrics.
 func (vr VMAFReport) GetStats() (vs VMAFStats) {
@@ -212,11 +213,11 @@ func (vr VMAFReport) GetStats() (vs VMAFStats) {
 	vs.Maximum = vr.PooledMetrics.VMAF.Max
 	// Compute the missing ones
 	sort.Sort(vr.Frames)
-	vs.Percentile1 = vr.Frames.VMAFPercentile(VMAFPercentile1)
-	vs.Percentile5 = vr.Frames.VMAFPercentile(VMAFPercentile5)
-	vs.Percentile10 = vr.Frames.VMAFPercentile(VMAFPercentile10)
-	vs.Percentile25 = vr.Frames.VMAFPercentile(VMAFPercentile25)
-	vs.Median = vr.Frames.VMAFPercentile(VMAFPercentile50)
+	vs.Percentile1 = vr.Frames.VMAFPercentile(vmafPercentile1)
+	vs.Percentile5 = vr.Frames.VMAFPercentile(vmafPercentile5)
+	vs.Percentile10 = vr.Frames.VMAFPercentile(vmafPercentile10)
+	vs.Percentile25 = vr.Frames.VMAFPercentile(vmafPercentile25)
+	vs.Median = vr.Frames.VMAFPercentile(vmafPercentile50)
 	return
 }
 

@@ -406,6 +406,8 @@ var encodeCommand = &cli.Command{
 				NVIDIAGPUIndex:    cmd.Int("nvidiagpuindex"),
 				VAAPIRendererPath: cmd.String("vaapirendererpath"),
 				D3D12VAGPUIndex:   cmd.Int("d3d12vagpuindex"),
+				VMAFNeg:           cmd.Bool("vmafneg"),
+				VMAFCUDA:          cmd.Bool("vmafcuda"),
 			},
 		)
 		if err != nil {
@@ -461,6 +463,8 @@ type TerminalObserver struct {
 	analysisProgressBar *liveprogress.Bar
 	// Encode
 	encodeProgressBar *liveprogress.Bar
+	// VMAF
+	vmafProgressBar *liveprogress.Bar
 }
 
 func (to *TerminalObserver) Start(totalSegments int, globalDuration time.Duration) {
@@ -596,6 +600,38 @@ func (to *TerminalObserver) OnSegmentEncodeStop() {
 	}
 }
 
+func (to *TerminalObserver) OnSegmentVMAFStart(totalFrames int) {
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+	}
+	to.vmafProgressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "      VMAF | "
+		}),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	)
+}
+
+func (to *TerminalObserver) OnSegmentVMAFProgress(stats ffmpeg.ProgressStats) {
+	if to.vmafProgressBar != nil {
+		to.vmafProgressBar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+}
+
+func (to *TerminalObserver) OnSegmentVMAFStop() {
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+		to.vmafProgressBar = nil
+	}
+}
+
 func (to *TerminalObserver) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
 	// Clean up possible orphans child status
 	if to.segmentStatusLine != nil {
@@ -609,6 +645,10 @@ func (to *TerminalObserver) OnSegmentDone(segmentFinalQP, segmentFrames, segment
 	if to.encodeProgressBar != nil {
 		liveprogress.RemoveBar(to.encodeProgressBar)
 		to.encodeProgressBar = nil
+	}
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+		to.vmafProgressBar = nil
 	}
 	// Finished segment data
 	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",

@@ -32,6 +32,9 @@ type QPSearchCallbacks interface {
 	OnSegmentEncodeStart(totalFrames int)
 	OnSegmentEncodeProgress(stats ffmpeg.ProgressStats)
 	OnSegmentEncodeStop()
+	OnSegmentVMAFStart(totalFrames int)
+	OnSegmentVMAFProgress(stats ffmpeg.ProgressStats)
+	OnSegmentVMAFStop()
 	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits)
 }
 
@@ -59,6 +62,14 @@ type QPSearchConfig struct {
 	// D3D12VAGPUIndex is the Direct3D 12 adapter index to use for D3D12VA encoding.
 	// If unset, it defaults to 0.
 	D3D12VAGPUIndex int
+
+	// VMAFNeg, if true, uses VMAF NEG (No Enhancement Gain) models.
+	// Recommended when the source has undergone upscaling, sharpening, or denoising,
+	// as these can artificially inflate standard VMAF scores.
+	VMAFNeg bool
+	// VMAFCUDA, if true, enables CUDA acceleration for VMAF computation.
+	// This requires libvmaf to have been compiled with CUDA support.
+	VMAFCUDA bool
 }
 
 // QPSearchResults holds the outcome of a QP search across all segments.
@@ -423,26 +434,25 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 	vmafStats ffmpeg.VMAFStats, err error) {
 	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	// Encode
-	if err = segmentQPEncode(ctx, scb, config, input, output, qp, videoTrack.NbReadFrames); err != nil {
+	if err = segmentQPEncode(ctx, scb, config, input, output, qp, videoTrack); err != nil {
 		err = fmt.Errorf("failed to encode segment: %w", err)
 		return
 	}
-	// // Compute VMAF
-	// vmafReportPath := output + "_vmaf.json"
-	// frameRate := videoTrack.RFrameRate
-	// ultraHD := videoTrack.Height >= ffmpeg.UltraHDHeight
-	// if vmafStats, err = computeVMAF(ctx, output, input, vmafReportPath, frameRate, videoTrack.NbReadFrames, ultraHD, false, debug); err != nil {
-	// 	err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
-	// 	return
-	// }
+	// Compute VMAF
+	vmafReport, err := segmentVMAF(ctx, scb, config, input, output, videoTrack)
+	if err != nil {
+		err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
+		return
+	}
+	vmafStats = vmafReport.GetStats()
 	scb.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
 	return
 }
 
 func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	input, output string, qp, totalFrames int) (err error) {
+	input, output string, qp int, videoTrack *ffmpeg.FFProbeBinaryStream) (err error) {
 	// Signal start & stop
-	scb.OnSegmentEncodeStart(totalFrames)
+	scb.OnSegmentEncodeStart(videoTrack.NbReadFrames)
 	defer scb.OnSegmentEncodeStop()
 	// Execute the requested encoder
 	start := time.Now()
@@ -555,4 +565,26 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		scb.Debug("Segment encoded in %s", time.Since(start).Round(time.Second))
 	}
 	return
+}
+
+func segmentVMAF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
+	segmentOriginal, segmentEncoded string, videoTrack *ffmpeg.FFProbeBinaryStream) (stats ffmpeg.VMAFReport, err error) {
+	scb.OnSegmentVMAFStart(videoTrack.NbReadFrames)
+	defer scb.OnSegmentVMAFStop()
+	return ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
+		ReferencePath:     segmentOriginal,
+		DistortedPath:     segmentEncoded,
+		InputFrameRate:    videoTrack.RFrameRate,
+		ReportPath:        segmentEncoded + "_vmaf.json",
+		UltraHD:           videoTrack.Height >= ffmpeg.UltraHDHeight,
+		NoEnhancementGain: config.VMAFNeg,
+		NVDEC:             false, // input is most likely ffv1 for master slicing
+		VMAFCuda:          config.VMAFCUDA,
+		GPUID:             &config.NVIDIAGPUIndex,
+		Debug: func(msg string) {
+			scb.Debug(msg)
+		},
+		RuntimeError:      scb.Error,
+		FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
+	})
 }
