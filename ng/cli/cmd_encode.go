@@ -109,7 +109,7 @@ var encodeCommand = &cli.Command{
 		// VMAF
 		&cli.BoolFlag{
 			Name:     "vmafcuda",
-			Usage:    "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support.",
+			Usage:    "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support in the ffmpeg build.",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "VMAF",
