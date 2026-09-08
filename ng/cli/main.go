@@ -79,7 +79,7 @@ func main() {
 		},
 	}
 	if err := cmd.Run(ctx, os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "FATAL ERROR: %v\n", err)
 		os.Exit(1)
 	}
 }
