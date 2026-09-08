@@ -278,7 +278,7 @@ func getStreamsInfosCF(ctx context.Context, path string, debug bool) (stats ffmp
 }
 
 // LiveQPSearch received and process search progress signals to translate them as terminal UI progress
-// it implements the core.SearchCallbacks interface required by core.FindAllSegmentsQP()
+// it implements the core.QPSearchCallbacks interface required by core.FindAllSegmentsQP()
 type LiveQPSearch struct {
 	debug bool
 	// Global progress
