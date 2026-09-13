@@ -442,7 +442,13 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", duration.Round(time.Second))
 
 		// Step 3 - Merging
-		// TODO
+		// 3 - merging encoded segments
+		// 3b - merging source segments
+
+		// Step 4 - final vmaf check
+		// Step 5 - remux final file
+		// Step 6 - regen mkv stats
+		// Step 7 - move file to output dir
 		return
 	},
 }
