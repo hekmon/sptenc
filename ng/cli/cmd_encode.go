@@ -382,7 +382,7 @@ var encodeCommand = &cli.Command{
 
 		// Step 2 - Encode segments
 		lqps := &LiveQPSearch{
-			debug: cmd.Bool(debugFlagName),
+			PrintDebug: cmd.Bool(debugFlagName),
 		}
 		lqps.Start(len(segmentPaths), totalDuration)
 		start := time.Now()
@@ -435,20 +435,19 @@ var encodeCommand = &cli.Command{
 		}
 		fmt.Fprintf(bypass, "Segment QP range: %d - %d\n", minQP, maxQP)
 		if results.NbBestEfforts > 0 {
-			fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
-				results.NbBestEfforts,
-			)
+			if results.NbBestEfforts == 1 {
+				fmt.Fprintln(bypass, "WARNING: %d segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
+			} else {
+				fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
+					results.NbBestEfforts,
+				)
+			}
 		}
 		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", duration.Round(time.Second))
 
-		// Step 3 - Merging
-		// 3 - merging encoded segments
-		// 3b - merging source segments
-
-		// Step 4 - final vmaf check
-		// Step 5 - remux final file
-		// Step 6 - regen mkv stats
-		// Step 7 - move file to output dir
+		// Step 3 - final vmaf check
+		// Step 4 - remux final file
+		// Step 5 - regen mkv stats
 		return
 	},
 }
