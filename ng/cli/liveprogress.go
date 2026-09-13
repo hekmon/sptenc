@@ -344,6 +344,9 @@ func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
 	to.segmentCurrent = segmentIndex
 	if to.segmentCandidates != nil {
 		to.segmentCandidatesAccess.Lock()
+		for i := range to.segmentCandidates {
+			to.segmentCandidates[i] = "" // drop references
+		}
 		to.segmentCandidates = to.segmentCandidates[:0] // reset while keeping cap
 		to.segmentCandidatesAccess.Unlock()
 	}
