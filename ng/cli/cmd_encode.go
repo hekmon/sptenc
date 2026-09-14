@@ -379,6 +379,16 @@ var encodeCommand = &cli.Command{
 			}
 			fmt.Fprintf(bypass, "\tTotal duration of segments: %s\n", totalDuration)
 		}
+		// Validate video stream presence and reject VFR content
+		videoStream := sourceStats.VideoTrack()
+		if videoStream == nil {
+			err = errors.New("no video stream found in source")
+			return
+		}
+		if !videoStream.IsConstantFrameRate() {
+			err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+			return
+		}
 
 		// Step 2 - Encode segments
 		lqps := &LiveQPSearch{
@@ -468,7 +478,7 @@ var encodeCommand = &cli.Command{
 			duration = time.Since(start)
 			fmt.Fprintf(bypass, "Source segments merged in %s.\n", duration.Round(time.Second))
 		} else {
-			vmafSource = cmd.String("originalfile")
+			vmafSource = cmd.StringArg("inputpath")
 		}
 
 		// Step 4 - final vmaf check
@@ -490,6 +500,8 @@ var encodeCommand = &cli.Command{
 
 		// Step 6 - regen mkv stats
 		// TODO
+
+		// TODO, check how to keep HDR if present
 		return
 	},
 }

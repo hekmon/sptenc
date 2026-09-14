@@ -339,6 +339,13 @@ func (s *FFProbeBinaryStream) IsInterlaced() bool {
 	return s.FieldOrder != "progressive" && s.FieldOrder != "unknown"
 }
 
+// IsConstantFrameRate reports whether the stream appears to have a constant frame rate.
+// It compares r_frame_rate and avg_frame_rate from ffprobe. If they differ, the stream
+// is likely variable frame rate (VFR), which can cause frame misalignment in VMAF comparisons.
+func (s *FFProbeBinaryStream) IsConstantFrameRate() bool {
+	return s.RFrameRate == s.AvgFrameRate
+}
+
 // FFProbeBinaryStreamDisposition describes the role and properties of a stream.
 type FFProbeBinaryStreamDisposition struct {
 	Default         int `json:"default"`
