@@ -69,8 +69,11 @@ func generateWorkingDirectoryPath(basePath string) string {
 }
 
 func validateSceneThreshold(v float64) error {
-	if v < ffmpeg.SceneThresholdMin || v > ffmpeg.SceneThresholdMax {
-		return fmt.Errorf("must be between %d and %d", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax)
+	if v <= 0 {
+		return fmt.Errorf("must be between 1 and %d", ffmpeg.SceneThresholdMax)
+	}
+	if v > ffmpeg.SceneThresholdMax {
+		return fmt.Errorf("must be between 1 and %d", ffmpeg.SceneThresholdMax)
 	}
 	return nil
 }

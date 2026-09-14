@@ -505,7 +505,7 @@ var encodeCommand = &cli.Command{
 		} else {
 			originalFile = inputPath
 		}
-		outputPath := computeFinalPath(originalFile, workingDir, ffmpeg.Encoder(cmd.String("encoder")))
+		outputPath := computeFinalPath(originalFile, cmd.String("outputdir"), ffmpeg.Encoder(cmd.String("encoder")))
 		encodeToFlac := core.AllAudioTracksPCM(sourceStats)
 		if encodeToFlac {
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
@@ -519,6 +519,20 @@ var encodeCommand = &cli.Command{
 		}
 		duration = time.Since(start)
 		fmt.Fprintf(bypass, "Remuxed to final file %s in %s\n", shellescape.Quote(filepath.Base(outputPath)), duration.Round(time.Second))
+		finalFileSize, err := getFileSize(outputPath)
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: failed to get final file size: %s\n", err)
+		} else {
+			originalSize, err := getFileSize(originalFile)
+			if err != nil {
+				fmt.Fprintf(bypass, "WARNING: failed to get original file size: %s\n", err)
+			} else {
+				sizeReduction := originalSize - finalFileSize
+				compressionRatio := float64(sizeReduction) / float64(originalSize) * 100
+				fmt.Fprintf(bypass, "Compression: %s -> %s (%.1f%% reduction, %s saved)\n",
+					originalSize, finalFileSize, compressionRatio, sizeReduction)
+			}
+		}
 
 		// Step 6 - regen mkv stats
 		fmt.Fprintln(bypass, "Regenerating MKV statistics tags...")

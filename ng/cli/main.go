@@ -13,6 +13,7 @@ import (
 	"github.com/hekmon/sptenc/ng/mkvtoolnix"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/hekmon/liveterm/v2"
 	"github.com/urfave/cli/v3"
 )
 
@@ -97,10 +98,13 @@ func main() {
 	}
 }
 
+const sptencURL = "https://github.com/hekmon/sptenc"
+
 func version() string {
 	infos, ok := debug.ReadBuildInfo()
 	if !ok {
-		return fmt.Sprintf("unknown (%s/%s)", runtime.GOOS, runtime.GOARCH)
+		return fmt.Sprintf("%s unknown (%s/%s)", liveterm.Hyperlink(sptencURL, "sptenc"), runtime.GOOS, runtime.GOARCH)
 	}
-	return fmt.Sprintf("%s (%s, %s/%s)", infos.Main.Version, infos.GoVersion, runtime.GOOS, runtime.GOARCH)
+	return fmt.Sprintf("%s %s (%s, %s/%s)",
+		liveterm.Hyperlink(sptencURL, "sptenc"), infos.Main.Version, infos.GoVersion, runtime.GOOS, runtime.GOARCH)
 }
