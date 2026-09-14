@@ -172,7 +172,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafhmean",
 			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
-			Value:     core.VMAFOffValue,
+			Value:     93,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
@@ -180,7 +180,7 @@ var encodeCommand = &cli.Command{
 		&cli.Float64Flag{
 			Name:      "vmafmean",
 			Usage:     "Minimum acceptable VMAF score for mean.",
-			Value:     93,
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,

@@ -120,43 +120,49 @@ The model is **automatically selected** based on input resolution. Use `-vmafneg
 
 ### sptenc thresholds
 
-| Flag | Description | Default | Use Case |
+VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND**
+(Just Noticeable Difference — detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%). See [Netflix via StreamingLearningCenter — Just Noticeable Difference](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html).
+
+| Metric | Flag | Default | Meaning (threshold T) |
 |---|---|---|---|
-| `-vmafmean` | Arithmetic mean of all frames | **93** | General quality targeting |
-| `-vmafhmean` | Harmonic mean (penalizes outliers) | disabled | Stricter than mean; enforces consistency |
-| `-vmafmedian` | Median (P50) | disabled | Ensures 50% of frames meet threshold |
-| `-vmafp25` | 25th percentile | disabled | Ensures 75% of frames meet threshold |
-| `-vmafp10` | 10th percentile | disabled | Ensures 90% of frames meet threshold |
-| `-vmafp5` | 5th percentile | disabled | Ensures 95% of frames meet threshold |
-| `-vmafp1` | 1st percentile | disabled | Ensures 99% of frames meet threshold |
-| `-vmafmin` | Worst single frame | disabled | Ensures 100% of frames meet threshold - may inflate bitrate |
-| `-vmafminalt` | Fallback for best-effort segments | disabled | For segments that cannot meet `-vmafmin` even at QP 0 |
+| Harmonic mean | `-vmafhmean` | **93** | Penalizes local dips; **default gate** because it cannot under-deliver: hmean ≥ T mathematically implies mean ≥ T |
+| Arithmetic mean | `-vmafmean` | disabled | Average quality. Redundant as a gate whenever hmean or a low percentile is enabled — kept for reporting and for external comparability (Netflix 93 convention, all published ladders use arithmetic mean) |
+| Median | `-vmafmedian` | disabled | ≥ 50% of frames at or above T |
+| Percentile 25 | `-vmafp25` | disabled | ≥ 75% of frames at or above T |
+| Percentile 10 | `-vmafp10` | disabled | ≥ 90% of frames at or above T |
+| Percentile 5 | `-vmafp5` | disabled | ≥ 95% of frames at or above T |
+| Percentile 1 | `-vmafp1` | disabled | ≥ 99% of frames at or above T |
+| Min | `-vmafmin` | disabled | 100% of frames at or above T — strictest floor. Can over-fire on transient frames (title cards, flash frames) and inflate bitrate |
+| Min fallback | `-vmafminalt` | disabled | Best-effort ceiling for segments that cannot satisfy `-vmafmin` even at QP 0 |
+
+**Fixed relationship:** `min ≤ p1 ≤ p5 ≤ … ≤ hmean ≤ mean`
+
+Consequences used everywhere below:
+- **Gate composition:** one strict measure > several modest ones. Enabling `-vmafhmean T` makes `-vmafmean T` a tautology — don't gate both.
+- **Diagnostic inversion:** the **mean − hmean gap** is the signal for "uniformly good" (small gap → QP is well tuned) vs "good on average with bad patches" (large gap → per-scene splitter cut, or QP granularity issue, or move the gate to hmean/min). The mean is always logged for this reason even when it's not gated.
 
 **Rules:**
 - All enabled thresholds must pass simultaneously (AND logic)
 - Set any threshold to `-1` to disable it
 
-> 💡 **Tip:** Start with `-vmafmean 93` alone with the `-debug` flag to inspect each encode attempt VMAF score to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
+> 💡 **Tip:** Start with `-vmafmean 93` alone with the `-debug` flag to inspect each encode attempt's VMAF score and identify problematic scenes, then move the actual gate to `-vmafhmean 93`, and add `-vmafp5` or `-vmafp1` only if a profile demands explicit percentile guarantees. Running mean + hmean gates at the same value is redundant — only one of them is real work.
 
 ### Recommended Values
 
-VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND** (Just Noticeable Difference -
-detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%) ([Netflix via StreamingLearningCenter](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html)).
-
-| Use Case | Recommended metric | Target value |
+| Use Case | Gate | Target value |
 |---|---|---|
-| "I am afraid of deleting my lossless master file" | `-vmafmean` + `-vmafmin` | `99` + `93` |
+| "I am afraid of deleting my lossless master file" | `-vmafhmean` + `-vmafmin` | `99` + `93` |
 | Archival / mastering | `-vmafhmean` | `95` |
-| General streaming / VOD | `-vmafmean` | `93` |
-| Live sports / fast motion | `-vmafmean` + `-vmafp10` | `93` + `88` |
+| General streaming / VOD | `-vmafhmean` | `93` (default) |
+| Live sports / fast motion | `-vmafhmean` | `93` |
 | Mobile / bandwidth-constrained | `-vmafmean` | `85–90` |
-| Quality consistency critical | `-vmafp5` or `-vmafp1` | `85` |
+| Quality consistency critical | `-vmafhmean` or `-vmafp5` | `90` |
 
-> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is
-> *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers.
-> The 95 target, from a more recent paper, is the lowest score at which content is *"on average
-> subjectively indistinguishable from the original"* - a higher bar that costs ~1400 kbps extra at the
-> top rung ([StreamingLearningCenter](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)).
+**Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `-vmafmean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
+
+**Why the paranoid-master row is hmean + min and not mean + min:** `hmean ≥ 99` entails `mean ≥ 99`, so gating mean 99 was redundant. The `-vmafmin 93` floor survives alongside because harmonic mean punishes dips it *recognizes* but still tolerates genuinely isolated single frames; min closes that last gap.
+
+> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers ([StreamingLearningCenter — analysis](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)). The 95 target, from a more recent paper, is the lowest score at which content is *"on average subjectively indistinguishable from the original"* — a higher bar that costs ~1400 kbps extra at the top rung. With `-vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
 
 ## Adaptive QP Search
 
