@@ -23,7 +23,7 @@ var encodeCommand = &cli.Command{
 	Name:    "encode",
 	Aliases: []string{"e"},
 	Usage:   "Encode video segments to meet perceptual quality targets at minimal file size",
-	Description: fmt.Sprintf("The input path can be provided in two forms:\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command). If using your own segments, make sure every file have the same codec and frame rate!\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\n\nSTATS CACHE\nThe stats cache records QP search statistics (mean and standard deviation) to speed up future encodes with the same encoder and VMAF profile. Because a given VMAF target can require very different QP distributions depending on the source, mixing them into the same cache effectively poisons it (e.g. clean animation vs grainy film will pull the stats in opposite directions). The --cacheprofile flag keeps these histories separate. Without a profile, all runs share the same cache, which can slow convergence if you encode very different content types.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size). Run 'sptenc check' to see which encoders are available on your system.\n\nAUDIO\nIf all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically losslessly compressed to FLAC during the final remux step. This reduces file size without any quality loss, consistent with sptenc's goal of smallest file size at guaranteed perceptual quality.",
+	Description: fmt.Sprintf("The input path can be provided in two forms:\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command). Files are processed in alphabetical order; name them accordingly (e.g. seg_01.mkv, seg_02.mkv) to preserve scene order. If using your own segments, make sure every file have the same codec and frame rate!\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\n\nSTATS CACHE\nThe stats cache records QP search statistics (mean and standard deviation) to speed up future encodes with the same encoder and VMAF profile. Because a given VMAF target can require very different QP distributions depending on the source, mixing them into the same cache effectively poisons it (e.g. clean animation vs grainy film will pull the stats in opposite directions). The --cacheprofile flag keeps these histories separate. Without a profile, all runs share the same cache, which can slow convergence if you encode very different content types.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size). Run 'sptenc check' to see which encoders are available on your system.\n\nAUDIO\nIf all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically losslessly compressed to FLAC during the final remux step. This reduces file size without any quality loss, consistent with sptenc's goal of smallest file size at guaranteed perceptual quality.",
 		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: []cli.Flag{
 		// encoding
@@ -384,9 +384,11 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
-			if segmentsPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
-				err = fmt.Errorf("Failed to get segments from directory: %w", err)
-				return
+			// Build segment paths directly from known naming convention rather than
+			// scanning the directory, which avoids filesystem ordering issues.
+			segmentsPaths = make([]string, len(scenes)+1)
+			for i := range segmentsPaths {
+				segmentsPaths[i] = filepath.Join(segmentsDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
 			}
 			// get stream infos
 			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
