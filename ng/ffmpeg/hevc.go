@@ -108,6 +108,7 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 		"-c", "copy",
 		"-c:v", "libx265",
 		"-profile:v", "main10",
+		"-pix_fmt", "yuv420p10le",
 		"-preset", string(config.Preset),
 	}
 	//// quality
