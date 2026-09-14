@@ -23,7 +23,7 @@ var encodeCommand = &cli.Command{
 	Name:    "encode",
 	Aliases: []string{"e"},
 	Usage:   "Encode video segments to meet perceptual quality targets at minimal file size",
-	Description: fmt.Sprintf("The input path can be provided in two forms:\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command)\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size). See the check command for encoder availability.\n%s%s",
+	Description: fmt.Sprintf("The input path can be provided in two forms:\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command). If using your own segments, make sure every file have the same codec and frame rate!\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size). See the check command for encoder availability.\n%s%s",
 		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue, renderHEVCEncodersTable(), renderAV1EncodersTable()),
 	Flags: []cli.Flag{
 		// encoding
@@ -299,7 +299,7 @@ var encodeCommand = &cli.Command{
 		// Step 1 - Segments and media infos
 		var (
 			segmentsPaths []string
-			stats         ffmpeg.FFProbeStats
+			sourceStats   ffmpeg.FFProbeStats
 			totalDuration time.Duration
 		)
 		if !inputInfos.IsDir() {
@@ -345,11 +345,11 @@ var encodeCommand = &cli.Command{
 				return
 			}
 			// get stream infos
-			if stats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
+			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("Failed to probe input file: %w", err)
 				return
 			}
-			totalDuration = stats.Format.Duration
+			totalDuration = sourceStats.Format.Duration
 		} else {
 			fmt.Fprintf(bypass, "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
 				shellescape.Quote(filepath.Base(inputPath)),
@@ -367,7 +367,7 @@ var encodeCommand = &cli.Command{
 			}
 			fmt.Fprintf(bypass, "Found %d segments in directory\n", len(segmentsPaths))
 			// get stream infos (from first segment)
-			if stats, err = getStreamsInfos(ctx, segmentsPaths[0], cmd.Bool(debugFlagName)); err != nil {
+			if sourceStats, err = getStreamsInfos(ctx, segmentsPaths[0], cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("Failed to probe segment file: %w", err)
 				return
 			}
@@ -446,32 +446,44 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", duration.Round(time.Second))
 
 		// Step 3 - merging
+		fmt.Fprintln(bypass, "Merging segments...")
 		encodedSegmentsMerged := filepath.Join(workingDir, "encoded_segments_merged.mkv")
+		start = time.Now()
 		if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
 			err = fmt.Errorf("failed to concat encoded segments: %w", err)
 			return
 		}
-		var (
-			vmafSource string
-		)
+		duration = time.Since(start)
+		fmt.Fprintf(bypass, "Encoded segments merged in %s.\n", duration.Round(time.Second))
+		var vmafSource string
 		if inputInfos.IsDir() {
+			fmt.Fprintln(bypass, "Merging source segments...")
 			vmafSource = filepath.Join(workingDir, "source_segments_merged.mkv")
+			start = time.Now()
 			// Here we use results.TotalSegmentsFrames because all segments frames number have been checked against source in QP search
 			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("failed to concat source segments: %w", err)
 				return
 			}
-			if cmd.Bool("vmafcuda") {
-				// TODO
-			}
+			duration = time.Since(start)
+			fmt.Fprintf(bypass, "Source segments merged in %s.\n", duration.Round(time.Second))
 		} else {
 			vmafSource = cmd.String("originalfile")
-			if cmd.Bool("vmafcuda") {
-				// TODO
-			}
 		}
 
 		// Step 4 - final vmaf check
+		fmt.Fprintln(bypass, "Computing final VMAF...")
+		start = time.Now()
+		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
+			results.TotalSegmentsFrames, cmd.Int("nvidiagpuindex"), cmd.Bool("vmafneg"), cmd.Bool("vmafcuda"), cmd.Bool(debugFlagName),
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to compute final vmaf: %w", err)
+			return
+		}
+		duration = time.Since(start)
+		finalVMAFStats := finalVMAFreport.GetStats()
+		fmt.Fprintf(bypass, "Final VMAF computed in %s: %f\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 5 - remux final file
 		// TODO

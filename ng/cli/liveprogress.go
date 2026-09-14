@@ -536,3 +536,45 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 		FFMPEGStatsReport: progress,
 	})
 }
+
+func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *ffmpeg.FFProbeBinaryStream, totalFrames, gpuIndex int, vmafNeg, vmafCUDA, debug bool) (
+	stats ffmpeg.VMAFReport, err error) {
+	vmafBar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)), // not derived from sourceStats as it could be from segmented input (from segment #0)
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "      VMAF | "
+		}),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	)
+	defer liveprogress.RemoveBar(vmafBar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		vmafBar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+	return ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
+		ReferencePath:     source,
+		DistortedPath:     distorted,
+		InputFrameRate:    videoStream.RFrameRate,
+		ReportPath:        distorted + "_vmaf.json",
+		UltraHD:           videoStream.Height >= ffmpeg.UltraHDHeight,
+		NoEnhancementGain: vmafNeg,
+		NVDECReference:    ffmpeg.IsNVDecCompatible(videoStream.CodecName) && vmafCUDA, // source is nvdec compatible and user is indicating us there is a NVIDIA GPU (vmafCUDA)
+		NVDECDistorted:    vmafCUDA,                                                    // encoded output is in HEVC or AV1, both can be decoded by nvdec so the question is: is there a nvidia GPU ? If user requested vmafCUDA we know for sure
+		VMAFCuda:          vmafCUDA,
+		GPUID:             &gpuIndex,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
+}
