@@ -99,7 +99,7 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bo
 		nbFrames, codec, time.Since(start).Round(time.Second),
 	)
 	// ffv1 encode
-	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless master...")
+	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
 	inputFileName, _ := extractFileNameInfos(inputFilePath)
 	outputFile = filepath.Join(outputDir, fmt.Sprintf("%s - ffv1 master.mkv", inputFileName))
 	start = time.Now()
