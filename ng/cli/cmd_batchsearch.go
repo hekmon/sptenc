@@ -69,7 +69,8 @@ var batchsearchCommand = &cli.Command{
 			"This command is designed to run unattended.\n\n" +
 			"ENCODERS\n" +
 			"Use --searchencoder to choose the encoder for the search loop. GPU encoders (e.g. hevc_nvenc) are " +
-			"strongly recommended for speed; a warning is raised if a CPU encoder is selected.\n\n" +
+			"strongly recommended for speed. If available, also enable CUDA VMAF acceleration (--vmafcuda) to avoid " +
+			"bottlenecking the search on CPU-side quality validation. A warning is raised if a non-GPU encoder is selected.\n\n" +
 			"When --finalencode is set and the search encoder is GPU-based, the command automatically derives " +
 			"the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs the final " +
 			"encode with the discovered threshold. The GPU-found threshold is usually a close enough approximation " +
