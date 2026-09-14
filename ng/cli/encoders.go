@@ -124,6 +124,8 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		"n/a",
 	})
 	table.Render()
+	buff.WriteString(fmt.Sprintf("  CPU: %s is slow and single-instance rarely saturates many cores (by design), prefer %s when possible.\n",
+		ffmpeg.AV1EncoderLibaom, ffmpeg.AV1EncoderSVTAV1))
 	return buff.String()
 }
 

@@ -158,5 +158,5 @@ func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) stri
 	builder.WriteString(strconv.FormatFloat(profile.median, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
-	return fmt.Sprintf("qp_history_%s_vmaf-%s.json", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	return fmt.Sprintf("qphistory_%s_vmaf-%s.json", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 }
