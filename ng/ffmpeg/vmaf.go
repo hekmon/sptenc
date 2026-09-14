@@ -52,7 +52,8 @@ type VMAFComputeConfig struct {
 	ReportPath        string // Path where the JSON VMAF report will be written.
 	UltraHD           bool   // Use the Ultra-HD (4K) VMAF model.
 	NoEnhancementGain bool   // Use the NEG (No Enhancement Gain) model variant.
-	NVDEC             bool   // Enable NVDEC hardware acceleration for decoding.
+	NVDECReference    bool   // Enable NVDEC hardware acceleration for decoding the reference video.
+	NVDECDistorted    bool   // Enable NVDEC hardware acceleration for decoding the distorted video.
 	VMAFCuda          bool   // Enable CUDA-accelerated VMAF computation.
 	GPUID             *int   // Optional GPU device ID to use for hardware acceleration.
 	// Reporting
@@ -85,11 +86,11 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	version := VMAFModel(config.UltraHD, config.NoEnhancementGain)
 	// Build up ffmpeg args
 	args := []string{"-loglevel", "error", "-stats"}
-	if (config.NVDEC || config.VMAFCuda) && config.GPUID != nil {
+	if (config.NVDECReference || config.NVDECDistorted || config.VMAFCuda) && config.GPUID != nil {
 		args = append(args, "-init_hw_device", fmt.Sprintf("cuda=nvc:%d", *config.GPUID))
 	}
 	//// distorted file first
-	if config.NVDEC || config.VMAFCuda {
+	if config.NVDECDistorted {
 		args = append(args, "-hwaccel", "cuda")
 		if config.GPUID != nil {
 			args = append(args, "-hwaccel_device", "nvc")
@@ -103,7 +104,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.DistortedPath,
 	)
 	//// ref file
-	if config.NVDEC || config.VMAFCuda {
+	if config.NVDECReference {
 		args = append(args, "-hwaccel", "cuda")
 		if config.GPUID != nil {
 			args = append(args, "-hwaccel_device", "nvc")
@@ -121,11 +122,22 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		if config.GPUID != nil {
 			args = append(args, "-filter_hw_device", "nvc")
 		}
+		var scaleDist, scaleRef string
+		if config.NVDECDistorted {
+			scaleDist = "[syncdist]scale_cuda=format=yuv420p[dist]"
+		} else {
+			scaleDist = "[syncdist]hwupload,scale_cuda=format=yuv420p[dist]"
+		}
+		if config.NVDECReference {
+			scaleRef = "[syncref]scale_cuda=format=yuv420p[ref]"
+		} else {
+			scaleRef = "[syncref]hwupload,scale_cuda=format=yuv420p[ref]"
+		}
 		args = append(args,
 			"-filter_complex",
 			fmt.Sprintf(
-				"[0:v]setpts=PTS-STARTPTS[syncdist];[syncdist]scale_cuda=format=yuv420p[dist];[1:v]setpts=PTS-STARTPTS[syncref];[syncref]scale_cuda=format=yuv420p[ref];[dist][ref]libvmaf_cuda=model=version=%s:log_fmt=json:log_path=%s",
-				version, adaptVMAFPath(config.ReportPath),
+				"[0:v]setpts=PTS-STARTPTS[syncdist];%s;[1:v]setpts=PTS-STARTPTS[syncref];%s;[dist][ref]libvmaf_cuda=model=version=%s:log_fmt=json:log_path=%s",
+				scaleDist, scaleRef, version, adaptVMAFPath(config.ReportPath),
 			),
 		)
 	} else {

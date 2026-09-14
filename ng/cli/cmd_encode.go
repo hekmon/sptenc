@@ -298,7 +298,7 @@ var encodeCommand = &cli.Command{
 
 		// Step 1 - Segments and media infos
 		var (
-			segmentPaths  []string
+			segmentsPaths []string
 			stats         ffmpeg.FFProbeStats
 			totalDuration time.Duration
 		)
@@ -340,7 +340,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tSplit %d scenes in %w",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
-			if segmentPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
+			if segmentsPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
 				err = fmt.Errorf("Failed to get segments from directory: %w", err)
 				return
 			}
@@ -357,23 +357,23 @@ var encodeCommand = &cli.Command{
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 			)
 			// get segments
-			if segmentPaths, err = getSegmentsFromDir(inputPath); err != nil {
+			if segmentsPaths, err = getSegmentsFromDir(inputPath); err != nil {
 				err = fmt.Errorf("Failed to get segments from directory: %w", err)
 				return
 			}
-			if len(segmentPaths) == 0 {
+			if len(segmentsPaths) == 0 {
 				err = fmt.Errorf("No segment files found in input directory")
 				return
 			}
-			fmt.Fprintf(bypass, "Found %d segments in directory\n", len(segmentPaths))
+			fmt.Fprintf(bypass, "Found %d segments in directory\n", len(segmentsPaths))
 			// get stream infos (from first segment)
-			if stats, err = getStreamsInfos(ctx, segmentPaths[0], cmd.Bool(debugFlagName)); err != nil {
+			if stats, err = getStreamsInfos(ctx, segmentsPaths[0], cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("Failed to probe segment file: %w", err)
 				return
 			}
 			// Calculate total duration of all segments for accurate progress bar
 			fmt.Fprintln(bypass, "Calculating total duration of segments...")
-			if totalDuration, err = getSegmentsTotalDuration(ctx, segmentPaths, cmd.Bool(debugFlagName)); err != nil {
+			if totalDuration, err = getSegmentsTotalDuration(ctx, segmentsPaths, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("Failed to calculate total duration: %w", err)
 				return
 			}
@@ -384,11 +384,11 @@ var encodeCommand = &cli.Command{
 		lqps := &LiveQPSearch{
 			PrintDebug: cmd.Bool(debugFlagName),
 		}
-		lqps.Start(len(segmentPaths), totalDuration)
+		lqps.Start(len(segmentsPaths), totalDuration)
 		start := time.Now()
 		results, err := core.FindAllSegmentsQP(ctx, lqps,
 			core.QPSearchConfig{
-				SegmentPaths:      segmentPaths,
+				SegmentsPaths:     segmentsPaths,
 				Auditor:           vmafAuditor,
 				WorkingDir:        workingDir,
 				StatsCache:        statsCache,
@@ -411,9 +411,9 @@ var encodeCommand = &cli.Command{
 		// Print stats
 		fmt.Fprintf(bypass, "Segments QPs: %+v\n", results.QPs)
 		fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
-			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentPaths), results.TotalSegmentsFrames,
+			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
 		)
-		fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentPaths)))
+		fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentsPaths)))
 		fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames))
 		segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
 		if err != nil {
@@ -445,9 +445,39 @@ var encodeCommand = &cli.Command{
 		}
 		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", duration.Round(time.Second))
 
-		// Step 3 - final vmaf check
-		// Step 4 - remux final file
-		// Step 5 - regen mkv stats
+		// Step 3 - merging
+		encodedSegmentsMerged := filepath.Join(workingDir, "encoded_segments_merged.mkv")
+		if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
+			err = fmt.Errorf("failed to concat encoded segments: %w", err)
+			return
+		}
+		var (
+			vmafSource string
+		)
+		if inputInfos.IsDir() {
+			vmafSource = filepath.Join(workingDir, "source_segments_merged.mkv")
+			// Here we use results.TotalSegmentsFrames because all segments frames number have been checked against source in QP search
+			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
+				err = fmt.Errorf("failed to concat source segments: %w", err)
+				return
+			}
+			if cmd.Bool("vmafcuda") {
+				// TODO
+			}
+		} else {
+			vmafSource = cmd.String("originalfile")
+			if cmd.Bool("vmafcuda") {
+				// TODO
+			}
+		}
+
+		// Step 4 - final vmaf check
+
+		// Step 5 - remux final file
+		// TODO
+
+		// Step 6 - regen mkv stats
+		// TODO
 		return
 	},
 }

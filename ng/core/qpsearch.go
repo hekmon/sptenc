@@ -40,8 +40,8 @@ type QPSearchCallbacks interface {
 
 // QPSearchConfig holds the invariants for a QP search run.
 type QPSearchConfig struct {
-	// SegmentPaths contains the file paths of the video segments to search for optimal QP.
-	SegmentPaths []string
+	// SegmentsPaths contains the file paths of the video segments to search for optimal QP.
+	SegmentsPaths []string
 	// Auditor validates whether a candidate QP meets the target quality (e.g. via VMAF).
 	Auditor VMAFChecker
 	// WorkingDir is the directory where temporary encoded segments and VMAF reports are written during the search.
@@ -101,10 +101,10 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 		segmentNbAttempts             int
 		bestEffort                    bool
 	)
-	results.EncodedSegmentsPaths = make([]string, len(config.SegmentPaths))
-	results.QPs = make([]int, len(config.SegmentPaths))
+	results.EncodedSegmentsPaths = make([]string, len(config.SegmentsPaths))
+	results.QPs = make([]int, len(config.SegmentsPaths))
 	// Go
-	for segment, segmentPath := range config.SegmentPaths {
+	for segment, segmentPath := range config.SegmentsPaths {
 		scb.OnSegmentStart(segment, segmentPath)
 		// Find this segment QP
 		if segmentQP, segmentFrames, segmentNbAttempts, bestEffort, segmentDuration, err = findSegmentQP(ctx, scb, config, segment, segmentPath); err != nil {
@@ -578,7 +578,8 @@ func segmentVMAF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConf
 		ReportPath:        segmentEncoded + "_vmaf.json",
 		UltraHD:           videoTrack.Height >= ffmpeg.UltraHDHeight,
 		NoEnhancementGain: config.VMAFNeg,
-		NVDEC:             false, // input is most likely ffv1 for master slicing
+		NVDECReference:    false, // input is most likely ffv1 for master slicing
+		NVDECDistorted:    false, // encoded segment is not guaranteed to be NVDEC-compatible either
 		VMAFCuda:          config.VMAFCUDA,
 		GPUID:             &config.NVIDIAGPUIndex,
 		Debug: func(msg string) {

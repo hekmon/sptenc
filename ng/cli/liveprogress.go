@@ -495,3 +495,44 @@ func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAt
 	to.globalNbSegmentsDone++
 	to.globalAllSegmentSize = currentTotalSize
 }
+
+func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, totalFrames int, debug bool) (err error) {
+	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
+	if err != nil {
+		err = fmt.Errorf("failed to generate concat list file: %w", err)
+		return
+	}
+	concatBar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalFrames)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Concat | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	)
+	defer liveprogress.RemoveBar(concatBar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		concatBar.CurrentSet(uint64(stats.CurrentFrame))
+	}
+	return ffmpeg.Concat(ctx, ffmpeg.ConcatConfig{
+		ConcatListPath: concatList,
+		ConcatUnsafe:   true,
+		OutputPath:     outputFile,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
+}
