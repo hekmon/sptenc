@@ -40,6 +40,7 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 		"-c:v", "ffv1", // encoded as ffv1
 		"-g", "1", // with every frame self contained
 		"-pix_fmt", "yuv420p10le", // in 10bits output
+		"-fps_mode", "passthrough", // preserve original timestamps
 		config.OutputFilePath,
 	}
 	// Prepare command

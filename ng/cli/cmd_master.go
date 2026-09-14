@@ -119,8 +119,9 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bo
 			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 	} else {
-		fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s\n",
+		fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s (%s)\n",
 			time.Since(start).Round(time.Second),
+			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 	}
 	return

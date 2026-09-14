@@ -350,7 +350,7 @@ var encodeCommand = &cli.Command{
 				cunits.ImportInBytes(float64(inputInfos.Size())),
 				cmd.String("encoder"),
 			)
-			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n%s\n", vmafAuditor)
+			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// create master
 			var (
 				masterFile string
@@ -401,7 +401,7 @@ var encodeCommand = &cli.Command{
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 				cmd.String("encoder"),
 			)
-			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n%s\n", vmafAuditor)
+			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// get segments
 			if segmentsPaths, err = getSegmentsFromDir(inputPath); err != nil {
 				err = fmt.Errorf("Failed to get segments from directory: %w", err)
@@ -523,6 +523,26 @@ var encodeCommand = &cli.Command{
 		}
 
 		// Step 4 - final vmaf check
+		// Verify frame counts match before computing VMAF to catch misalignment early.
+		// Use -count_frames (NbReadFrames) via liveCountNbFrames for accurate counts.
+		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
+		sourceFrames, _, _, err := liveCountNbFrames(ctx, vmafSource, cmd.Bool(debugFlagName))
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: could not count frames in source for verification: %s\n", err)
+			sourceFrames = 0
+		}
+		encodedFrames, _, _, err := liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName))
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: could not count frames in encoded output for verification: %s\n", err)
+			encodedFrames = 0
+		}
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Frame counts — source: %d, encoded: %d\n", sourceFrames, encodedFrames)
+		}
+		if sourceFrames > 0 && encodedFrames > 0 && sourceFrames != encodedFrames {
+			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
+			return
+		}
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),

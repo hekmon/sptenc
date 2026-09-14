@@ -174,7 +174,7 @@ var splitCommand = &cli.Command{
 		}
 
 		// analyze
-		fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with threshold above %s...\n",
+		fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 		)
 		start := time.Now()
