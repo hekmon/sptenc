@@ -18,7 +18,7 @@ var checkCommand = &cli.Command{
 	Name:        "check",
 	Aliases:     []string{"c"},
 	Usage:       "Verify third-party tools are present and usable",
-	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf), ffprobe and mkvpropedit",
+	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf), ffprobe and mkvpropedit.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size).",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")
@@ -32,6 +32,7 @@ var checkCommand = &cli.Command{
 			hasLibvmafCUDA bool
 			hasAnyHEVC     bool
 			hasAnyAV1      bool
+			encoders       ffmpeg.EncodersInfo
 		)
 		// Check ffprobe
 		ffprobeVersion, ffprobeErr := ffmpeg.GetFFProbeVersion(ctx)
@@ -60,7 +61,8 @@ var checkCommand = &cli.Command{
 				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf_cuda", boolToEmoji(hasLibvmafCUDA)})
 			}
 			// Check encoders
-			encoders, encErr := ffmpeg.GetEncoders(ctx)
+			var encErr error
+			encoders, encErr = ffmpeg.GetEncoders(ctx)
 			if encErr != nil {
 				ffmpegErr = fmt.Errorf("failed to list encoders: %w", encErr)
 			} else {
@@ -91,6 +93,14 @@ var checkCommand = &cli.Command{
 		renderCheckTable("🔍  ffprobe", ffprobeRows, maxLabelWidth)
 		renderCheckTable("📦  mkvpropedit", mkvpropeditRows, maxLabelWidth)
 		renderCheckTable("🎬  ffmpeg", ffmpegRows, maxLabelWidth)
+		// Print encoder availability tables
+		if ffmpegOK {
+			fmt.Println()
+			fmt.Println("Encoder Availability")
+			fmt.Println()
+			fmt.Println(renderHEVCEncodersAvailability(encoders))
+			fmt.Println(renderAV1EncodersAvailability(encoders))
+		}
 		// Determine status
 		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, mkvpropeditOK, hasLibvmaf, hasAnyHEVC || hasAnyAV1)
 		fmt.Printf("\n  Status: %s %s\n\n", statusEmoji, status)
