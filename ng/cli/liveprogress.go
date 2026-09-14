@@ -319,12 +319,31 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 	)
 }
 
-func (to *LiveQPSearch) Stop() {
-	if to.globalProgressBar == nil {
-		return
+func (to *LiveQPSearch) cleanupSegmentUI() {
+	if to.segmentStatusLine != nil {
+		liveprogress.RemoveCustomLine(to.segmentStatusLine)
+		to.segmentStatusLine = nil
 	}
-	liveprogress.RemoveBar(to.globalProgressBar)
-	to.globalProgressBar = nil
+	if to.analysisProgressBar != nil {
+		liveprogress.RemoveBar(to.analysisProgressBar)
+		to.analysisProgressBar = nil
+	}
+	if to.encodeProgressBar != nil {
+		liveprogress.RemoveBar(to.encodeProgressBar)
+		to.encodeProgressBar = nil
+	}
+	if to.vmafProgressBar != nil {
+		liveprogress.RemoveBar(to.vmafProgressBar)
+		to.vmafProgressBar = nil
+	}
+}
+
+func (to *LiveQPSearch) Stop() {
+	to.cleanupSegmentUI()
+	if to.globalProgressBar != nil {
+		liveprogress.RemoveBar(to.globalProgressBar)
+		to.globalProgressBar = nil
+	}
 }
 
 func (to *LiveQPSearch) Debug(format string, a ...any) {
@@ -361,7 +380,7 @@ func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
 			// first step is to analyse source files for total number of frames, no candidate yet
 			return fmt.Sprintf("   Segment | #%d - Searching for best QP...", segmentIndex)
 		}
-		return fmt.Sprintf("   Segment | #%d - Searching for best QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ", "))
+		return fmt.Sprintf("   Segment | #%d - Searching for best QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
 	})
 }
 
@@ -473,24 +492,9 @@ func (to *LiveQPSearch) OnSegmentVMAFStop() {
 
 func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
 	// Clean up possible orphans child status
-	if to.segmentStatusLine != nil {
-		liveprogress.RemoveCustomLine(to.segmentStatusLine)
-		to.segmentStatusLine = nil
-	}
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
-		to.analysisProgressBar = nil
-	}
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
-		to.encodeProgressBar = nil
-	}
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
-		to.vmafProgressBar = nil
-	}
+	to.cleanupSegmentUI()
 	// Finished segment data
-	fmt.Fprintf(liveprogress.Bypass(), "Segment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
+	fmt.Fprintf(liveprogress.Bypass(), "\tSegment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
 		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
 	)
 	// Global progress

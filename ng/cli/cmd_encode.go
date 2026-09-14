@@ -203,6 +203,15 @@ var encodeCommand = &cli.Command{
 		if err := checkMKVPropEdit(ctx); err != nil {
 			return ctx, err
 		}
+		// Check requested encoder is available
+		encoders, err := ffmpeg.GetEncoders(ctx)
+		if err != nil {
+			return ctx, fmt.Errorf("failed to list ffmpeg encoders: %w", err)
+		}
+		requestedEncoder := cmd.String("encoder")
+		if !encoders.Has(requestedEncoder) {
+			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
+		}
 		// Input path argument
 		if cmd.Args().Len() != 1 {
 			return ctx, errors.New("only one input file is required")
@@ -268,6 +277,7 @@ var encodeCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
 		// create a temporary directory
 		workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
@@ -327,10 +337,12 @@ var encodeCommand = &cli.Command{
 			totalDuration time.Duration
 		)
 		if !inputInfos.IsDir() {
-			fmt.Fprintf(bypass, "Start encoding of %s (%s)\n",
+			fmt.Fprintf(bypass, "Starting split encoding of %s (%s) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				cunits.ImportInBytes(float64(inputInfos.Size())),
+				cmd.String("encoder"),
 			)
+			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n%s\n", vmafAuditor)
 			// create master
 			var (
 				masterFile string
@@ -375,11 +387,13 @@ var encodeCommand = &cli.Command{
 			}
 			totalDuration = sourceStats.Format.Duration
 		} else {
-			fmt.Fprintf(bypass, "Start encoding of split video files within %s\n\t(source: %s (%s))\n",
+			fmt.Fprintf(bypass, "Starting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				shellescape.Quote(filepath.Base(cmd.String("originalfile"))),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+				cmd.String("encoder"),
 			)
+			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n%s\n", vmafAuditor)
 			// get segments
 			if segmentsPaths, err = getSegmentsFromDir(inputPath); err != nil {
 				err = fmt.Errorf("Failed to get segments from directory: %w", err)
@@ -448,7 +462,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "DEBUG: Segments QPs: %+v\n", results.QPs)
 		}
 		minQP, maxQP := results.GetMinMaxQPs()
-		fmt.Fprintf(bypass, "\tSegment QP range: [%d,%d]\n", minQP, maxQP)
+		fmt.Fprintf(bypass, "\t***\n\tSegments QP range: [%d,%d]\n", minQP, maxQP)
 		if results.NbBestEfforts > 0 {
 			if results.NbBestEfforts == 1 {
 				fmt.Fprintln(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
@@ -543,7 +557,7 @@ var encodeCommand = &cli.Command{
 			return fmt.Errorf("failed to remux encoded video with original file: %w", err)
 		}
 		duration = time.Since(start)
-		fmt.Fprintf(bypass, "\tRemuxed to final file %s in %s\n", shellescape.Quote(filepath.Base(outputPath)), duration.Round(time.Second))
+		fmt.Fprintf(bypass, "\tRemuxed to final file %s in %s\n", shellescape.Quote(outputPath), duration.Round(time.Second))
 		finalFileSize, err := getFileSize(outputPath)
 		if err != nil {
 			fmt.Fprintf(bypass, "WARNING: failed to get final file size: %s\n", err)

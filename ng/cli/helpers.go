@@ -67,7 +67,7 @@ func isASCII(s string) bool {
 }
 
 func generateWorkingDirectoryPath(basePath string) string {
-	return filepath.Join(basePath, fmt.Sprintf("sptenc-%d", time.Now().Unix()))
+	return filepath.Join(basePath, fmt.Sprintf("sptenc-%d", time.Now().Nanosecond()))
 }
 
 func validateSceneThreshold(v float64) error {
