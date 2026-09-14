@@ -10,7 +10,7 @@ import (
 
 const (
 	titleTagKey               = "title"
-	titleTagValue             = "SptEncoded"
+	TitleTagValue             = "SptEncoded"
 	sptencURLTagKey           = "sptenc_url"
 	sptencVersionTagKey       = "sptenc_version"
 	sptencEncoderTagKey       = "sptenc_encoder"
@@ -43,7 +43,7 @@ const (
 	sptencVMAFResultMaxTagKey    = "sptenc_vmaf_result_max"
 )
 
-func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.Encoder, statsQP QPSearchResults, vmaf *ffmpeg.VMAFStats, vmafNEG, ultraHD bool) (flags ffmpeg.FFMEGTags) {
+func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.Encoder, statsQP QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool) (flags ffmpeg.FFMEGTags) {
 	flags = make(ffmpeg.FFMEGTags, 0, 54)
 	// Global
 	module, version := signature()
@@ -96,29 +96,27 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(vc.mean, 'f', -1, 64)))
 	}
 	//// VMAF results
-	if vmaf != nil {
-		flags = append(flags,
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Minimum, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP1TagKey, strconv.FormatFloat(vmaf.Percentile1, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP5TagKey, strconv.FormatFloat(vmaf.Percentile5, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP10TagKey, strconv.FormatFloat(vmaf.Percentile10, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP25TagKey, strconv.FormatFloat(vmaf.Percentile25, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMedianTagKey, strconv.FormatFloat(vmaf.Median, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultHMeanTagKey, strconv.FormatFloat(vmaf.HarmonicMean, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Mean, 'f', -1, 64)),
-			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Maximum, 'f', -1, 64)),
-		)
-	}
+	flags = append(flags,
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Minimum, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP1TagKey, strconv.FormatFloat(vmaf.Percentile1, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP5TagKey, strconv.FormatFloat(vmaf.Percentile5, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP10TagKey, strconv.FormatFloat(vmaf.Percentile10, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP25TagKey, strconv.FormatFloat(vmaf.Percentile25, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMedianTagKey, strconv.FormatFloat(vmaf.Median, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultHMeanTagKey, strconv.FormatFloat(vmaf.HarmonicMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Mean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Maximum, 'f', -1, 64)),
+	)
 	return
 }
 
 func computeNewTitle(tags map[string]string) (newTitle string) {
 	if tags != nil {
 		if oldTitle, ok := tags[titleTagKey]; ok {
-			return oldTitle + " [" + titleTagValue + "]"
+			return oldTitle + " [" + TitleTagValue + "]"
 		}
 	}
-	return titleTagValue
+	return TitleTagValue
 }
 
 func signature() (module, version string) {

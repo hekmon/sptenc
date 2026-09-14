@@ -337,7 +337,7 @@ var encodeCommand = &cli.Command{
 			if err = liveSplitScenes(ctx, masterFile, segmentsDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
-			fmt.Fprintf(bypass, "\tSplit %d scenes in %w",
+			fmt.Fprintf(bypass, "\tSplit %d scenes in %v",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
 			if segmentsPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
@@ -438,7 +438,7 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Segment QP range: %d - %d\n", minQP, maxQP)
 		if results.NbBestEfforts > 0 {
 			if results.NbBestEfforts == 1 {
-				fmt.Fprintln(bypass, "WARNING: %d segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
+				fmt.Fprintln(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
 			} else {
 				fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
 					results.NbBestEfforts,
@@ -485,10 +485,29 @@ var encodeCommand = &cli.Command{
 		}
 		duration = time.Since(start)
 		finalVMAFStats := finalVMAFreport.GetStats()
-		fmt.Fprintf(bypass, "Final VMAF computed in %s: %f\n", duration.Round(time.Second), finalVMAFStats)
+		fmt.Fprintf(bypass, "Final VMAF computed in %s: %s\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 5 - remux final file
-		// TODO
+		fmt.Fprintln(bypass, "Remuxing to final file...")
+		var originalFile string
+		if inputInfos.IsDir() {
+			originalFile = cmd.String("originalfile")
+		} else {
+			originalFile = inputPath
+		}
+		outputPath := computeFinalPath(originalFile, workingDir, ffmpeg.Encoder(cmd.String("encoder")))
+		encodeToFlac := core.AllAudioTracksPCM(sourceStats)
+		if encodeToFlac {
+			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
+		}
+		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String("encoder")),
+			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.UltraHDHeight)
+		start = time.Now()
+		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags, totalDuration, cmd.Bool(debugFlagName)); err != nil {
+			return fmt.Errorf("failed to remux encoded video with original file: %w", err)
+		}
+		duration = time.Since(start)
+		fmt.Fprintf(bypass, "Remuxed to final file %s in %s\n", shellescape.Quote(filepath.Base(outputPath)), duration.Round(time.Second))
 
 		// Step 6 - regen mkv stats
 		// TODO

@@ -135,3 +135,10 @@ func getFileSize(path string) (size cunits.Bits, err error) {
 	size = cunits.ImportInBytes(float64(info.Size()))
 	return
 }
+
+func computeFinalPath(input, outputDir string, encoder ffmpeg.Encoder) (final string) {
+	baseName, _ := extractFileNameInfos(input)
+	final = filepath.Join(outputDir,
+		fmt.Sprintf("%s [%s %s].mkv", baseName, encoder, core.TitleTagValue))
+	return
+}

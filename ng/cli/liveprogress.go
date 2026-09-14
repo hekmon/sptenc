@@ -580,3 +580,44 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		FFMPEGStatsReport: progress,
 	})
 }
+
+func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputFile string, encodeToFLAC bool, tags ffmpeg.FFMEGTags, expectedDuration time.Duration, debug bool) (err error) {
+	var currentStats ffmpeg.ProgressStats
+	remuxBar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(expectedDuration)),
+		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "   Remuxing | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(remuxBar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		currentStats = stats
+		remuxBar.CurrentSet(uint64(stats.Time))
+	}
+	return ffmpeg.RemuxSwapVideo(ctx, ffmpeg.RemuxSwapVideoConfig{
+		OriginalFile:   originalFile,
+		NewVideoFile:   newVideoFile,
+		OutputFilePath: outputFile,
+		EncodeToFLAC:   encodeToFLAC,
+		Tags:           tags,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
+}
