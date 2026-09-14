@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ng/mkvtoolnix"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/urfave/cli/v3"
@@ -55,6 +56,12 @@ func main() {
 				Value:    ffmpeg.FFProbeBinary,
 				OnlyOnce: true,
 			},
+			&cli.StringFlag{
+				Name:     "mkvpropeditpath",
+				Usage:    "mkvpropedit binary path",
+				Value:    mkvtoolnix.MKVPropEdit,
+				OnlyOnce: true,
+			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			if cmd.String("ffmpegpath") != ffmpeg.FFMPEGBinary {
@@ -67,6 +74,12 @@ func main() {
 				ffmpeg.FFProbeBinary = cmd.String("ffprobepath")
 				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom ffprobe path\n", shellescape.Quote(ffmpeg.FFProbeBinary))
+				}
+			}
+			if cmd.String("mkvpropeditpath") != mkvtoolnix.MKVPropEdit {
+				mkvtoolnix.MKVPropEdit = cmd.String("mkvpropeditpath")
+				if cmd.Bool(debugFlagName) {
+					fmt.Printf("DEBUG: using %s as custom mkvpropedit path\n", shellescape.Quote(mkvtoolnix.MKVPropEdit))
 				}
 			}
 			return ctx, nil

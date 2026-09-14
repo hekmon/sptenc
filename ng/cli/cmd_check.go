@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ng/mkvtoolnix"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
@@ -17,7 +18,7 @@ var checkCommand = &cli.Command{
 	Name:        "check",
 	Aliases:     []string{"c"},
 	Usage:       "Verify third-party tools are present and usable",
-	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf) and ffprobe",
+	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf), ffprobe and mkvpropedit",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")
@@ -26,6 +27,7 @@ var checkCommand = &cli.Command{
 		var (
 			ffprobeOK      bool
 			ffmpegOK       bool
+			mkvpropeditOK  bool
 			hasLibvmaf     bool
 			hasLibvmafCUDA bool
 			hasAnyHEVC     bool
@@ -37,6 +39,12 @@ var checkCommand = &cli.Command{
 			ffprobeOK = true
 		}
 		ffprobeRows := buildTableRows(ffprobeVersion.Version, ffprobeErr, nil)
+		// Check mkvpropedit
+		mkvpropeditVersion, mkvpropeditErr := mkvtoolnix.GetMKVPropEditVersion(ctx)
+		if mkvpropeditErr == nil {
+			mkvpropeditOK = true
+		}
+		mkvpropeditRows := buildTableRows(mkvpropeditVersion, mkvpropeditErr, nil)
 		// Check ffmpeg
 		ffmpegVersion, ffmpegErr := ffmpeg.GetFFMPEGVersion(ctx)
 		var ffmpegDetails [][2]string
@@ -79,11 +87,12 @@ var checkCommand = &cli.Command{
 		}
 		ffmpegRows := buildTableRows(ffmpegVersion.Version, ffmpegErr, ffmpegDetails)
 		// Compute common label width across all tables
-		maxLabelWidth := maxLabelLen(ffprobeRows, ffmpegRows)
+		maxLabelWidth := maxLabelLen(ffprobeRows, mkvpropeditRows, ffmpegRows)
 		renderCheckTable("🔍  ffprobe", ffprobeRows, maxLabelWidth)
+		renderCheckTable("📦  mkvpropedit", mkvpropeditRows, maxLabelWidth)
 		renderCheckTable("🎬  ffmpeg", ffmpegRows, maxLabelWidth)
 		// Determine status
-		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasAnyHEVC || hasAnyAV1)
+		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, mkvpropeditOK, hasLibvmaf, hasAnyHEVC || hasAnyAV1)
 		fmt.Printf("\n  Status: %s %s\n\n", statusEmoji, status)
 		if status == "not ok" {
 			return fmt.Errorf("one or more required tools are missing or misconfigured")
@@ -92,8 +101,8 @@ var checkCommand = &cli.Command{
 	},
 }
 
-func computeStatus(ffprobeOK, ffmpegOK, hasLibvmaf, hasAnyEncoder bool) (status, emoji string) {
-	if !ffprobeOK || !ffmpegOK || !hasLibvmaf || !hasAnyEncoder {
+func computeStatus(ffprobeOK, ffmpegOK, mkvpropeditOK, hasLibvmaf, hasAnyEncoder bool) (status, emoji string) {
+	if !ffprobeOK || !ffmpegOK || !mkvpropeditOK || !hasLibvmaf || !hasAnyEncoder {
 		return "not ok", "❌"
 	}
 	return "ok", "✅"
@@ -140,7 +149,7 @@ func renderCheckTable(name string, rows [][2]string, labelWidth int) {
 		})),
 		tablewriter.WithConfig(tablewriter.Config{
 			Row: tw.CellConfig{
-				Alignment: tw.CellAlignment{PerColumn: []tw.Align{tw.AlignLeft, tw.AlignCenter}},
+				Alignment: tw.CellAlignment{PerColumn: []tw.Align{tw.AlignLeft, tw.AlignLeft}},
 				Formatting: tw.CellFormatting{
 					AutoWrap: tw.WrapNone,
 				},
