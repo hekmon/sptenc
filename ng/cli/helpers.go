@@ -22,6 +22,7 @@ type ctxKey string
 const (
 	inputFileSizeCtxKey  ctxKey = "inputsize"
 	inputFileInfosCtxKey ctxKey = "fileInfos"
+	outputDirCtxKey      ctxKey = "outputdir"
 )
 
 func checkFFMPEG(ctx context.Context) error {

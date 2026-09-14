@@ -63,7 +63,7 @@ var encodeCommand = &cli.Command{
 			Name:     "outputdir",
 			Aliases:  []string{"o"},
 			Usage:    "Output directory",
-			Value:    ".",
+			Value:    "",
 			OnlyOnce: true,
 			Category: "Directories",
 		},
@@ -216,6 +216,7 @@ var encodeCommand = &cli.Command{
 			if !fileInfos.Mode().IsRegular() {
 				return ctx, errors.New("input path must be a directory or a regular file")
 			}
+			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		} else {
 			// Directory input: need original file for remuxing audio/subs
 			if cmd.String("originalfile") == "" {
@@ -229,13 +230,18 @@ var encodeCommand = &cli.Command{
 			}
 			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		}
-		// Check Output directory
-		if fileInfos, err = os.Stat(cmd.String("outputdir")); err != nil {
+		// Resolve and check output directory
+		outputDir := cmd.String("outputdir")
+		if outputDir == "" {
+			outputDir = filepath.Dir(cmd.Args().First())
+		}
+		if fileInfos, err = os.Stat(outputDir); err != nil {
 			return ctx, fmt.Errorf("failed to access output directory: %w", err)
 		}
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("output directory path must be a directory")
 		}
+		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String("statscachedir"), 0755); err != nil {
 			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
@@ -506,7 +512,7 @@ var encodeCommand = &cli.Command{
 		} else {
 			originalFile = inputPath
 		}
-		outputPath := computeFinalPath(originalFile, cmd.String("outputdir"), ffmpeg.Encoder(cmd.String("encoder")))
+		outputPath := computeFinalPath(originalFile, ctx.Value(outputDirCtxKey).(string), ffmpeg.Encoder(cmd.String("encoder")))
 		// Determine whether to auto-convert audio to FLAC.
 		// sourceStats was probed from either the input file (single file) or the first segment (directory).
 		// Probe originalFile directly to get the correct audio stream info in both cases.

@@ -24,7 +24,7 @@ var masterCommand = &cli.Command{
 			Name:     "outputdir",
 			Aliases:  []string{"o"},
 			Usage:    "Output directory",
-			Value:    ".",
+			Value:    "",
 			OnlyOnce: true,
 		},
 	},
@@ -54,13 +54,18 @@ var masterCommand = &cli.Command{
 			return ctx, errors.New("input file must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
-		// Check Output directory
-		if fileInfos, err = os.Stat(cmd.String("outputdir")); err != nil {
+		// Resolve and check output directory
+		outputDir := cmd.String("outputdir")
+		if outputDir == "" {
+			outputDir = filepath.Dir(cmd.Args().First())
+		}
+		if fileInfos, err = os.Stat(outputDir); err != nil {
 			return ctx, fmt.Errorf("failed to access output directory: %w", err)
 		}
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("output directory path must be a directory")
 		}
+		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -76,7 +81,7 @@ var masterCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		// create master
-		_, _, err = createMaster(ctx, inputFilePath, cmd.String("outputdir"), cmd.Bool(debugFlagName))
+		_, _, err = createMaster(ctx, inputFilePath, ctx.Value(outputDirCtxKey).(string), cmd.Bool(debugFlagName))
 		return
 	},
 }
