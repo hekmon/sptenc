@@ -520,7 +520,14 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Remuxed to final file %s in %s\n", shellescape.Quote(filepath.Base(outputPath)), duration.Round(time.Second))
 
 		// Step 6 - regen mkv stats
-		// TODO
+		fmt.Fprintln(bypass, "Regenerating MKV statistics tags...")
+		start = time.Now()
+		if err = liveGenerateMKVStats(ctx, outputPath, cmd.Bool(debugFlagName)); err != nil {
+			err = fmt.Errorf("failed to regenerate MKV statistics tags: %w", err)
+			return
+		}
+		duration = time.Since(start)
+		fmt.Fprintf(bypass, "MKV statistics tags regenerated in %s\n", duration.Round(time.Second))
 
 		// TODO, check how to keep HDR if present
 		return

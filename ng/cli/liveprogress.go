@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ng/mkvtoolnix"
 
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
@@ -619,5 +620,34 @@ func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputF
 			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
 		},
 		FFMPEGStatsReport: progress,
+	})
+}
+
+func liveGenerateMKVStats(ctx context.Context, outputPath string, debug bool) (err error) {
+	mkvStatsBar := liveprogress.AddBar(
+		liveprogress.WithTotal(100),
+		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " MKV Stats | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+	)
+	defer liveprogress.RemoveBar(mkvStatsBar)
+	return mkvtoolnix.GenerateMKVStats(ctx, mkvtoolnix.GenerateMKVStatsConfig{
+		Path: outputPath,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		ProgressReport: func(percent int) {
+			mkvStatsBar.CurrentSet(uint64(percent))
+		},
 	})
 }
