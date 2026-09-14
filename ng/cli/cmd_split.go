@@ -183,13 +183,13 @@ var splitCommand = &cli.Command{
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
 		fmt.Fprintf(liveprogress.Bypass(), "\tDetected %d scenes in %s\n",
-			len(scenes), time.Since(start).Round(time.Second),
+			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 		if cmd.Bool("analyze") {
 			if !cmd.Bool(debugFlagName) {
 				for i, scene := range scenes {
 					fmt.Fprintf(liveprogress.Bypass(), "Scene #%d at %s with score %s\n",
-						i+1, scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64),
+						2+i, scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64),
 					)
 				}
 			}
@@ -203,7 +203,7 @@ var splitCommand = &cli.Command{
 			return fmt.Errorf("failed to split scenes: %w", err)
 		}
 		fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %s\n",
-			len(scenes), time.Since(start).Round(time.Second),
+			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 
 		return

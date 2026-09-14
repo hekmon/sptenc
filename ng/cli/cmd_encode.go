@@ -382,7 +382,7 @@ var encodeCommand = &cli.Command{
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
-				len(scenes), time.Since(start).Round(time.Second),
+				1+len(scenes), time.Since(start).Round(time.Second),
 			)
 			// Build segment paths directly from known naming convention rather than
 			// scanning the directory, which avoids filesystem ordering issues.
