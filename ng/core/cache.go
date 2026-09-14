@@ -18,11 +18,12 @@ import (
 	"gonum.org/v1/gonum/stat"
 )
 
-// NewStatsCacheHistory initializes a stats cache for the given encoder and VMAF profile.
-// It loads any existing cache from disk or starts with an empty history.
-func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFChecker) (sch *StatsCacheHistory, err error) {
+// NewStatsCacheHistory initializes a stats cache for the given encoder, VMAF profile,
+// and optional user-provided cache profile. It loads any existing cache from disk or
+// starts with an empty history.
+func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFChecker, cacheProfile string) (sch *StatsCacheHistory, err error) {
 	sch = &StatsCacheHistory{
-		path: filepath.Join(dir, computeCacheStatsFileName(encoder, profile)),
+		path: filepath.Join(dir, computeCacheStatsFileName(encoder, profile, cacheProfile)),
 	}
 	var found bool
 	if sch.qpMin, sch.qpMax, found = ffmpeg.GetEncoderQPRange(encoder); !found {
@@ -148,7 +149,7 @@ func (sch *StatsCacheHistory) saveStats() error {
 	return enc.Encode(sch.stats)
 }
 
-func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) string {
+func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker, cacheProfile string) string {
 	var builder bytes.Buffer
 	builder.WriteString(strconv.FormatFloat(profile.min, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.p1, 'f', -1, 64))
@@ -158,5 +159,9 @@ func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) stri
 	builder.WriteString(strconv.FormatFloat(profile.median, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
-	return fmt.Sprintf("qphistory_%s_vmaf-%s.json", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	filename := fmt.Sprintf("qphistory_%s_vmaf-%s", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	if cacheProfile != "" {
+		filename += "_" + base64.RawURLEncoding.EncodeToString([]byte(cacheProfile))
+	}
+	return filename + ".json"
 }
