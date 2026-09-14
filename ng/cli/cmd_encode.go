@@ -318,6 +318,8 @@ var encodeCommand = &cli.Command{
 		 * Execute process
 		 */
 
+		globalStart := time.Now()
+
 		// Step 1 - Segments and media infos
 		var (
 			segmentsPaths []string
@@ -413,6 +415,7 @@ var encodeCommand = &cli.Command{
 		}
 
 		// Step 2 - Encode segments
+		fmt.Fprintln(bypass, "Finding optimal QP for segments...")
 		lqps := &LiveQPSearch{
 			PrintDebug: cmd.Bool(debugFlagName),
 		}
@@ -441,23 +444,11 @@ var encodeCommand = &cli.Command{
 		duration := time.Since(start)
 		lqps.Stop()
 		// Print stats
-		fmt.Fprintf(bypass, "Segments QPs: %+v\n", results.QPs)
-		fmt.Fprintf(bypass, "%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
-			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
-		)
-		fmt.Fprintf(bypass, "Attempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentsPaths)))
-		fmt.Fprintf(bypass, "Frames ratio: x%02f\n", float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames))
-		segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
-		if err != nil {
-			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
-			err = nil
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Segments QPs: %+v\n", results.QPs)
 		}
-		fmt.Fprintf(bypass, "Segment QP mean is %s with a standard deviation of %s.\n",
-			strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
-		)
-		fmt.Fprintf(bypass, "Weighted global QP is %s.\n", strconv.FormatFloat(results.GlobalWeightedQP, 'f', -1, 64))
 		minQP, maxQP := results.GetMinMaxQPs()
-		fmt.Fprintf(bypass, "Segment QP range: %d - %d\n", minQP, maxQP)
+		fmt.Fprintf(bypass, "\tSegment QP range: [%d,%d]\n", minQP, maxQP)
 		if results.NbBestEfforts > 0 {
 			if results.NbBestEfforts == 1 {
 				fmt.Fprintln(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
@@ -467,7 +458,21 @@ var encodeCommand = &cli.Command{
 				)
 			}
 		}
-		fmt.Fprintf(bypass, "Segments encoding QP search done in %s.\n", duration.Round(time.Second))
+		segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
+		if err != nil {
+			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
+			err = nil
+		}
+		fmt.Fprintf(bypass, "\tSegment QP mean is %s with a standard deviation of %s.\n",
+			strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
+		)
+		fmt.Fprintf(bypass, "\tWeighted global QP is %s.\n", strconv.FormatFloat(results.GlobalWeightedQP, 'f', -1, 64))
+		fmt.Fprintf(bypass, "\t%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
+			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
+		)
+		fmt.Fprintf(bypass, "\tAttempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentsPaths)))
+		fmt.Fprintf(bypass, "\tFrames ratio: x%02f\n", float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames))
+		fmt.Fprintf(bypass, "\tSegments encoding QP search done in %s.\n", duration.Round(time.Second))
 
 		// Step 3 - merging
 		fmt.Fprintln(bypass, "Merging segments...")
@@ -478,7 +483,7 @@ var encodeCommand = &cli.Command{
 			return
 		}
 		duration = time.Since(start)
-		fmt.Fprintf(bypass, "Encoded segments merged in %s.\n", duration.Round(time.Second))
+		fmt.Fprintf(bypass, "\tEncoded segments merged in %s.\n", duration.Round(time.Second))
 		var vmafSource string
 		if inputInfos.IsDir() {
 			fmt.Fprintln(bypass, "Merging source segments...")
@@ -507,7 +512,7 @@ var encodeCommand = &cli.Command{
 		}
 		duration = time.Since(start)
 		finalVMAFStats := finalVMAFreport.GetStats()
-		fmt.Fprintf(bypass, "Final VMAF computed in %s: %s\n", duration.Round(time.Second), finalVMAFStats)
+		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n%s", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 5 - remux final file
 		fmt.Fprintln(bypass, "Remuxing to final file...")
@@ -538,7 +543,7 @@ var encodeCommand = &cli.Command{
 			return fmt.Errorf("failed to remux encoded video with original file: %w", err)
 		}
 		duration = time.Since(start)
-		fmt.Fprintf(bypass, "Remuxed to final file %s in %s\n", shellescape.Quote(filepath.Base(outputPath)), duration.Round(time.Second))
+		fmt.Fprintf(bypass, "\tRemuxed to final file %s in %s\n", shellescape.Quote(filepath.Base(outputPath)), duration.Round(time.Second))
 		finalFileSize, err := getFileSize(outputPath)
 		if err != nil {
 			fmt.Fprintf(bypass, "WARNING: failed to get final file size: %s\n", err)
@@ -550,10 +555,10 @@ var encodeCommand = &cli.Command{
 				sizeReduction := originalSize - finalFileSize
 				compressionRatio := float64(sizeReduction) / float64(originalSize) * 100
 				if inputInfos.IsDir() {
-					fmt.Fprintf(bypass, "Compression (source video from segments vs final remux incl. audio/subtitles): %s -> %s (%s change, %s)\n",
+					fmt.Fprintf(bypass, "\tCompression (source video from segments vs final remux incl. audio/subtitles): %s -> %s (%s change, %s)\n",
 						originalSize, finalFileSize, formatPercent(compressionRatio), sizeReduction)
 				} else {
-					fmt.Fprintf(bypass, "Compression: %s -> %s (%s reduction, %s saved)\n",
+					fmt.Fprintf(bypass, "\tCompression: %s -> %s (%s reduction, %s saved)\n",
 						originalSize, finalFileSize, formatPercent(compressionRatio), sizeReduction)
 				}
 			}
@@ -567,7 +572,7 @@ var encodeCommand = &cli.Command{
 			return
 		}
 		duration = time.Since(start)
-		fmt.Fprintf(bypass, "MKV statistics tags regenerated in %s\n", duration.Round(time.Second))
+		fmt.Fprintf(bypass, "\tMKV statistics tags regenerated in %s\n", duration.Round(time.Second))
 
 		// Verify container-level color metadata was propagated correctly.
 		// Bitstream-level HDR SEIs (mastering display, content light level)
@@ -590,8 +595,16 @@ var encodeCommand = &cli.Command{
 				if videoStream.ColorPrimaries != "" && outStream.ColorPrimaries != videoStream.ColorPrimaries {
 					fmt.Fprintf(bypass, "WARNING: output color_primaries (%s) does not match source (%s)\n", outStream.ColorPrimaries, videoStream.ColorPrimaries)
 				}
+			} else {
+				fmt.Fprintf(bypass, "WARNING: output file has no video stream, can not verify color metadata\n")
 			}
+		} else {
+			fmt.Fprintf(bypass, "WARNING: could not verify output color metadata: %s\n", err)
 		}
+
+		// Done
+		duration = time.Since(globalStart)
+		fmt.Fprintf(bypass, "Complete split encoding took %s\n", duration.Round(time.Millisecond))
 		return
 	},
 }

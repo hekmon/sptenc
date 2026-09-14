@@ -357,7 +357,11 @@ func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
 	to.segmentStatusLine = liveprogress.AddCustomLine(func() string {
 		to.segmentCandidatesAccess.Lock()
 		defer to.segmentCandidatesAccess.Unlock()
-		return fmt.Sprintf("   Segment | #%d - Searching for QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
+		if len(to.segmentCandidates) == 0 {
+			// first step is to analyse source files for total number of frames, no candidate yet
+			return fmt.Sprintf("   Segment | #%d - Searching for best QP...", segmentIndex)
+		}
+		return fmt.Sprintf("   Segment | #%d - Searching for best QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ", "))
 	})
 }
 
