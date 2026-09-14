@@ -23,7 +23,7 @@ var encodeCommand = &cli.Command{
 	Name:    "encode",
 	Aliases: []string{"e"},
 	Usage:   "Encode video segments to meet perceptual quality targets at minimal file size",
-	Description: fmt.Sprintf("The input path can be provided in two forms:\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command). If using your own segments, make sure every file have the same codec and frame rate!\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size). See the check command for encoder availability.\n%s%s",
+	Description: fmt.Sprintf("The input path can be provided in two forms:\n* single video file: sptenc will first create a lossless FFV1 master and split it into scene-aligned segments using the given threshold before encoding (one shot process)\n* pre-split video files: every video file within the pointed directory will be treated as already segmented scenes and used directly for the encode phase (see the split command). If using your own segments, make sure every file have the same codec and frame rate!\n\nEach VMAF metric flag sets the minimum acceptable VMAF score (%d-%d) for that statistic. If a segment encoding falls below any enabled threshold, it is considered invalid and re-encoded at a lower QP. Set a value to %d to disable that metric.\nVMAF NEG (No Enhancement Gain) models are alternative VMAF model variants recommended when the source has undergone upscaling, sharpening, or denoising, as these can artificially inflate standard VMAF scores. NEG models provide more conservative scoring by ignoring enhancement gains, so expect lower scores. Use the --vmafneg flag to enable them.\n\nAUDIO\nIf all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically losslessly compressed to FLAC during the final remux step. This reduces file size without any quality loss, consistent with sptenc's goal of smallest file size at guaranteed perceptual quality.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size). See the check command for encoder availability.\n%s%s",
 		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue, renderHEVCEncodersTable(), renderAV1EncodersTable()),
 	Flags: []cli.Flag{
 		// encoding
@@ -216,7 +216,8 @@ var encodeCommand = &cli.Command{
 			if !fileInfos.Mode().IsRegular() {
 				return ctx, errors.New("input path must be a directory or a regular file")
 			}
-			// if input is dir, we need the originalfile to be set
+		} else {
+			// Directory input: need original file for remuxing audio/subs
 			if cmd.String("originalfile") == "" {
 				return ctx, errors.New("when input path is a directory, you must specify the --originalfile flag")
 			}
@@ -506,7 +507,15 @@ var encodeCommand = &cli.Command{
 			originalFile = inputPath
 		}
 		outputPath := computeFinalPath(originalFile, cmd.String("outputdir"), ffmpeg.Encoder(cmd.String("encoder")))
-		encodeToFlac := core.AllAudioTracksPCM(sourceStats)
+		// Determine whether to auto-convert audio to FLAC.
+		// sourceStats was probed from either the input file (single file) or the first segment (directory).
+		// Probe originalFile directly to get the correct audio stream info in both cases.
+		var encodeToFlac bool
+		if originalStats, err := getStreamsInfos(ctx, originalFile, cmd.Bool(debugFlagName)); err == nil {
+			encodeToFlac = core.AllAudioTracksPCM(originalStats)
+		} else {
+			fmt.Fprintf(bypass, "WARNING: failed to probe original file for audio, skipping FLAC check: %s\n", err)
+		}
 		if encodeToFlac {
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
