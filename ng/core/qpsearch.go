@@ -10,7 +10,6 @@ import (
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 
 	"al.essio.dev/pkg/shellescape"
-	"github.com/hekmon/cunits/v3"
 )
 
 const (
@@ -28,8 +27,8 @@ type QPSearchCallbacks interface {
 	// Segment lifecycle
 	OnSegmentStart(segmentIndex int, segmentPath string)
 	OnSegmentNewCandidate(qpCandidate int)
-	OnSegmentAnalysisStart(fileSize cunits.Bits)
-	OnSegmentAnalysisProgress(read cunits.Bits) // not total, additionnal
+	OnSegmentAnalysisStart(fileSize int64)
+	OnSegmentAnalysisProgress(read int64) // not total, additionnal
 	OnSegmentAnalysisStop()
 	OnSegmentEncodeStart(totalFrames int)
 	OnSegmentEncodeProgress(stats ffmpeg.ProgressStats)
@@ -37,7 +36,7 @@ type QPSearchCallbacks interface {
 	OnSegmentVMAFStart(totalFrames int)
 	OnSegmentVMAFProgress(stats ffmpeg.ProgressStats)
 	OnSegmentVMAFStop()
-	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits)
+	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
 }
 
 // QPSearchConfig holds the invariants for a QP search run.
@@ -119,7 +118,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 		segmentDuration, doneDuration time.Duration
 		segmentFrames                 int
 		segmentQP, segmentWeights     int
-		segmentSize, allSegmentSize   cunits.Bits
+		segmentSize, allSegmentSize   int64
 		segmentNbAttempts             int
 		bestEffort                    bool
 	)
@@ -235,7 +234,7 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 		return
 	}
 	// Prepare signals
-	scb.OnSegmentAnalysisStart(cunits.ImportInBytes(float64(fileInfos.Size())))
+	scb.OnSegmentAnalysisStart(fileInfos.Size())
 	defer scb.OnSegmentAnalysisStop()
 	// Start analysis
 	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
@@ -249,7 +248,7 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 			RuntimeError: scb.Error,
 		},
 		ReadBytesReport: func(bytesRead int) {
-			scb.OnSegmentAnalysisProgress(cunits.ImportInBytes(float64(bytesRead)))
+			scb.OnSegmentAnalysisProgress(int64(bytesRead))
 		},
 	})
 }

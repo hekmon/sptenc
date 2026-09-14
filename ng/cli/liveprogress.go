@@ -390,7 +390,7 @@ func (to *LiveQPSearch) OnSegmentNewCandidate(qpCandidate int) {
 	to.segmentCandidatesAccess.Unlock()
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize cunits.Bits) {
+func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize int64) {
 	if to.analysisProgressBar != nil {
 		liveprogress.RemoveBar(to.analysisProgressBar)
 	}
@@ -405,13 +405,13 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize cunits.Bits) {
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			return fmt.Sprintf(" | %s/%s",
-				cunits.Bits(bar.Current()), cunits.Bits(bar.Total()),
+				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
 			)
 		}),
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisProgress(newRead cunits.Bits) {
+func (to *LiveQPSearch) OnSegmentAnalysisProgress(newRead int64) {
 	if to.analysisProgressBar != nil {
 		to.analysisProgressBar.CurrentAdd(uint64(newRead))
 	}
@@ -490,7 +490,7 @@ func (to *LiveQPSearch) OnSegmentVMAFStop() {
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize cunits.Bits) {
+func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
 	// Clean up possible orphans child status
 	to.cleanupSegmentUI()
 	// Finished segment data
@@ -502,7 +502,7 @@ func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAt
 		to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
 	}
 	to.globalNbSegmentsDone++
-	to.globalAllSegmentSize = currentTotalSize
+	to.globalAllSegmentSize = cunits.ImportInBytes(float64(currentTotalSize))
 }
 
 func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, totalFrames int, debug bool) (err error) {

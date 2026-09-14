@@ -13,8 +13,6 @@ import (
 	"github.com/hekmon/sptenc/ng/core"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
 	"github.com/hekmon/sptenc/ng/mkvtoolnix"
-
-	"github.com/hekmon/cunits/v3"
 )
 
 type ctxKey string
@@ -153,13 +151,13 @@ func getSegmentsTotalDuration(ctx context.Context, segmentPaths []string, debug 
 	return
 }
 
-func getFileSize(path string) (size cunits.Bits, err error) {
+func getFileSize(path string) (size int64, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		err = fmt.Errorf("failed to stat path: %w", err)
 		return
 	}
-	size = cunits.ImportInBytes(float64(info.Size()))
+	size = info.Size()
 	return
 }
 

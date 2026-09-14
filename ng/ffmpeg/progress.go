@@ -10,17 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/hekmon/cunits/v3"
 )
 
 // ProgressStats holds the parsed progress information from an ffmpeg encode or extraction.
 type ProgressStats struct {
 	CurrentFrame int
 	FPS          float64
-	Dup          int         // images extract only
-	Drop         int         // images extract only
-	Size         cunits.Bits // encode only
+	Dup          int // images extract only
+	Drop         int // images extract only
 	Time         time.Duration
 	Bitrate      string // encode only
 	Speed        float64
@@ -94,11 +91,6 @@ func parseProgressStats(line string) (stats ProgressStats, err error) {
 		case "drop":
 			if stats.Drop, err = strconv.Atoi(value); err != nil {
 				err = fmt.Errorf("error parsing value for current key %q: %w", currentKey, err)
-			}
-		case "size":
-			value = strings.ReplaceAll(value, "kB", "KB") // unix fix
-			if stats.Size, err = cunits.Parse(value); err != nil {
-				err = fmt.Errorf("error parsing value for current key %q value %q: %w", currentKey, value, err)
 			}
 		case "time":
 			timeFields := strings.Split(value, ":")

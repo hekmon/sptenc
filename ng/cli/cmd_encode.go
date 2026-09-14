@@ -570,10 +570,14 @@ var encodeCommand = &cli.Command{
 				compressionRatio := float64(sizeReduction) / float64(originalSize) * 100
 				if inputInfos.IsDir() {
 					fmt.Fprintf(bypass, "\tCompression (source video from segments vs final remux incl. audio/subtitles): %s -> %s (%s change, %s)\n",
-						originalSize, finalFileSize, formatPercent(compressionRatio), sizeReduction)
+						cunits.ImportInBytes(float64(originalSize)), cunits.ImportInBytes(float64(finalFileSize)),
+						formatPercent(compressionRatio), cunits.ImportInBytes(float64(sizeReduction)),
+					)
 				} else {
 					fmt.Fprintf(bypass, "\tCompression: %s -> %s (%s reduction, %s saved)\n",
-						originalSize, finalFileSize, formatPercent(compressionRatio), sizeReduction)
+						cunits.ImportInBytes(float64(originalSize)), cunits.ImportInBytes(float64(finalFileSize)),
+						formatPercent(compressionRatio), cunits.ImportInBytes(float64(sizeReduction)),
+					)
 				}
 			}
 		}
