@@ -547,7 +547,9 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "      VMAF | "
 		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
 		}),
