@@ -58,3 +58,6 @@ func GetEncoderQPRange(encoder Encoder) (qpMin, qpMax int, found bool) {
 		return
 	}
 }
+
+// FFMEGTags is a list of FFMPEG tags (cli flag + value)
+type FFMEGTags []string

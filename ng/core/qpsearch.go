@@ -15,6 +15,8 @@ import (
 
 const (
 	segEncodedOutputFormat = "seg_%d_qp%d.mkv"
+	libx265Preset          = ffmpeg.Libx265PresetSlow
+	nvEncPreset            = ffmpeg.NVEncPresetP7
 )
 
 // QPSearchCallbacks is implemented by the caller to observe and present the search process.
@@ -88,6 +90,26 @@ type QPSearchResults struct {
 	TotalEncodedFrames int
 	// NbBestEfforts is the number of segments that stop at the minimum QP without reaching the target VMAF profile.
 	NbBestEfforts int
+}
+
+func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
+	switch len(qpsr.QPs) {
+	case 0:
+		return -1, -1
+	case 1:
+		return qpsr.QPs[0], qpsr.QPs[0]
+	default:
+		minQP, maxQP = qpsr.QPs[0], qpsr.QPs[0]
+		for _, qp := range qpsr.QPs[1:] {
+			if qp < minQP {
+				minQP = qp
+			}
+			if qp > maxQP {
+				maxQP = qp
+			}
+		}
+		return
+	}
 }
 
 // FindAllSegmentsQP searches for the optimal QP for each segment.
@@ -461,7 +483,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	case ffmpeg.HEVCEncoderLibx265:
 		err = ffmpeg.HEVCLibx265EncodeQP(ctx, ffmpeg.HEVCLibx265EncodeQPConfig{
 			Input:        input,
-			Preset:       ffmpeg.Libx265PresetSlow,
+			Preset:       libx265Preset,
 			Quantization: qp,
 			Output:       output,
 			Debug: func(msg string) {
@@ -474,7 +496,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		err = ffmpeg.HEVCNVEncEncodeQP(ctx, ffmpeg.HEVCNVEncEncodeQPConfig{
 			Input:        input,
 			Device:       config.NVIDIAGPUIndex,
-			Preset:       ffmpeg.NVEncPresetP7,
+			Preset:       nvEncPreset,
 			Quantization: qp,
 			Output:       output,
 			Debug: func(msg string) {
@@ -536,7 +558,7 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		err = ffmpeg.AV1NVEncEncodeQP(ctx, ffmpeg.AV1NVEncEncodeQPConfig{
 			Input:        input,
 			Device:       config.NVIDIAGPUIndex,
-			Preset:       ffmpeg.NVEncPresetP7,
+			Preset:       nvEncPreset,
 			Quantization: qp,
 			Output:       output,
 			Debug: func(msg string) {
