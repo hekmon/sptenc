@@ -513,7 +513,8 @@ var encodeCommand = &cli.Command{
 		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String("encoder")),
 			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.UltraHDHeight)
 		start = time.Now()
-		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags, totalDuration, cmd.Bool(debugFlagName)); err != nil {
+		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
+			totalDuration, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to remux encoded video with original file: %w", err)
 		}
 		duration = time.Since(start)
@@ -529,7 +530,29 @@ var encodeCommand = &cli.Command{
 		duration = time.Since(start)
 		fmt.Fprintf(bypass, "MKV statistics tags regenerated in %s\n", duration.Round(time.Second))
 
-		// TODO, check how to keep HDR if present
+		// Verify container-level color metadata was propagated correctly.
+		// Bitstream-level HDR SEIs (mastering display, content light level)
+		// are the encoder's responsibility and are verified implicitly by
+		// the -c:v copy remux; this check only validates the Matroska
+		// Colour elements we explicitly injected.
+		// If this fails (e.g. due to an ffmpeg muxer regression), a future
+		// fallback could use mkvpropedit to fix the container tags.
+		if outputStats, err := getStreamsInfos(ctx, outputPath, cmd.Bool(debugFlagName)); err == nil {
+			if outStream := outputStats.VideoTrack(); outStream != nil {
+				if videoStream.ColorRange != "" && outStream.ColorRange != videoStream.ColorRange {
+					fmt.Fprintf(bypass, "WARNING: output color_range (%s) does not match source (%s)\n", outStream.ColorRange, videoStream.ColorRange)
+				}
+				if videoStream.ColorSpace != "" && outStream.ColorSpace != videoStream.ColorSpace {
+					fmt.Fprintf(bypass, "WARNING: output colorspace (%s) does not match source (%s)\n", outStream.ColorSpace, videoStream.ColorSpace)
+				}
+				if videoStream.ColorTransfer != "" && outStream.ColorTransfer != videoStream.ColorTransfer {
+					fmt.Fprintf(bypass, "WARNING: output color_trc (%s) does not match source (%s)\n", outStream.ColorTransfer, videoStream.ColorTransfer)
+				}
+				if videoStream.ColorPrimaries != "" && outStream.ColorPrimaries != videoStream.ColorPrimaries {
+					fmt.Fprintf(bypass, "WARNING: output color_primaries (%s) does not match source (%s)\n", outStream.ColorPrimaries, videoStream.ColorPrimaries)
+				}
+			}
+		}
 		return
 	},
 }

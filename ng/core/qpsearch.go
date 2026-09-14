@@ -258,7 +258,7 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 //
 // The algorithm intentionally keeps each phase (bracketing, interpolation,
 // boundary walks) explicit and inline. Edge-case handling is subtle;
-// resist collapsing into generic helpers — readability trumps brevity here.
+// resist collapsing into generic helpers - readability trumps brevity here.
 //
 // The QP→VMAF relationship is empirically monotonic (lower QP = higher VMAF).
 // This has held across 2+ years of production encoding; non-monotonic edge cases
@@ -293,7 +293,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		if len(testedQPs) == 0 {
 			// Step 1: test the mean as the starting point to determine the search direction.
 			// If stats are out of the encoder range, the encode fails fast. Rotten data is
-			// caught cheaply — no need to defensively clamp.
+			// caught cheaply - no need to defensively clamp.
 			candidateQP = mean
 			scb.Debug("Searching for QP in range [%d, %d] with %d as first candidate", bestValid, firstInvalid, candidateQP)
 		} else if !(bestValidTested && firstInvalidTested) {
@@ -301,7 +301,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			// This leaves one bound at its original extreme, signaling which direction to search.
 			// Step from the mean in stddev increments until we bracket the threshold.
 			// Once both sides are known, interpolation walks from invalid toward valid to find
-			// the highest valid QP — the one that yields the smallest file.
+			// the highest valid QP - the one that yields the smallest file.
 			if bestValid == qpMin {
 				if candidateQP = mean - len(results)*stddev; candidateQP < qpMin {
 					if _, alreadyComputed = results[qpMin]; alreadyComputed {
@@ -325,7 +325,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 				return
 			}
 		} else {
-			// Step 3: the range is closed — narrow it with interpolation.
+			// Step 3: the range is closed - narrow it with interpolation.
 			if candidateQP, err = interpolateCandidate(scb, config, bestValid, firstInvalid, qpMin, qpMax, results); err != nil {
 				err = fmt.Errorf("failed to find candidate: %w", err)
 				return

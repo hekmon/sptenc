@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 
 	"github.com/hekmon/processpriority"
@@ -26,6 +27,10 @@ type RemuxSwapVideoConfig struct {
 	OriginalFile string
 	NewVideoFile string
 	// Output
+	// OutputFilePath must use the .mkv extension. Matroska is required because
+	// it is the most permissive container for stream copy and it carries HDR
+	// container metadata (Colour elements, MaxCLL, MaxFALL) that other containers
+	// lack or encode differently.
 	OutputFilePath string
 	EncodeToFLAC   bool
 	Tags           FFMEGTags // tags to add, can be nil
@@ -50,6 +55,43 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 	if config.OutputFilePath == "" {
 		return errors.New("output file path cannot be empty")
 	}
+	// Matroska is required because:
+	// - It is the most permissive container for stream copy (handles arbitrary codecs, attachments, subtitles).
+	// - It carries HDR container metadata (Colour elements, MaxCLL, MaxFALL) that other containers lack or encode differently.
+	if filepath.Ext(config.OutputFilePath) != ".mkv" {
+		return errors.New("output file path must have a .mkv extension")
+	}
+	// Extract container-level color metadata from the original file so we can
+	// propagate it onto the copied video stream. With -c:v copy ffmpeg copies
+	// encoded packets unchanged, but the output stream's codecpar (which the
+	// muxer uses to write container-level color tags / Matroska Colour elements)
+	// is inherited from the stream actually mapped. The mapped stream may have
+	// left these codecpar fields empty or wrong even when its bitstream SEIs are
+	// correct, because encoders write SEIs into the encoded frames while muxers
+	// write container tags from codecpar, and the two are independent. By probing
+	// the original file and passing output-side -color_* flags we override the
+	// mapped stream's codecpar with the original's authoritative values. This does
+	// not affect or create bitstream-level SEIs.
+	var (
+		colorRange     string
+		colorSpace     string
+		colorTransfer  string
+		colorPrimaries string
+	)
+	if originalStats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{
+		Path:         config.OriginalFile,
+		Debug:        config.Debug,
+		RuntimeError: config.RuntimeError,
+	}); err == nil {
+		if video := originalStats.VideoTrack(); video != nil {
+			colorRange = video.ColorRange
+			colorSpace = video.ColorSpace
+			colorTransfer = video.ColorTransfer
+			colorPrimaries = video.ColorPrimaries
+		}
+	} else if config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("failed to probe original file for color metadata: %w", err))
+	}
 	// Prepare
 	args := []string{
 		"-y",
@@ -60,30 +102,40 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 		"-i", config.OriginalFile,
 		"-i", config.NewVideoFile,
 	)
-	//// copy only the video stream from the concat script
+	//// stream mapping: video from the encoded merge, everything else from the original
 	args = append(args,
-		"-map", "1:v",
-		"-c:v", "copy",
+		"-map", "1:v", // video from encoded merge
+		"-map", "0", // all streams from original...
+		"-map", "-0:v", // ...except its video streams
 	)
-	//// copy everything from original file except its video track
+	//// codecs
 	args = append(args,
-		"-map", "0", // map all streams from original file...
-		"-map", "-0:v", // ...except video streams
-		"-c:s", "copy", // copy (not convert) if subtitles
-		"-c:d", "copy", // copy (not convert) if data
-		"-c:t", "copy", // copy (not convert) if attachments
+		"-c:v", "copy",
+		"-c:s", "copy",
+		"-c:d", "copy",
+		"-c:t", "copy",
 	)
 	if config.EncodeToFLAC {
 		args = append(args, "-c:a", "flac", "-compression_level", strconv.Itoa(FLACCompressionMax), "-exact_rice_parameters", strconv.Itoa(FLACExactRiceParams))
 	} else {
 		args = append(args, "-c:a", "copy")
 	}
-	//// avoid '[matroska] Starting new cluster due to timestamp' especially with lossless video stream and secondary low bitrate tracks,
-	//// see https://ffmpeg.org/ffmpeg-formats.html#toc-Format-Options
+	//// container-level options (muxer behavior, metadata, color signaling)
+	if colorRange != "" {
+		args = append(args, "-color_range:v:0", colorRange)
+	}
+	if colorSpace != "" {
+		args = append(args, "-colorspace:v:0", colorSpace)
+	}
+	if colorTransfer != "" {
+		args = append(args, "-color_trc:v:0", colorTransfer)
+	}
+	if colorPrimaries != "" {
+		args = append(args, "-color_primaries:v:0", colorPrimaries)
+	}
 	args = append(args,
-		"-max_interleave_delta", "0",
+		"-max_interleave_delta", "0", // avoid '[matroska] Starting new cluster due to timestamp'
 	)
-	//// add tags
 	args = append(args, config.Tags...)
 	//// end with output
 	args = append(args, config.OutputFilePath)

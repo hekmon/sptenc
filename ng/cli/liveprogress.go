@@ -582,7 +582,8 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 	})
 }
 
-func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputFile string, encodeToFLAC bool, tags ffmpeg.FFMEGTags, expectedDuration time.Duration, debug bool) (err error) {
+func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputFile string, encodeToFLAC bool, tags ffmpeg.FFMEGTags,
+	expectedDuration time.Duration, debug bool) (err error) {
 	var currentStats ffmpeg.ProgressStats
 	remuxBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(expectedDuration)),
