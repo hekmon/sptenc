@@ -550,7 +550,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String("encoder")),
-			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.UltraHDHeight)
+			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.Height4K)
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {

@@ -572,7 +572,7 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		DistortedPath:     distorted,
 		InputFrameRate:    videoStream.RFrameRate,
 		ReportPath:        distorted + "_vmaf.json",
-		UltraHD:           videoStream.Height >= ffmpeg.UltraHDHeight,
+		UltraHD:           videoStream.Height >= ffmpeg.Height4K,
 		NoEnhancementGain: vmafNeg,
 		NVDECReference:    ffmpeg.IsNVDecCompatible(videoStream.CodecName) && vmafCUDA, // source is nvdec compatible and user is indicating us there is a NVIDIA GPU (vmafCUDA)
 		NVDECDistorted:    vmafCUDA,                                                    // encoded output is in HEVC or AV1, both can be decoded by nvdec so the question is: is there a nvidia GPU ? If user requested vmafCUDA we know for sure

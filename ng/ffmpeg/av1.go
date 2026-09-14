@@ -47,7 +47,7 @@ type AV1LibaomEncodeQPConfig struct {
 	// Input
 	Input string
 	// Output
-	CPUUsed      int    // 1 (slowest) to 8 (fastest), if unset it will be set automatically to AV1LibaomCPUUsedDefault
+	CPUUsed      int    // libaom speed/quality tradeoff: 1 (slowest/best) to 8 (fastest/worst). Not thread count.
 	Quantization int    // AV1Lossless is rejected: no verified bit-exact AV1 lossless encoder
 	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
 	// Reporting
@@ -79,6 +79,23 @@ func AV1LibaomEncodeQP(ctx context.Context, config AV1LibaomEncodeQPConfig) (err
 	if config.CPUUsed < AV1LibaomCPUUsedMin || config.CPUUsed > AV1LibaomCPUUsedMax {
 		return fmt.Errorf("cpu-used must be %d-%d, got %d", AV1LibaomCPUUsedMin, AV1LibaomCPUUsedMax, config.CPUUsed)
 	}
+	// Probe input resolution to drive tiling decisions (required by policy: tiling
+	// must be keyed on resolution, not core count).
+	probeStats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{
+		Path:         config.Input,
+		Debug:        config.Debug,
+		RuntimeError: config.RuntimeError,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to probe input resolution: %w", err)
+	}
+	videoStream := probeStats.VideoTrack()
+	if videoStream == nil {
+		return errors.New("no video stream found in input")
+	}
+	width := videoStream.Width
+	height := videoStream.Height
+
 	// Prepare
 	args := []string{
 		"-y",
@@ -89,7 +106,25 @@ func AV1LibaomEncodeQP(ctx context.Context, config AV1LibaomEncodeQPConfig) (err
 		"-c:v", "libaom-av1",
 		"-pix_fmt", "yuv420p10le", // force 10-bit output (AV1 main profile covers 8/10bit, unlike HEVC main10)
 		"-cpu-used", strconv.Itoa(config.CPUUsed),
+		"-threads", strconv.Itoa(NbThreadsToUse),
+		"-row-mt", "1",
 	}
+	// Auto-tile based on probed resolution. Tiers:
+	//   4K-class (>=3840x2160) -> 2x2 tiles
+	//   1080p-class (>=1920x1080) -> 2x1 tiles
+	//   below -> libaom default (1x1)
+	// Axis convention: both width AND height must meet the tier threshold.
+	// Guard: libaom EINVAL if frame < 128 px on an axis with tiles enabled.
+	if width >= 128 && height >= 128 {
+		switch {
+		case width >= Width4K && height >= Height4K:
+			args = append(args, "-tile-columns", "1", "-tile-rows", "1") // 2x2 tiles
+		case width >= WidthFHD && height >= HeightFHD:
+			args = append(args, "-tile-columns", "1", "-tile-rows", "0") // 2x1 tiles
+		}
+	}
+	// Larger lookahead improves rate-distortion decisions for archival VOD.
+	args = append(args, "-lag-in-frames", "32")
 	// // quality
 	// libaom has no -qp: -crf N -b:v 0 triggers aom's Q mode (--end-usage=q --cq-level=N),
 	// a fixed-qindex mode with no bitrate target, deterministic for the per-scene quality loop.

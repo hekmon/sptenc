@@ -14,6 +14,14 @@ const (
 	float64Precision = 64 // standard float64 precision for formatting
 )
 
+// Standard display resolution tiers used for encoder tiling and model selection.
+const (
+	Width4K   = 3840
+	Height4K  = 2160
+	WidthFHD  = 1920
+	HeightFHD = 1080
+)
+
 var (
 	// ProcessPriority will be applied to all commands ran by the ffmpeg package
 	ProcessPriority = processpriority.BelowNormal

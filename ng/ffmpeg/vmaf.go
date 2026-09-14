@@ -24,7 +24,6 @@ const (
 	VMAFModelRegularNEGName = "vmaf_v0.6.1neg"
 	VMAFModelUltraHDName    = "vmaf_4k_v0.6.1"
 	VMAFModelUltraHDNEGName = "vmaf_4k_v0.6.1neg"
-	UltraHDHeight           = 2160
 )
 
 // VMAFModel returns the VMAF model name to use based on the desired resolution
