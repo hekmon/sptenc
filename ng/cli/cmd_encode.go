@@ -369,7 +369,7 @@ var encodeCommand = &cli.Command{
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
-				len(scenes), time.Since(start).Round(time.Second),
+				1+len(scenes), time.Since(start).Round(time.Second),
 			)
 			// split
 			fmt.Fprintf(bypass, "Splitting scenes...\n")

@@ -107,6 +107,7 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bo
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
 		return
 	}
+	masterDuration := time.Since(start)
 	fileInfos, err := os.Stat(outputFile)
 	if err != nil {
 		err = fmt.Errorf("failed to stat master file: %w", err)
@@ -114,13 +115,13 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bo
 	}
 	if debug {
 		fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s: %s (%s)\n",
-			time.Since(start).Round(time.Second),
+			masterDuration.Round(time.Second),
 			shellescape.Quote(outputFile),
 			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 	} else {
 		fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s (%s)\n",
-			time.Since(start).Round(time.Second),
+			masterDuration.Round(time.Second),
 			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 	}

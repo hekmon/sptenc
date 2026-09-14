@@ -123,7 +123,7 @@ func scdetProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats
 					scenes = append(scenes, scene)
 					if debug != nil {
 						debug(fmt.Sprintf("Scene %d detected at %v with score %s",
-							len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
+							1+len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
 					}
 				}
 			}
