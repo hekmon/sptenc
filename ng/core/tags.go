@@ -15,6 +15,7 @@ const (
 	sptencVersionTagKey       = "sptenc_version"
 	sptencEncoderTagKey       = "sptenc_encoder"
 	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
+	sptencSegmentsCountTagKey = "sptenc_segments_count"
 	// Encoding QP stats
 	sptencStatsMinQP      = "sptenc_stats_min_qp"
 	sptencStatsMaxQP      = "sptenc_stats_max_qp"
@@ -43,8 +44,8 @@ const (
 	sptencVMAFResultMaxTagKey    = "sptenc_vmaf_result_max"
 )
 
-func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.Encoder, statsQP QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool) (flags ffmpeg.FFMEGTags) {
-	flags = make(ffmpeg.FFMEGTags, 0, 54)
+func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.Encoder, statsQP QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
+	flags = make(ffmpeg.FFMEGTags, 0, 56)
 	// Global
 	module, version := signature()
 	flags = append(flags,
@@ -54,6 +55,7 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 		"-metadata:s:v:0", "vendor_id=", // prevent ffmpeg from inserting VENDOR_ID : [0][0][0][0]
 	)
 	// Encoding
+	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencSegmentsCountTagKey, segmentsCount))
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderTagKey, encoder))
 	switch encoder {
 	case ffmpeg.HEVCEncoderLibx265:

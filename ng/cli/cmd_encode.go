@@ -484,8 +484,8 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\t%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
 			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
 		)
-		fmt.Fprintf(bypass, "\tAttempts ratio: x%02f\n", float64(results.TotalNbAttempts)/float64(len(segmentsPaths)))
-		fmt.Fprintf(bypass, "\tFrames ratio: x%02f\n", float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames))
+		fmt.Fprintf(bypass, "\tAttempts ratio: x%s\n", strconv.FormatFloat(float64(results.TotalNbAttempts)/float64(len(segmentsPaths)), 'f', -1, 64))
+		fmt.Fprintf(bypass, "\tFrames ratio: x%s\n", strconv.FormatFloat(float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames), 'f', -1, 64))
 		fmt.Fprintf(bypass, "\tSegments encoding QP search done in %s.\n", duration.Round(time.Second))
 
 		// Step 3 - merging
@@ -550,7 +550,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String("encoder")),
-			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.Height4K)
+			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.Height4K, len(segmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {
