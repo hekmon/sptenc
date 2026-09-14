@@ -193,6 +193,16 @@ var encodeCommand = &cli.Command{
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		// Check required tools
+		if err := checkFFMPEG(ctx); err != nil {
+			return ctx, err
+		}
+		if err := checkFFProbe(ctx); err != nil {
+			return ctx, err
+		}
+		if err := checkMKVPropEdit(ctx); err != nil {
+			return ctx, err
+		}
 		// Input path argument
 		if cmd.Args().Len() != 1 {
 			return ctx, errors.New("only one input file is required")

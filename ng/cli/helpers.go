@@ -11,6 +11,7 @@ import (
 
 	"github.com/hekmon/sptenc/ng/core"
 	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ng/mkvtoolnix"
 
 	"github.com/hekmon/cunits/v3"
 )
@@ -21,6 +22,27 @@ const (
 	inputFileSizeCtxKey  ctxKey = "inputsize"
 	inputFileInfosCtxKey ctxKey = "fileInfos"
 )
+
+func checkFFMPEG(ctx context.Context) error {
+	if _, err := ffmpeg.GetFFMPEGVersion(ctx); err != nil {
+		return fmt.Errorf("ffmpeg check failed: %w", err)
+	}
+	return nil
+}
+
+func checkFFProbe(ctx context.Context) error {
+	if _, err := ffmpeg.GetFFProbeVersion(ctx); err != nil {
+		return fmt.Errorf("ffprobe check failed: %w", err)
+	}
+	return nil
+}
+
+func checkMKVPropEdit(ctx context.Context) error {
+	if _, err := mkvtoolnix.GetMKVPropEditVersion(ctx); err != nil {
+		return fmt.Errorf("mkvpropedit check failed: %w", err)
+	}
+	return nil
+}
 
 func extractFileNameInfos(path string) (name, extension string) {
 	fullFileName := filepath.Base(path)
