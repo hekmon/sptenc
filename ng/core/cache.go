@@ -150,7 +150,6 @@ func (sch *StatsCacheHistory) saveStats() error {
 
 func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) string {
 	var builder bytes.Buffer
-	builder.WriteString(string(encoder))
 	builder.WriteString(strconv.FormatFloat(profile.min, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.p1, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.p5, 'f', -1, 64))
@@ -159,5 +158,5 @@ func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker) stri
 	builder.WriteString(strconv.FormatFloat(profile.median, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
-	return fmt.Sprintf("sptenc_qp_history_%s.json", base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	return fmt.Sprintf("qp_history_%s_vmaf-%s.json", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 }

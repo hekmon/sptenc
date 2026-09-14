@@ -429,7 +429,7 @@ var encodeCommand = &cli.Command{
 		}
 
 		// Step 2 - Encode segments
-		fmt.Fprintln(bypass, "Finding optimal QP for segments...")
+		fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
 		lqps := &LiveQPSearch{
 			PrintDebug: cmd.Bool(debugFlagName),
 		}
