@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,4 +167,14 @@ func computeFinalPath(input, outputDir string, encoder ffmpeg.Encoder) (final st
 	final = filepath.Join(outputDir,
 		fmt.Sprintf("%s [%s %s].mkv", baseName, encoder, core.TitleTagValue))
 	return
+}
+
+// formatPercent formats a float64 as a percentage string with up to 1 decimal
+// place, trimming trailing ".0" for whole numbers.
+func formatPercent(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 1, 64)
+	if strings.HasSuffix(s, ".0") {
+		return s[:len(s)-2] + "%"
+	}
+	return s + "%"
 }

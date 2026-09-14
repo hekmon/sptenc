@@ -523,14 +523,19 @@ var encodeCommand = &cli.Command{
 		if err != nil {
 			fmt.Fprintf(bypass, "WARNING: failed to get final file size: %s\n", err)
 		} else {
-			originalSize, err := getFileSize(originalFile)
+			originalSize, err := getFileSize(vmafSource)
 			if err != nil {
-				fmt.Fprintf(bypass, "WARNING: failed to get original file size: %s\n", err)
+				fmt.Fprintf(bypass, "WARNING: failed to get source video size: %s\n", err)
 			} else {
 				sizeReduction := originalSize - finalFileSize
 				compressionRatio := float64(sizeReduction) / float64(originalSize) * 100
-				fmt.Fprintf(bypass, "Compression: %s -> %s (%.1f%% reduction, %s saved)\n",
-					originalSize, finalFileSize, compressionRatio, sizeReduction)
+				if inputInfos.IsDir() {
+					fmt.Fprintf(bypass, "Compression (source video from segments vs final remux incl. audio/subtitles): %s -> %s (%s change, %s)\n",
+						originalSize, finalFileSize, formatPercent(compressionRatio), sizeReduction)
+				} else {
+					fmt.Fprintf(bypass, "Compression: %s -> %s (%s reduction, %s saved)\n",
+						originalSize, finalFileSize, formatPercent(compressionRatio), sizeReduction)
+				}
 			}
 		}
 
