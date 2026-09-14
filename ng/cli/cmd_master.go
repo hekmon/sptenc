@@ -112,10 +112,16 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bo
 		err = fmt.Errorf("failed to stat master file: %w", err)
 		return
 	}
-	fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s: %s (%s)\n",
-		time.Since(start).Round(time.Second),
-		shellescape.Quote(outputFile),
-		cunits.ImportInBytes(float64(fileInfos.Size())),
-	)
+	if debug {
+		fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s: %s (%s)\n",
+			time.Since(start).Round(time.Second),
+			shellescape.Quote(outputFile),
+			cunits.ImportInBytes(float64(fileInfos.Size())),
+		)
+	} else {
+		fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s\n",
+			time.Since(start).Round(time.Second),
+		)
+	}
 	return
 }
