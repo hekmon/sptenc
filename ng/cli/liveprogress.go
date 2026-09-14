@@ -405,7 +405,7 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize cunits.Bits) {
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
 			return fmt.Sprintf(" | %s/%s",
-				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
+				cunits.Bits(bar.Current()), cunits.Bits(bar.Total()),
 			)
 		}),
 	)
