@@ -109,9 +109,11 @@ var batchsearchCommand = &cli.Command{
 	Action: func(ctx context.Context, cmd *cli.Command) error {
 		// TODO: Implement the batchsearch algorithm:
 		//  1. Analyze at a low threshold (e.g. 8) to get all boundary scores
-		//  2. Sort scores and collapse to distinct integer candidates
+		//  2. Sort scores and collapse to distinct integer candidates (skip integers that remove no new boundaries)
 		//  3. Encode at each candidate with --searchencoder, tracking minimum size
-		//  4. Stop after N consecutive size increases
+		//  4. Stop after 3 consecutive candidates fail to beat the best size found so far.
+		//     A flat result (same size as best) counts as a strike. This handles plateaus
+		//     without chasing local jitter past the global minimum.
 		//  5. Report the winning threshold
 		//  6. If --finalencode and searchencoder is GPU: derive CPU equivalent of same codec, run final encode with winning threshold
 		return nil
