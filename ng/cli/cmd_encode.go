@@ -337,7 +337,7 @@ var encodeCommand = &cli.Command{
 			totalDuration time.Duration
 		)
 		if !inputInfos.IsDir() {
-			fmt.Fprintf(bypass, "Starting split encoding of %s (%s) with %s.\n",
+			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				cunits.ImportInBytes(float64(inputInfos.Size())),
 				cmd.String("encoder"),
@@ -387,7 +387,7 @@ var encodeCommand = &cli.Command{
 			}
 			totalDuration = sourceStats.Format.Duration
 		} else {
-			fmt.Fprintf(bypass, "Starting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
+			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				shellescape.Quote(filepath.Base(cmd.String("originalfile"))),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
