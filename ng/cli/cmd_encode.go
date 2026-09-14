@@ -62,7 +62,7 @@ var encodeCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:     "outputdir",
 			Aliases:  []string{"o"},
-			Usage:    "Output directory",
+			Usage:    "Output directory (defaults to input file directory, or original file directory for segment inputs)",
 			Value:    "",
 			OnlyOnce: true,
 			Category: "Directories",
@@ -212,7 +212,8 @@ var encodeCommand = &cli.Command{
 			return ctx, fmt.Errorf("failed to access input file: %w", err)
 		}
 		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
-		if !fileInfos.IsDir() {
+		inputIsDir := fileInfos.IsDir()
+		if !inputIsDir {
 			if !fileInfos.Mode().IsRegular() {
 				return ctx, errors.New("input path must be a directory or a regular file")
 			}
@@ -233,7 +234,11 @@ var encodeCommand = &cli.Command{
 		// Resolve and check output directory
 		outputDir := cmd.String("outputdir")
 		if outputDir == "" {
-			outputDir = filepath.Dir(cmd.Args().First())
+			if inputIsDir {
+				outputDir = filepath.Dir(cmd.String("originalfile"))
+			} else {
+				outputDir = filepath.Dir(cmd.Args().First())
+			}
 		}
 		if fileInfos, err = os.Stat(outputDir); err != nil {
 			return ctx, fmt.Errorf("failed to access output directory: %w", err)
@@ -354,7 +359,7 @@ var encodeCommand = &cli.Command{
 			if err = liveSplitScenes(ctx, masterFile, segmentsDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
-			fmt.Fprintf(bypass, "\tSplit %d scenes in %v",
+			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
 				len(scenes), time.Since(start).Round(time.Second),
 			)
 			if segmentsPaths, err = getSegmentsFromDir(segmentsDir); err != nil {
