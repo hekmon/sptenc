@@ -260,7 +260,7 @@ var splitCommand = &cli.Command{
 			NVDec:           cmd.Bool("nvdec"),
 			NVDevice:        cmd.Int("nvidiagpuindex"),
 			VAAPIDec:        cmd.Bool("vaapidec"),
-			VAAPIDevice:        cmd.String("vaapirendererpath"),
+			VAAPIDevice:     cmd.String("vaapirendererpath"),
 			D3D12Dec:        cmd.Bool("d3d12dec"),
 			D3D12Device:     cmd.Int("d3d12vagpuindex"),
 			VideoToolboxDec: cmd.Bool("videotoolboxdec"),

@@ -14,9 +14,9 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-var checkCommand = &cli.Command{
-	Name:        "check",
-	Aliases:     []string{"c"},
+var verifyCommand = &cli.Command{
+	Name:        "verify",
+	Aliases:     []string{"v"},
 	Usage:       "Verify third-party tools are present and usable",
 	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf), ffprobe and mkvpropedit.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size).",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {

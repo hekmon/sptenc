@@ -94,10 +94,13 @@ func main() {
 			return ctx, nil
 		},
 		Commands: []*cli.Command{
-			checkCommand,
+			// porcelain
+			verifyCommand,
+			encodeCommand,
+			// plumbing
 			masterCommand,
 			splitCommand,
-			encodeCommand,
+			concatCommand,
 		},
 	}
 	if err := cmd.Run(ctx, os.Args); err != nil {

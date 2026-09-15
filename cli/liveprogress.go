@@ -99,12 +99,12 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 	}
 	// build config
 	config := ffmpeg.FFV1VideoMasterConfig{
-		InputFilePath:  inputFilePath,
-		OutputFilePath: finalFile,
+		InputFilePath:   inputFilePath,
+		OutputFilePath:  finalFile,
 		NVDec:           masterConfig.NVDec,
 		NVDevice:        masterConfig.NVDevice,
-		VAAPIDec:           masterConfig.VAAPIDec,
-		VAAPIDevice:        masterConfig.VAAPIDevice,
+		VAAPIDec:        masterConfig.VAAPIDec,
+		VAAPIDevice:     masterConfig.VAAPIDevice,
 		D3D12Dec:        masterConfig.D3D12Dec,
 		D3D12Device:     masterConfig.D3D12Device,
 		VideoToolboxDec: masterConfig.VideoToolboxDec,
@@ -205,6 +205,52 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 		ScenesMarkers: scenesMarkers,
 		OutputDir:     outputDir,
 		// Reporting
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
+}
+
+/*
+ * Encode
+ */
+
+func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segments []string, totalDuration time.Duration, debug bool) (err error) {
+	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
+	if err != nil {
+		err = fmt.Errorf("failed to generate concat list file: %w", err)
+		return
+	}
+	var speed float64
+	concatBar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalDuration)),
+		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Concat | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | speed: %sx", strconv.FormatFloat(speed, 'f', -1, 64))
+		}),
+	)
+	defer liveprogress.RemoveBar(concatBar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		concatBar.CurrentSet(uint64(stats.Time))
+		speed = stats.Speed
+	}
+	return ffmpeg.Concat(ctx, ffmpeg.ConcatConfig{
+		ConcatListPath: concatList,
+		ConcatUnsafe:   true,
+		OutputPath:     outputFile,
 		Debug: func(s string) {
 			if debug {
 				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
@@ -534,46 +580,6 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 	defer liveprogress.RemoveBar(concatBar)
 	progress := func(stats ffmpeg.ProgressStats) {
 		concatBar.CurrentSet(uint64(stats.CurrentFrame))
-	}
-	return ffmpeg.Concat(ctx, ffmpeg.ConcatConfig{
-		ConcatListPath: concatList,
-		ConcatUnsafe:   true,
-		OutputPath:     outputFile,
-		Debug: func(s string) {
-			if debug {
-				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
-			}
-		},
-		RuntimeError: func(err error) {
-			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
-		},
-		FFMPEGStatsReport: progress,
-	})
-}
-
-func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segments []string, totalDuration time.Duration, debug bool) (err error) {
-	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
-	if err != nil {
-		err = fmt.Errorf("failed to generate concat list file: %w", err)
-		return
-	}
-	concatBar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(totalDuration.Milliseconds())),
-		liveprogress.WithMultiplyRunes(),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Concat | "
-		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %s/%s", time.Duration(bar.Current())*time.Millisecond, totalDuration.Round(time.Second))
-		}),
-	)
-	defer liveprogress.RemoveBar(concatBar)
-	progress := func(stats ffmpeg.ProgressStats) {
-		concatBar.CurrentSet(uint64(stats.Time.Milliseconds()))
 	}
 	return ffmpeg.Concat(ctx, ffmpeg.ConcatConfig{
 		ConcatListPath: concatList,

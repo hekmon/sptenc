@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	segEncodedOutputFormat = "seg_%d_qp%d.mkv"
+	segEncodedOutputFormat = "seg_%06d_qp%03d.mkv"
 	libx265Preset          = ffmpeg.Libx265PresetSlow
 	nvEncPreset            = ffmpeg.NVEncPresetP7
 )

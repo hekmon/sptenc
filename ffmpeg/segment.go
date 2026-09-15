@@ -15,7 +15,7 @@ import (
 
 const (
 	// SegmentOutputFormat is the filename pattern used when splitting a video into segments.
-	SegmentOutputFormat = "seg_%d.mkv"
+	SegmentOutputFormat = "seg_%06d.mkv"
 )
 
 // SegmentConfig holds the configuration for Segment.
