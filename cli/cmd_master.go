@@ -50,6 +50,13 @@ var masterCommand = &cli.Command{
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
+		&cli.BoolFlag{
+			Name:     "videotoolboxdec",
+			Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
+			Value:    false,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
+		},
 		&cli.IntFlag{
 			Name:     "nvidiagpuindex",
 			Usage:    "GPU to use with --nvdec",
@@ -121,8 +128,11 @@ var masterCommand = &cli.Command{
 		if cmd.Bool("d3d12dec") {
 			hwDecFlags++
 		}
+		if cmd.Bool("videotoolboxdec") {
+			hwDecFlags++
+		}
 		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec)")
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec, --videotoolboxdec)")
 		}
 		return ctx, nil
 	},
@@ -140,11 +150,11 @@ var masterCommand = &cli.Command{
 		defer liveprogress.Stop(false)
 		// build optional hw decode config
 		masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
-			cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"),
+			cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
 			cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
 		)
-		if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec")) &&
-			!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec {
+		if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
+			!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 		}
 		// create master
@@ -159,9 +169,9 @@ var masterCommand = &cli.Command{
 
 // buildFFV1MasterConfigForFlags determines hardware decode settings for FFV1 master creation
 // based on explicit user flags and input codec compatibility.
-func buildFFV1MasterConfigForFlags(ctx context.Context, inputPath string, nvdec, vadec, d3d12dec bool, nvDevice int, vaDevice string, d3d12Device int) ffmpeg.FFV1VideoMasterConfig {
+func buildFFV1MasterConfigForFlags(ctx context.Context, inputPath string, nvdec, vadec, d3d12dec, videotoolboxdec bool, nvDevice int, vaDevice string, d3d12Device int) ffmpeg.FFV1VideoMasterConfig {
 	var config ffmpeg.FFV1VideoMasterConfig
-	if !nvdec && !vadec && !d3d12dec {
+	if !nvdec && !vadec && !d3d12dec && !videotoolboxdec {
 		return config
 	}
 	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: inputPath})
@@ -182,6 +192,8 @@ func buildFFV1MasterConfigForFlags(ctx context.Context, inputPath string, nvdec,
 	case d3d12dec && ffmpeg.IsD3D12DecCompatible(video.CodecName):
 		config.D3D12Dec = true
 		config.D3D12Device = d3d12Device
+	case videotoolboxdec && ffmpeg.IsVideoToolboxDecCompatible(video.CodecName):
+		config.VideoToolboxDec = true
 	}
 	return config
 }

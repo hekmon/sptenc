@@ -101,12 +101,13 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 	config := ffmpeg.FFV1VideoMasterConfig{
 		InputFilePath:  inputFilePath,
 		OutputFilePath: finalFile,
-		NVDec:          masterConfig.NVDec,
-		NVDevice:       masterConfig.NVDevice,
-		VADec:          masterConfig.VADec,
-		VADevice:       masterConfig.VADevice,
-		D3D12Dec:       masterConfig.D3D12Dec,
-		D3D12Device:    masterConfig.D3D12Device,
+		NVDec:           masterConfig.NVDec,
+		NVDevice:        masterConfig.NVDevice,
+		VADec:           masterConfig.VADec,
+		VADevice:        masterConfig.VADevice,
+		D3D12Dec:        masterConfig.D3D12Dec,
+		D3D12Device:     masterConfig.D3D12Device,
+		VideoToolboxDec: masterConfig.VideoToolboxDec,
 		Debug: func(s string) {
 			if debug {
 				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)

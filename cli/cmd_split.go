@@ -79,6 +79,12 @@ var splitCommand = &cli.Command{
 			Value:    false,
 			OnlyOnce: true,
 		},
+		&cli.BoolFlag{
+			Name:     "videotoolboxdec",
+			Usage:    "Use VideoToolbox hardware-accelerated decoding when creating the master (macOS, Apple Silicon)",
+			Value:    false,
+			OnlyOnce: true,
+		},
 		&cli.IntFlag{
 			Name:     "nvidiagpuindex",
 			Usage:    "GPU to use with --nvdec",
@@ -147,8 +153,11 @@ var splitCommand = &cli.Command{
 		if cmd.Bool("d3d12dec") {
 			hwDecFlags++
 		}
+		if cmd.Bool("videotoolboxdec") {
+			hwDecFlags++
+		}
 		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec)")
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec, --videotoolboxdec)")
 		}
 		return ctx, nil
 	},
@@ -218,11 +227,11 @@ var splitCommand = &cli.Command{
 				}()
 				// build optional hw decode config
 				masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
-					cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"),
+					cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
 					cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
 				)
-				if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec")) &&
-					!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec {
+				if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
+					!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 					fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 				}
 				// create the master within

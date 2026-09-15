@@ -54,6 +54,8 @@ func GetEncoderQPRange(encoder Encoder) (qpMin, qpMax int, found bool) {
 		return HEVCVAAPIQPMin, HEVCVAAPIQPMax, true
 	case HEVCEncoderD3D12VA:
 		return HEVCD3D12VAQPMin, HEVCD3D12VAQPMax, true
+	case HEVCEncoderVideoToolbox:
+		return HEVCVideoToolboxQPMin, HEVCVideoToolboxQPMax, true
 	case AV1EncoderLibaom:
 		return AV1LibaomQPMin, AV1LibaomQPMax, true
 	case AV1EncoderSVTAV1:
@@ -119,6 +121,23 @@ func IsD3D12DecCompatible(codec CodecName) bool {
 	switch codec {
 	case CodecVideoMPEG2, CodecVideoVC1, CodecVideoAVC,
 		CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsVideoToolboxDecCompatible reports whether the given codec can be decoded by
+// VideoToolbox in principle. It performs a codec-level check only.
+//
+// Supported codecs: H.264, HEVC, MPEG-1, MPEG-2, MPEG-4 Part 2, ProRes.
+// ProRes is omitted as sptenc targets consumer codecs.
+//
+// Reference: https://trac.ffmpeg.org/wiki/HWAccelIntro#VideoToolbox
+func IsVideoToolboxDecCompatible(codec CodecName) bool {
+	switch codec {
+	case CodecVideoMPEG1, CodecVideoMPEG2, CodecVideoMPEG4,
+		CodecVideoAVC, CodecVideoHEVC:
 		return true
 	default:
 		return false

@@ -697,6 +697,10 @@ func buildFFV1MasterConfigForEncoder(ctx context.Context, inputPath string, enco
 			config.D3D12Dec = true
 			config.D3D12Device = d3d12GPUIndex
 		}
+	case ffmpeg.HEVCEncoderVideoToolbox:
+		if ffmpeg.IsVideoToolboxDecCompatible(video.CodecName) {
+			config.VideoToolboxDec = true
+		}
 	}
 	return config
 }

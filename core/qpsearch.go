@@ -528,6 +528,17 @@ func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			RuntimeError:      scb.Error,
 			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
 		})
+	case ffmpeg.HEVCEncoderVideoToolbox:
+		err = ffmpeg.HEVCVideoToolboxEncodeQP(ctx, ffmpeg.HEVCVideoToolboxEncodeQPConfig{
+			Input:        input,
+			Quantization: qp,
+			Output:       output,
+			Debug: func(msg string) {
+				scb.Debug(msg)
+			},
+			RuntimeError:      scb.Error,
+			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
+		})
 	// AV1
 	case ffmpeg.AV1EncoderLibaom:
 		err = ffmpeg.AV1LibaomEncodeQP(ctx, ffmpeg.AV1LibaomEncodeQPConfig{

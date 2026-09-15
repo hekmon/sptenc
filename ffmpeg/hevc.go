@@ -612,3 +612,127 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	}
 	return
 }
+
+/*
+ * HEVC VideoToolbox
+ * macOS only, Apple Silicon recommended for constant quality (-q:v).
+ * ffmpeg -h encoder=hevc_videotoolbox
+ */
+
+const (
+	// HEVCEncoderVideoToolbox is the FFmpeg encoder name for VideoToolbox HEVC hardware encoding.
+	HEVCEncoderVideoToolbox Encoder = "hevc_videotoolbox"
+
+	// HEVCVideoToolboxQPMin is the minimum QP value usable with hevc_videotoolbox.
+	// VideoToolbox uses -q:v with a 1-100 scale where 100 is best quality.
+	// sptenc internally inverts this so lower QP = higher quality (1 -> 100).
+	HEVCVideoToolboxQPMin = 1
+	// HEVCVideoToolboxQPMax is the maximum QP value usable with hevc_videotoolbox.
+	// Internal QP 100 maps to VideoToolbox quality 1 (worst).
+	HEVCVideoToolboxQPMax = 100
+)
+
+// HEVCVideoToolboxEncodeQPConfig holds the configuration for HEVC encoding using VideoToolbox.
+type HEVCVideoToolboxEncodeQPConfig struct {
+	// Input
+	Input string
+	// Output
+	Quantization int    // HEVCLossless is not supported by hevc_videotoolbox and will return an error
+	Output       string // .mkv (Matroska) file recommended: the most permissive container for stream copy
+	// Reporting
+	Debug             func(msg string)
+	RuntimeError      func(err error) // stderr error output, stats output will be send in FFMPEGStatsReport
+	FFMPEGStatsReport func(stats ProgressStats)
+}
+
+// HEVCVideoToolboxEncodeQP encodes a video file to HEVC/H.265 using the VideoToolbox hardware encoder via FFmpeg.
+func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncodeQPConfig) (err error) {
+	// Validate inputs
+	if config.Input == "" {
+		return errors.New("input path cannot be empty")
+	}
+	if config.Output == "" {
+		return errors.New("output file path cannot be empty")
+	}
+	if config.Quantization == HEVCLossless {
+		// VideoToolbox HEVC has no lossless mode
+		return errors.New("hevc_videotoolbox does not support lossless encoding")
+	}
+	if config.Quantization < HEVCVideoToolboxQPMin || config.Quantization > HEVCVideoToolboxQPMax {
+		return fmt.Errorf("quantization must be %d-%d, got %d", HEVCVideoToolboxQPMin, HEVCVideoToolboxQPMax, config.Quantization)
+	}
+	// Invert QP to VideoToolbox quality scale: internal QP 1 (best) -> 100, QP 100 (worst) -> 1
+	quality := 101 - config.Quantization
+	// Auto-detect VideoToolbox decode compatibility from input codec
+	vtdec := false
+	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
+		if video := stats.VideoTrack(); video != nil {
+			vtdec = IsVideoToolboxDecCompatible(video.CodecName)
+		}
+	} else if config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("failed to probe input for VideoToolbox decode auto-detection: %w, falling back to software decode", err))
+	}
+	// Prepare
+	args := []string{
+		"-y",
+		"-loglevel", "error", "-stats",
+	}
+	//// videotoolbox decoding ?
+	if vtdec {
+		args = append(args,
+			"-hwaccel", "videotoolbox",
+		)
+	}
+	args = append(args, "-i", config.Input)
+	//// flux selection
+	args = append(args,
+		"-map", "0",
+		"-c", "copy",
+	)
+	//// videotoolbox
+	args = append(args,
+		"-c:v", "hevc_videotoolbox",
+		"-allow_sw", "1", // allow software fallback if hardware is unavailable
+		"-profile:v", "main10",
+	)
+	//// quality
+	args = append(args,
+		"-q:v", strconv.Itoa(quality),
+	)
+	//// end with output
+	args = append(args,
+		"-max_interleave_delta", "0",
+		config.Output,
+	)
+	// Prepare command
+	if config.Debug != nil {
+		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
+	}
+	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	// Prepare output handling
+	outputPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
+		return
+	}
+	// Start program
+	if err = cmd.Start(); err != nil {
+		err = fmt.Errorf("error starting %s: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
+	progressDone := make(chan struct{})
+	go func() {
+		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		close(progressDone)
+	}()
+	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
+	}
+	<-progressDone
+	if err = cmd.Wait(); err != nil {
+		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	return
+}

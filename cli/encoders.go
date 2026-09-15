@@ -18,6 +18,7 @@ var (
 		// HEVC
 		string(ffmpeg.HEVCEncoderLibx265), string(ffmpeg.HEVCEncoderNVEnc),
 		string(ffmpeg.HEVCEncoderVAAPI), string(ffmpeg.HEVCEncoderD3D12VA),
+		string(ffmpeg.HEVCEncoderVideoToolbox),
 	}
 	encodersAV1 = []string{
 		// AV1
@@ -32,14 +33,14 @@ var (
 			},
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{
-					tw.AlignLeft, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter,
+					tw.AlignLeft, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter,
 				},
 			},
 		},
 		Row: tw.CellConfig{
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{
-					tw.AlignRight, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter,
+					tw.AlignRight, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter, tw.AlignCenter,
 				},
 			},
 		},
@@ -65,13 +66,14 @@ func renderHEVCEncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		tablewriter.WithConfig(tableConfig),
 		tablewriter.WithRenderer(renderer.NewColorized(tableColorCfg)),
 	)
-	table.Header("HEVC", "CPU", "NVIDIA", "AMD", "Intel")
+	table.Header("HEVC", "CPU", "NVIDIA GPU", "AMD GPU", "Intel GPU", "Apple Silicon")
 	table.Append([]string{
 		"Linux",
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderLibx265), encoders.Has(string(ffmpeg.HEVCEncoderLibx265))),
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderNVEnc), encoders.Has(string(ffmpeg.HEVCEncoderNVEnc))),
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderVAAPI), encoders.Has(string(ffmpeg.HEVCEncoderVAAPI))),
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderVAAPI), encoders.Has(string(ffmpeg.HEVCEncoderVAAPI))),
+		"n/a",
 	})
 	table.Append([]string{
 		"Windows",
@@ -79,6 +81,7 @@ func renderHEVCEncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderNVEnc), encoders.Has(string(ffmpeg.HEVCEncoderNVEnc))),
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderD3D12VA), encoders.Has(string(ffmpeg.HEVCEncoderD3D12VA))),
 		strikeIfUnavailable(string(ffmpeg.HEVCEncoderD3D12VA), encoders.Has(string(ffmpeg.HEVCEncoderD3D12VA))),
+		"n/a",
 	})
 	table.Append([]string{
 		"MacOS",
@@ -86,6 +89,7 @@ func renderHEVCEncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		"n/a",
 		"n/a",
 		"n/a",
+		strikeIfUnavailable(string(ffmpeg.HEVCEncoderVideoToolbox), encoders.Has(string(ffmpeg.HEVCEncoderVideoToolbox))),
 	})
 	table.Render()
 	return buff.String()
@@ -97,7 +101,7 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		tablewriter.WithConfig(tableConfig),
 		tablewriter.WithRenderer(renderer.NewColorized(tableColorCfg)),
 	)
-	table.Header("AV1", "CPU", "NVIDIA", "AMD", "Intel")
+	table.Header("AV1", "CPU", "NVIDIA GPU", "AMD GPU", "Intel GPU", "Apple Silicon")
 	cpuLinux := fmt.Sprintf("%s / %s",
 		strikeIfUnavailable(string(ffmpeg.AV1EncoderLibaom), encoders.Has(string(ffmpeg.AV1EncoderLibaom))),
 		strikeIfUnavailable(string(ffmpeg.AV1EncoderSVTAV1), encoders.Has(string(ffmpeg.AV1EncoderSVTAV1))),
@@ -108,6 +112,7 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		strikeIfUnavailable(string(ffmpeg.AV1EncoderNVEnc), encoders.Has(string(ffmpeg.AV1EncoderNVEnc))),
 		strikeIfUnavailable(string(ffmpeg.AV1EncoderVAAPI), encoders.Has(string(ffmpeg.AV1EncoderVAAPI))),
 		strikeIfUnavailable(string(ffmpeg.AV1EncoderVAAPI), encoders.Has(string(ffmpeg.AV1EncoderVAAPI))),
+		"n/a",
 	})
 	table.Append([]string{
 		"Windows",
@@ -115,6 +120,7 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		strikeIfUnavailable(string(ffmpeg.AV1EncoderNVEnc), encoders.Has(string(ffmpeg.AV1EncoderNVEnc))),
 		"unsupported",
 		"unsupported",
+		"n/a",
 	})
 	table.Append([]string{
 		"MacOS",
@@ -122,6 +128,7 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		"n/a",
 		"n/a",
 		"n/a",
+		"unsupported",
 	})
 	table.Render()
 	buff.WriteString(fmt.Sprintf("  CPU: %s is slow and single-instance rarely saturates many cores (by design), prefer %s when possible.\n",

@@ -49,7 +49,7 @@ Global flags (available on all commands):
 - 🔍 **4 VMAF models, auto-selected** - Automatically uses 1080p or 4K model based on input resolution; add `--vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
 - 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
-- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`) and AV1 (`libaom-av1`, `svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
+- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`libaom-av1`, `svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
 - 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmafcuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
 - 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
 - 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
@@ -121,6 +121,7 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `hevc_nvenc` | HEVC | NVIDIA GPU | All (NVIDIA GPU required) |
 | `hevc_vaapi` | HEVC | VAAPI GPU | Linux |
 | `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
+| `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS |
 | `libaom-av1` | AV1 | CPU | All |
 | `svtav1` | AV1 | CPU | All |
 | `av1_nvenc` | AV1 | NVIDIA GPU | All |

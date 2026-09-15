@@ -15,12 +15,13 @@ type FFV1VideoMasterConfig struct {
 	// Input
 	InputFilePath string
 	// Hardware decode (caller decides based on encoder choice and codec compatibility)
-	NVDec       bool // use NVDEC for hardware-accelerated decoding
-	NVDevice    int  // NVIDIA GPU index, see CUDADefaultDevice
-	VADec       bool // use VA-API for hardware-accelerated decoding
-	VADevice    string // DRM render node, see VAAPIDefaultDevice
-	D3D12Dec    bool // use D3D12VA for hardware-accelerated decoding
-	D3D12Device int  // Direct3D 12 adapter index, see D3D12VADefaultDevice
+	NVDec           bool // use NVDEC for hardware-accelerated decoding
+	NVDevice        int  // NVIDIA GPU index, see CUDADefaultDevice
+	VADec           bool // use VA-API for hardware-accelerated decoding
+	VADevice        string // DRM render node, see VAAPIDefaultDevice
+	D3D12Dec        bool // use D3D12VA for hardware-accelerated decoding
+	D3D12Device     int  // Direct3D 12 adapter index, see D3D12VADefaultDevice
+	VideoToolboxDec bool // use VideoToolbox for hardware-accelerated decoding
 	// Output
 	OutputFilePath string
 	// Reporting
@@ -70,6 +71,8 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 		if config.D3D12Device >= 0 {
 			args = append(args, "-hwaccel_device", strconv.Itoa(config.D3D12Device))
 		}
+	} else if config.VideoToolboxDec {
+		args = append(args, "-hwaccel", "videotoolbox")
 	}
 	args = append(args,
 		"-i", config.InputFilePath,
