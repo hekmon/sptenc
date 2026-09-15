@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ffmpeg"
 
 	"gonum.org/v1/gonum/stat"
 )

@@ -9,8 +9,8 @@ import (
 	"runtime/debug"
 	"syscall"
 
-	"github.com/hekmon/sptenc/ng/ffmpeg"
-	"github.com/hekmon/sptenc/ng/mkvtoolnix"
+	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/mkvtoolnix"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/liveterm/v2"

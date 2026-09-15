@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ffmpeg"
 )
 
 func getFileSize(path string) (size int64, err error) {

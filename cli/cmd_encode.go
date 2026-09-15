@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hekmon/sptenc/ng/core"
-	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/core"
+	"github.com/hekmon/sptenc/ffmpeg"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"

@@ -8,7 +8,6 @@ require (
 	al.essio.dev/pkg/shellescape v1.6.0
 	github.com/fatih/color v1.19.0
 	github.com/hekmon/cunits/v3 v3.0.0
-	github.com/hekmon/ffmpegutils v1.0.0
 	github.com/hekmon/liveprogress/v2 v2.2.1
 	github.com/hekmon/liveterm/v2 v2.6.1
 	github.com/hekmon/processpriority v1.0.0

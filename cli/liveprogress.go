@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hekmon/sptenc/ng/ffmpeg"
-	"github.com/hekmon/sptenc/ng/mkvtoolnix"
+	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/mkvtoolnix"
 
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"

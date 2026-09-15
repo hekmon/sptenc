@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hekmon/sptenc/ng/core"
-	"github.com/hekmon/sptenc/ng/ffmpeg"
-	"github.com/hekmon/sptenc/ng/mkvtoolnix"
+	"github.com/hekmon/sptenc/core"
+	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/mkvtoolnix"
 )
 
 type ctxKey string

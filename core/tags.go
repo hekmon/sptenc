@@ -5,7 +5,7 @@ import (
 	"runtime/debug"
 	"strconv"
 
-	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ffmpeg"
 )
 
 const (

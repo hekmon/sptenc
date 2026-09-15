@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/hekmon/sptenc/ng/ffmpeg"
+	"github.com/hekmon/sptenc/ffmpeg"
 
 	"github.com/fatih/color"
 	"github.com/olekukonko/tablewriter"

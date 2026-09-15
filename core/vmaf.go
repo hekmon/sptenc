@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"errors"
@@ -6,25 +6,31 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hekmon/ffmpegutils"
+	"github.com/hekmon/sptenc/ffmpeg"
+
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
 )
 
 const (
+	// VMAFOffValue disables VMAF processing.
 	VMAFOffValue = -1
+	// VMAFMinValue is the minimum valid VMAF score.
 	VMAFMinValue = 0
+	// VMAFMaxValue is the maximum valid VMAF score.
 	VMAFMaxValue = 100
 )
 
-func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc *VMAFChecker, err error) {
+// NewVMAFChecker creates a new VMAFChecker with the given thresholds.
+// Each threshold can be set to VMAFOffValue to disable that specific check.
+// Returns an error if all values are off or if any value is out of the valid VMAF range.
+func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc VMAFChecker, err error) {
 	if min == VMAFOffValue && p1 == VMAFOffValue && p5 == VMAFOffValue && p10 == VMAFOffValue &&
 		p25 == VMAFOffValue && median == VMAFOffValue && hmean == VMAFOffValue && mean == VMAFOffValue {
 		err = errors.New("all values are off")
 		return
 	}
-	vc = new(VMAFChecker)
 	if (min < VMAFMinValue || min > VMAFMaxValue) && min != VMAFOffValue {
 		err = fmt.Errorf("min value %f is out of range [%d, %d]", min, VMAFMinValue, VMAFMaxValue)
 		return
@@ -68,6 +74,7 @@ func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc *VMA
 	return
 }
 
+// VMAFChecker holds VMAF score thresholds used to validate video quality.
 type VMAFChecker struct {
 	min    float64
 	p1     float64
@@ -79,7 +86,9 @@ type VMAFChecker struct {
 	mean   float64
 }
 
-func (vc VMAFChecker) Validate(stats ffmpegutils.VMAFStats) bool {
+// Validate checks whether the provided VMAFStats meet all configured thresholds.
+// It returns false if any active threshold is not met, otherwise true.
+func (vc VMAFChecker) Validate(stats ffmpeg.VMAFStats) bool {
 	if vc.min != VMAFOffValue && stats.Minimum < vc.min {
 		return false
 	}
@@ -107,6 +116,7 @@ func (vc VMAFChecker) Validate(stats ffmpegutils.VMAFStats) bool {
 	return true
 }
 
+// String returns a formatted table representation of the active VMAF thresholds.
 func (vc VMAFChecker) String() string {
 	var tableBuffer strings.Builder
 	// Prepare alignment config for all columns
