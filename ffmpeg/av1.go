@@ -493,10 +493,10 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 		config.Device = VAAPIDefaultDevice
 	}
 	// Auto-detect VA-API decode compatibility from input codec
-	vadec := false
+	vaapidec := false
 	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
 		if video := stats.VideoTrack(); video != nil {
-			vadec = IsVAAPIDecCompatible(video.CodecName)
+			vaapidec = IsVAAPIDecCompatible(video.CodecName)
 		}
 	} else if config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("failed to probe input for VA-API decode auto-detection: %w, falling back to software decode", err))
@@ -507,7 +507,7 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 		"-loglevel", "error", "-stats",
 	}
 	// // vaapi decoding ?
-	if vadec {
+	if vaapidec {
 		args = append(args,
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
@@ -520,7 +520,7 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 		)
 	}
 	args = append(args, "-i", config.Input)
-	if vadec {
+	if vaapidec {
 		args = append(args, "-vf", "scale_vaapi=format=p010le") // convert to 10bits if necessary while staying on the GPU between decode and encode
 	} else {
 		args = append(args, "-vf", "hwupload,scale_vaapi=format=p010le") // perform the 10bits conversion on GPU for performance (as we are going to use vaapi encode)

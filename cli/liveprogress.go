@@ -103,8 +103,8 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 		OutputFilePath: finalFile,
 		NVDec:           masterConfig.NVDec,
 		NVDevice:        masterConfig.NVDevice,
-		VADec:           masterConfig.VADec,
-		VADevice:        masterConfig.VADevice,
+		VAAPIDec:           masterConfig.VAAPIDec,
+		VAAPIDevice:        masterConfig.VAAPIDevice,
 		D3D12Dec:        masterConfig.D3D12Dec,
 		D3D12Device:     masterConfig.D3D12Device,
 		VideoToolboxDec: masterConfig.VideoToolboxDec,
@@ -126,7 +126,7 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
  * Split
  */
 
-func liveDetectScenes(ctx context.Context, path string, threshold float64, totalDuration time.Duration, debug bool) (scenes []ffmpeg.Scene, err error) {
+func liveDetectScenes(ctx context.Context, path string, threshold float64, totalDuration time.Duration, debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
 	// live progress
 	var currentStats ffmpeg.ProgressStats
 	bar := liveprogress.AddBar(
@@ -152,22 +152,18 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 		bar.CurrentSet(uint64(stats.Time))
 	}
 	// Execute scene detection
-	scenes, err = ffmpeg.ScenesDetection(ctx, ffmpeg.ScenesDetectionConfig{
-		// Input
-		Path: path,
-		// scdet
-		Threshold: threshold,
-		// Reporting
-		Debug: func(s string) {
-			if debug {
-				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
-			}
-		},
-		RuntimeError: func(err error) {
-			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
-		},
-		FFMPEGStatsReport: progress,
-	})
+	scenesConfig.Path = path
+	scenesConfig.Threshold = threshold
+	scenesConfig.Debug = func(s string) {
+		if debug {
+			fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+		}
+	}
+	scenesConfig.RuntimeError = func(err error) {
+		fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+	}
+	scenesConfig.FFMPEGStatsReport = progress
+	scenes, err = ffmpeg.ScenesDetection(ctx, scenesConfig)
 	return
 }
 

@@ -34,6 +34,14 @@ type ScenesDetectionConfig struct {
 	// Config
 	Path      string
 	Threshold float64 // https://ffmpeg.org/ffmpeg-filters.html#scdet-1
+	// Hardware decode (caller decides based on codec compatibility)
+	NVDec           bool   // use NVDEC for hardware-accelerated decoding
+	NVDevice        int    // NVIDIA GPU index, see CUDADefaultDevice
+	VAAPIDec        bool   // use VA-API for hardware-accelerated decoding
+	VAAPIDevice     string // DRM render node, see VAAPIDefaultDevice
+	D3D12Dec        bool   // use D3D12VA for hardware-accelerated decoding
+	D3D12Device     int    // Direct3D 12 adapter index, see D3D12VADefaultDevice
+	VideoToolboxDec bool   // use VideoToolbox for hardware-accelerated decoding
 	// Reporting
 	Debug             func(msg string)
 	RuntimeError      func(err error) // non fatal errors
@@ -52,12 +60,66 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 		err = fmt.Errorf("scene detection threshold must be between %d and %d", SceneThresholdMin, SceneThresholdMax)
 		return
 	}
+	// Auto-detect hardware decode compatibility if flags are set
+	if config.NVDec || config.VAAPIDec || config.D3D12Dec || config.VideoToolboxDec {
+		if stats, probeErr := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Path}); probeErr == nil {
+			if video := stats.VideoTrack(); video != nil {
+				if config.NVDec && !IsNVDecCompatible(video.CodecName) {
+					config.NVDec = false
+				}
+				if config.VAAPIDec && !IsVAAPIDecCompatible(video.CodecName) {
+					config.VAAPIDec = false
+				}
+				if config.D3D12Dec && !IsD3D12DecCompatible(video.CodecName) {
+					config.D3D12Dec = false
+				}
+				if config.VideoToolboxDec && !IsVideoToolboxDecCompatible(video.CodecName) {
+					config.VideoToolboxDec = false
+				}
+			}
+		} else if config.RuntimeError != nil {
+			config.RuntimeError(fmt.Errorf("failed to probe input for hardware decode auto-detection: %w, falling back to software decode", probeErr))
+		}
+	}
+	// Apply defaults
+	if config.NVDevice == 0 {
+		config.NVDevice = CUDADefaultDevice
+	}
+	if config.VAAPIDevice == "" {
+		config.VAAPIDevice = VAAPIDefaultDevice
+	}
+	if config.D3D12Device == 0 {
+		config.D3D12Device = D3D12VADefaultDevice
+	}
 	// Prepare command
 	args := []string{
-		"-i", config.Path,
-		"-vf", "scdet=t=" + strconv.FormatFloat(config.Threshold, 'f', -1, float64Precision),
-		"-f", "null", "-",
+		"-y",
+		"-loglevel", "error", "-stats",
 	}
+	// Hardware decode paths
+	if config.NVDec {
+		args = append(args, "-hwaccel", "cuda")
+		if config.NVDevice >= 0 {
+			args = append(args, "-hwaccel_device", strconv.Itoa(config.NVDevice))
+		}
+	} else if config.VAAPIDec {
+		args = append(args, "-hwaccel", "vaapi")
+		if config.VAAPIDevice != "" {
+			args = append(args, "-vaapi_device", config.VAAPIDevice)
+		}
+	} else if config.D3D12Dec {
+		args = append(args, "-hwaccel", "d3d12va")
+		if config.D3D12Device >= 0 {
+			args = append(args, "-hwaccel_device", strconv.Itoa(config.D3D12Device))
+		}
+	} else if config.VideoToolboxDec {
+		args = append(args, "-hwaccel", "videotoolbox")
+	}
+	args = append(args,
+		"-i", config.Path,
+		"-vf", "scdet=t="+strconv.FormatFloat(config.Threshold, 'f', -1, float64Precision),
+		"-f", "null", "-",
+	)
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Detect scenes with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}

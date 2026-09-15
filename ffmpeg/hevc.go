@@ -372,10 +372,10 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 		config.Device = VAAPIDefaultDevice
 	}
 	// Auto-detect VA-API decode compatibility from input codec
-	vadec := false
+	vaapidec := false
 	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
 		if video := stats.VideoTrack(); video != nil {
-			vadec = IsVAAPIDecCompatible(video.CodecName)
+			vaapidec = IsVAAPIDecCompatible(video.CodecName)
 		}
 	} else if config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("failed to probe input for VA-API decode auto-detection: %w, falling back to software decode", err))
@@ -386,7 +386,7 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 		"-loglevel", "error", "-stats",
 	}
 	//// vaapi decoding ?
-	if vadec {
+	if vaapidec {
 		args = append(args,
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
@@ -399,7 +399,7 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 		)
 	}
 	args = append(args, "-i", config.Input)
-	if vadec {
+	if vaapidec {
 		args = append(args, "-vf", "scale_vaapi=format=p010le") // convert to 10bits if necessary while staying on the GPU between decode and encode
 	} else {
 		args = append(args, "-vf", "hwupload,scale_vaapi=format=p010le") // perform the 10bits conversion on GPU for performance (as we are going to use vaapi encode)
@@ -663,15 +663,18 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	}
 	// Invert QP to VideoToolbox quality scale: internal QP 1 (best) -> 100, QP 100 (worst) -> 1
 	quality := 101 - config.Quantization
-	// Auto-detect VideoToolbox decode compatibility from input codec
+	// Auto-detect VideoToolbox decode compatibility and pixel format from input
 	vtdec := false
+	pixFmt := ""
 	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
 		if video := stats.VideoTrack(); video != nil {
 			vtdec = IsVideoToolboxDecCompatible(video.CodecName)
+			pixFmt = video.PixFmt
 		}
 	} else if config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("failed to probe input for VideoToolbox decode auto-detection: %w, falling back to software decode", err))
 	}
+	is10Bit := strings.Contains(pixFmt, "p10") || strings.Contains(pixFmt, "10le")
 	// Prepare
 	args := []string{
 		"-y",
@@ -684,6 +687,16 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 		)
 	}
 	args = append(args, "-i", config.Input)
+	//// filter chain: convert to 10-bit when necessary (scale_vt does not support bit-depth conversion)
+	if !is10Bit {
+		if vtdec {
+			// 8-bit hw decode: round-trip through CPU for 10-bit conversion
+			args = append(args, "-vf", "hwdownload,format=p010le,hwupload")
+		} else {
+			// 8-bit software decode: convert to 10-bit software frames
+			args = append(args, "-vf", "format=p010le")
+		}
+	}
 	//// flux selection
 	args = append(args,
 		"-map", "0",

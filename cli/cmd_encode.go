@@ -377,7 +377,16 @@ var encodeCommand = &cli.Command{
 			)
 			var scenes []ffmpeg.Scene
 			start := time.Now()
-			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName)); err != nil {
+			scenesConfig := ffmpeg.ScenesDetectionConfig{
+				NVDec:           masterConfig.NVDec,
+				NVDevice:        masterConfig.NVDevice,
+				VAAPIDec:        masterConfig.VAAPIDec,
+				VAAPIDevice:     masterConfig.VAAPIDevice,
+				D3D12Dec:        masterConfig.D3D12Dec,
+				D3D12Device:     masterConfig.D3D12Device,
+				VideoToolboxDec: masterConfig.VideoToolboxDec,
+			}
+			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
@@ -689,8 +698,8 @@ func buildFFV1MasterConfigForEncoder(ctx context.Context, inputPath string, enco
 		}
 	case ffmpeg.HEVCEncoderVAAPI, ffmpeg.AV1EncoderVAAPI:
 		if ffmpeg.IsVAAPIDecCompatible(video.CodecName) {
-			config.VADec = true
-			config.VADevice = vaapiDevice
+			config.VAAPIDec = true
+			config.VAAPIDevice = vaapiDevice
 		}
 	case ffmpeg.HEVCEncoderD3D12VA:
 		if ffmpeg.IsD3D12DecCompatible(video.CodecName) {

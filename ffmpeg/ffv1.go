@@ -15,13 +15,13 @@ type FFV1VideoMasterConfig struct {
 	// Input
 	InputFilePath string
 	// Hardware decode (caller decides based on encoder choice and codec compatibility)
-	NVDec           bool // use NVDEC for hardware-accelerated decoding
-	NVDevice        int  // NVIDIA GPU index, see CUDADefaultDevice
-	VADec           bool // use VA-API for hardware-accelerated decoding
-	VADevice        string // DRM render node, see VAAPIDefaultDevice
-	D3D12Dec        bool // use D3D12VA for hardware-accelerated decoding
-	D3D12Device     int  // Direct3D 12 adapter index, see D3D12VADefaultDevice
-	VideoToolboxDec bool // use VideoToolbox for hardware-accelerated decoding
+	NVDec           bool   // use NVDEC for hardware-accelerated decoding
+	NVDevice        int    // NVIDIA GPU index, see CUDADefaultDevice
+	VAAPIDec        bool   // use VA-API for hardware-accelerated decoding
+	VAAPIDevice     string // DRM render node, see VAAPIDefaultDevice
+	D3D12Dec        bool   // use D3D12VA for hardware-accelerated decoding
+	D3D12Device     int    // Direct3D 12 adapter index, see D3D12VADefaultDevice
+	VideoToolboxDec bool   // use VideoToolbox for hardware-accelerated decoding
 	// Output
 	OutputFilePath string
 	// Reporting
@@ -44,8 +44,8 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	if config.NVDevice == 0 {
 		config.NVDevice = CUDADefaultDevice
 	}
-	if config.VADevice == "" {
-		config.VADevice = VAAPIDefaultDevice
+	if config.VAAPIDevice == "" {
+		config.VAAPIDevice = VAAPIDefaultDevice
 	}
 	if config.D3D12Device == 0 {
 		config.D3D12Device = D3D12VADefaultDevice
@@ -61,10 +61,10 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 		if config.NVDevice >= 0 {
 			args = append(args, "-hwaccel_device", strconv.Itoa(config.NVDevice))
 		}
-	} else if config.VADec {
+	} else if config.VAAPIDec {
 		args = append(args, "-hwaccel", "vaapi")
-		if config.VADevice != "" {
-			args = append(args, "-vaapi_device", config.VADevice)
+		if config.VAAPIDevice != "" {
+			args = append(args, "-vaapi_device", config.VAAPIDevice)
 		}
 	} else if config.D3D12Dec {
 		args = append(args, "-hwaccel", "d3d12va")

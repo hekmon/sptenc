@@ -45,12 +45,14 @@ var splitCommand = &cli.Command{
 			Value:    false,
 			OnlyOnce: true,
 		},
+		// Directories
 		&cli.StringFlag{
 			Name:     "outputdir",
 			Aliases:  []string{"o"},
 			Usage:    "Output directory for split scenes",
 			Value:    "",
 			OnlyOnce: true,
+			Category: "Directories",
 		},
 		&cli.StringFlag{
 			Name:             "tmpdir",
@@ -60,48 +62,57 @@ var splitCommand = &cli.Command{
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,
 			ValidateDefaults: true,
+			Category:         "Directories",
 		},
+		// HW dec
 		&cli.BoolFlag{
 			Name:     "nvdec",
-			Usage:    "Use NVDEC hardware-accelerated decoding when creating the master (NVIDIA GPU required)",
+			Usage:    "Use NVDEC hardware-accelerated decoding when creating the master or detecting scenes (NVIDIA GPU required)",
 			Value:    false,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "vadec",
-			Usage:    "Use VA-API hardware-accelerated decoding when creating the master (Intel/AMD GPU required)",
+			Name:     "vaapidec",
+			Usage:    "Use VA-API hardware-accelerated decoding when creating the master or detecting scenes (Intel/AMD GPU required)",
 			Value:    false,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
 			Name:     "d3d12dec",
-			Usage:    "Use D3D12VA hardware-accelerated decoding when creating the master (Windows, GPU required)",
+			Usage:    "Use D3D12VA hardware-accelerated decoding when creating the master or detecting scenes (Windows, GPU required)",
 			Value:    false,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
 			Name:     "videotoolboxdec",
-			Usage:    "Use VideoToolbox hardware-accelerated decoding when creating the master (macOS, Apple Silicon)",
+			Usage:    "Use VideoToolbox hardware-accelerated decoding when creating the master or detecting scenes (macOS, Apple Silicon)",
 			Value:    false,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
 			Name:     "nvidiagpuindex",
-			Usage:    "GPU to use with --nvdec",
+			Usage:    "GPU to use with --nvdec for master creation or scene detection",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 		&cli.StringFlag{
 			Name:     "vaapirendererpath",
-			Usage:    "Direct Rendering Manager render node to use with --vadec",
+			Usage:    "Direct Rendering Manager render node to use with --vaapidec for master creation or scene detection",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
 			Name:     "d3d12vagpuindex",
-			Usage:    "GPU to use with --d3d12dec",
+			Usage:    "GPU to use with --d3d12dec for master creation or scene detection",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 	},
 	Arguments: []cli.Argument{
@@ -147,7 +158,7 @@ var splitCommand = &cli.Command{
 		if cmd.Bool("nvdec") {
 			hwDecFlags++
 		}
-		if cmd.Bool("vadec") {
+		if cmd.Bool("vaapidec") {
 			hwDecFlags++
 		}
 		if cmd.Bool("d3d12dec") {
@@ -157,7 +168,7 @@ var splitCommand = &cli.Command{
 			hwDecFlags++
 		}
 		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec, --videotoolboxdec)")
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapidec, --d3d12dec, --videotoolboxdec)")
 		}
 		return ctx, nil
 	},
@@ -227,11 +238,11 @@ var splitCommand = &cli.Command{
 				}()
 				// build optional hw decode config
 				masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
-					cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
+					cmd.Bool("nvdec"), cmd.Bool("vaapidec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
 					cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
 				)
-				if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
-					!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
+				if (cmd.Bool("nvdec") || cmd.Bool("vaapidec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
+					!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 					fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 				}
 				// create the master within
@@ -246,7 +257,16 @@ var splitCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 		)
 		start := time.Now()
-		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName))
+		scenesConfig := ffmpeg.ScenesDetectionConfig{
+			NVDec:           cmd.Bool("nvdec"),
+			NVDevice:        cmd.Int("nvidiagpuindex"),
+			VAAPIDec:        cmd.Bool("vaapidec"),
+			VAAPIDevice:        cmd.String("vaapirendererpath"),
+			D3D12Dec:        cmd.Bool("d3d12dec"),
+			D3D12Device:     cmd.Int("d3d12vagpuindex"),
+			VideoToolboxDec: cmd.Bool("videotoolboxdec"),
+		}
+		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
