@@ -20,6 +20,7 @@ import (
 var splitCommand = &cli.Command{
 	Name:        "split",
 	Aliases:     []string{"s"},
+	Category:    "Tooling",
 	Usage:       "Split a video file by scenes",
 	Description: "Detect scene changes in a video and split it into separate files at each transition. By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter to find scene boundaries. Use --analyze to preview detected scenes without splitting, or --master if the input has already been converted with the master command. The detection threshold can be (and should be!) tuned with --threshold to control sensitivity: experiment different values with --analyze first and validate with the original file before performing the actual splitting.",
 	Flags: []cli.Flag{

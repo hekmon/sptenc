@@ -45,9 +45,10 @@ import (
 // If the search encoder is already CPU-based, --finalencode is a no-op: the
 // winning result from the search is the definitive output.
 var batchsearchCommand = &cli.Command{
-	Name:    "batchsearch",
-	Aliases: []string{"bs"},
-	Usage:   "Find the optimal scene detection threshold for a given source file",
+	Name:     "batchsearch",
+	Aliases:  []string{"bs"},
+	Category: "Advanced",
+	Usage:    "Find the optimal scene detection threshold for a given source file",
 	Description: fmt.Sprintf(
 		"Analyze a video to discover the scene detection threshold that produces the smallest encode " +
 			"which still passes your VMAF targets. It scans the source once to map all natural scene boundaries, " +

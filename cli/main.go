@@ -26,6 +26,7 @@ const (
 )
 
 func init() {
+	// Align libs on update freq
 	liveterm.RefreshInterval = updateUIFreq
 	ffmpeg.StatsPeriod = updateUIFreq
 }
@@ -41,7 +42,7 @@ func main() {
 
 	// Start application
 	cmd := &cli.Command{
-		Name:        "sptenc",
+		Name:        linkedName(),
 		Usage:       "Split Encoder: a perceived-quality, VMAF-driven encoder",
 		Description: "Split Encoder is a tool that performs scene-aware video encoding where each segment is independently encoded and validated against configurable VMAF thresholds. For each segment, it searches for the highest QP (smallest file size) that still passes all enabled VMAF metrics, re-encoding at a lower QP if any threshold is not met. Once all segments pass validation, they are merged into the final output file with VMAF results embedded as metadata tags. This guarantees the target perceptual quality at the smallest possible file size for the given encoder, but encoding takes significantly longer than a standard single-pass encode because multiple QP candidates are tested per segment.\n\nThe encode command can be used on its own to handle the entire pipeline, or with intermediate artifacts produced by the master and split commands for finer control.",
 		Version:     version(),
@@ -94,10 +95,10 @@ func main() {
 			return ctx, nil
 		},
 		Commands: []*cli.Command{
-			// porcelain
-			verifyCommand,
+			// main
 			encodeCommand,
-			// plumbing
+			verifyCommand,
+			// tooling
 			masterCommand,
 			splitCommand,
 			concatCommand,
@@ -109,13 +110,20 @@ func main() {
 	}
 }
 
-const sptencURL = "https://github.com/hekmon/sptenc"
+func linkedName() string {
+	infos, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "sptenc"
+	}
+	return liveterm.Hyperlink("https://"+infos.Main.Path, "sptenc")
+}
 
 func version() string {
 	infos, ok := debug.ReadBuildInfo()
 	if !ok {
-		return fmt.Sprintf("%s unknown (%s/%s)", liveterm.Hyperlink(sptencURL, "sptenc"), runtime.GOOS, runtime.GOARCH)
+		return fmt.Sprintf("unknown (%s/%s)", runtime.GOOS, runtime.GOARCH)
 	}
-	return fmt.Sprintf("%s %s (%s, %s/%s)",
-		liveterm.Hyperlink(sptencURL, "sptenc"), infos.Main.Version, infos.GoVersion, runtime.GOOS, runtime.GOARCH)
+	return fmt.Sprintf("%s (%s, %s/%s)",
+		infos.Main.Version, infos.GoVersion, runtime.GOOS, runtime.GOARCH,
+	)
 }

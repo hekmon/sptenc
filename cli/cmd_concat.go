@@ -17,6 +17,7 @@ import (
 var concatCommand = &cli.Command{
 	Name:        "concat",
 	Aliases:     []string{"c"},
+	Category:    "Tooling",
 	Usage:       "Concatenate video files from a directory into a single file",
 	Description: "Reads all video files (.mkv, .mp4) from the input directory, sorts them alphabetically, and concatenates them into a single output file using ffmpeg's concat demuxer. This is useful for merging segments produced by the split command without re-encoding.",
 	Flags: []cli.Flag{
