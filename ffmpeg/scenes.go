@@ -92,7 +92,11 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	}
 	// Prepare command
 	args := []string{
-		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:2", "-stats_period",
+		"-y",
+		"-hide_banner",
+		"-nostats",
+		"-progress", "pipe:1",
+		"-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
 	// Hardware decode paths
@@ -123,8 +127,13 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 		config.Debug(fmt.Sprintf("Detect scenes with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
-	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	// Prepare output handling: stdout for progress, stderr for scdet
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
@@ -134,16 +143,22 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 		err = fmt.Errorf("error starting %s: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
 	}
-	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
+	// Start monitoring goroutines (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		scenes = scdetProgress(outputPipe, config.FFMPEGStatsReport, config.Debug, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	scenesDone := make(chan struct{})
+	go func() {
+		scenes = scdetProgress(stderrPipe, config.Debug, config.RuntimeError)
+		close(scenesDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-scenesDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
@@ -151,93 +166,67 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	return
 }
 
-func scdetProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats), debug func(string), runtimeError func(error)) (scenes []Scene) {
+func scdetProgress(ffmpegOutput io.ReadCloser, debug func(string), runtimeError func(error)) (scenes []Scene) {
 	defer ffmpegOutput.Close()
 	scanner := bufio.NewScanner(ffmpegOutput)
-	var stats ProgressStats
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, "[scdet") {
-			var scene Scene
-			var err error
-			if scene, err = parseScdet(line); err != nil {
-				if runtimeError != nil {
-					runtimeError(fmt.Errorf("error while parsing scdet informations: %w", err))
-				}
-			} else {
-				scenes = append(scenes, scene)
-				if debug != nil {
-					debug(fmt.Sprintf("Scene %d detected at %v with score %s",
-						len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
-				}
-			}
+		if !strings.HasPrefix(line, "[Parsed_scdet") {
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			if runtimeError != nil && line != "" {
-				runtimeError(errors.New(line))
+		var scene Scene
+		var err error
+		if scene, err = parseScdet(line); err != nil {
+			if runtimeError != nil {
+				runtimeError(fmt.Errorf("error while parsing scdet informations: %w", err))
 			}
-			continue
-		}
-		switch key {
-		case "frame":
-			stats.CurrentFrame, _ = strconv.Atoi(value)
-		case "fps":
-			stats.FPS, _ = strconv.ParseFloat(value, 64)
-		case "dup_frames":
-			stats.Dup, _ = strconv.Atoi(value)
-		case "drop_frames":
-			stats.Drop, _ = strconv.Atoi(value)
-		case "out_time_us":
-			if us, err := strconv.ParseInt(value, 10, 64); err == nil {
-				stats.Time = time.Duration(us) * time.Microsecond
-			}
-		case "bitrate":
-			stats.Bitrate = value
-		case "speed":
-			stats.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(value, "x"), 64)
-		case "progress":
-			if progress != nil {
-				progress(stats)
-			}
-			if value == "end" {
-				return
+		} else {
+			scenes = append(scenes, scene)
+			if debug != nil {
+				debug(fmt.Sprintf("Scene %d detected at %v with score %s",
+					len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil && runtimeError != nil {
-		runtimeError(fmt.Errorf("error reading ffmpeg output: %w", err))
+		runtimeError(fmt.Errorf("error reading ffmpeg stderr: %w", err))
 	}
 	return
 }
 
-// Scene detection constants
-const (
-	scdetLineFields      = 7 // Expected fields in scdet output line
-	scdetScoreFieldIndex = 4 // Field index for score
-	scdetTimeFieldIndex  = 6 // Field index for timestamp
-)
-
 func parseScdet(line string) (scene Scene, err error) {
-	// fmt.Fprintln(liveprogress.Bypass(), strings.TrimSuffix(line, "\n"))
-	var found bool
-	if _, line, found = strings.Cut(line, "[scdet"); !found {
-		err = errors.New("line does not contains scdet separator")
+	if !strings.Contains(line, "[Parsed_scdet") {
+		err = errors.New("line does not contain scdet marker")
 		return
 	}
-	fields := strings.Split(line, " ")
-	if len(fields) != scdetLineFields {
-		err = fmt.Errorf("line does not contains %d fields: %d", scdetLineFields, len(fields))
+
+	// Extract lavfi.scd.score and lavfi.scd.time from lines like:
+	// [Parsed_scdet_0 @ 0x88f047180] lavfi.scd.score: 19.626, lavfi.scd.time: 16.808
+	scoreIdx := strings.Index(line, "lavfi.scd.score:")
+	timeIdx := strings.Index(line, "lavfi.scd.time:")
+	if scoreIdx == -1 || timeIdx == -1 {
+		err = fmt.Errorf("line missing expected scdet fields: %s", line)
 		return
 	}
-	if scene.Score, err = strconv.ParseFloat(strings.TrimSuffix(fields[scdetScoreFieldIndex], ","), float64Precision); err != nil {
+
+	// Parse score
+	scoreStr := strings.TrimSpace(line[scoreIdx+len("lavfi.scd.score:"):])
+	if commaIdx := strings.Index(scoreStr, ","); commaIdx != -1 {
+		scoreStr = scoreStr[:commaIdx]
+	}
+	if scene.Score, err = strconv.ParseFloat(scoreStr, 64); err != nil {
 		err = fmt.Errorf("error parsing score: %w", err)
 		return
 	}
-	start, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSuffix(fields[scdetTimeFieldIndex], "\n"), "\r"), float64Precision)
-	if err != nil {
-		err = fmt.Errorf("error parsing start: %w", err)
+
+	// Parse time
+	timeStr := strings.TrimSpace(line[timeIdx+len("lavfi.scd.time:"):])
+	if commaIdx := strings.Index(timeStr, ","); commaIdx != -1 {
+		timeStr = timeStr[:commaIdx]
+	}
+	start, parseErr := strconv.ParseFloat(timeStr, 64)
+	if parseErr != nil {
+		err = fmt.Errorf("error parsing time: %w", parseErr)
 		return
 	}
 	// Round to nearest millisecond to avoid sub-ms float noise like 8m34.722999999s.
