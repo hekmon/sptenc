@@ -22,7 +22,17 @@ var splitCommand = &cli.Command{
 	Aliases:     []string{"s"},
 	Category:    "Tooling",
 	Usage:       "Split a video file by scenes",
-	Description: "Detect scene changes in a video and split it into separate files at each transition. By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter to find scene boundaries. Use --analyze to preview detected scenes without splitting, or --master if the input has already been converted with the master command. The detection threshold can be (and should be!) tuned with --threshold to control sensitivity: experiment different values with --analyze first and validate with the original file before performing the actual splitting.",
+	Description: "Detect scene changes in a video and split it into separate files at each transition.\n\n" +
+			"HOW IT WORKS\n" +
+			"By default, the command first creates a lossless FFV1 master to ensure\n" +
+			"frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter\n" +
+			"to find scene boundaries.\n\n" +
+			"WORKFLOW\n" +
+			"  1. Use --analyze to preview detected scenes without splitting.\n" +
+			"  2. Tune --threshold to control sensitivity (experiment first).\n" +
+			"  3. Validate with the original file before performing the actual split.\n\n" +
+			"If the input has already been converted with the master command,\n" +
+			"use --master to skip the master creation phase.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
 			Name:      "threshold",

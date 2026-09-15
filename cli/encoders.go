@@ -26,6 +26,9 @@ var (
 		string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
 	}
 	allEncoders = append(encodersHEVC, encodersAV1...)
+)
+
+var (
 	tableConfig = tablewriter.Config{
 		Header: tw.CellConfig{
 			Formatting: tw.CellFormatting{
@@ -131,7 +134,7 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		"unsupported",
 	})
 	table.Render()
-	buff.WriteString(fmt.Sprintf("  CPU: %s is slow and single-instance rarely saturates many cores (by design), prefer %s when possible.\n",
+	buff.WriteString(fmt.Sprintf("\tCPU: %s is slow and single-instance rarely saturates many cores (by design),\n\t     prefer %s when possible.\n",
 		ffmpeg.AV1EncoderLibaom, ffmpeg.AV1EncoderSVTAV1))
 	return buff.String()
 }

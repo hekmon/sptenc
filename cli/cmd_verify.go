@@ -15,10 +15,16 @@ import (
 )
 
 var verifyCommand = &cli.Command{
-	Name:        "verify",
-	Aliases:     []string{"v"},
-	Usage:       "Verify third-party tools are present and usable",
-	Description: "Check that required external tools are available and functional: ffmpeg (with libx265 and libvmaf), ffprobe and mkvpropedit.\n\nENCODERS\nUse GPU for quick VMAF profile testing but always prefer CPU encoders for final encode (lower file size).",
+	Name:    "verify",
+	Aliases: []string{"v"},
+	Usage:   "Verify third-party tools are present and usable",
+	Description: "Check that required external tools are available and functional:\n" +
+		"  * ffmpeg (with at least one encoder and libvmaf support)\n" +
+		"  * ffprobe\n" +
+		"  * mkvpropedit\n\n" +
+		"ENCODERS\n" +
+		"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders\n" +
+		"for the final encode to get the smallest file size.",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")
@@ -69,7 +75,7 @@ var verifyCommand = &cli.Command{
 				// HEVC
 				for _, e := range encodersHEVC {
 					has := encoders.Has(e)
-					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("HEVC: %s", e), boolToEmoji(has)})
+					ffmpegDetails = append(ffmpegDetails, [2]string{e, boolToEmoji(has)})
 					if has {
 						hasAnyHEVC = true
 					}
@@ -77,7 +83,7 @@ var verifyCommand = &cli.Command{
 				// AV1
 				for _, e := range encodersAV1 {
 					has := encoders.Has(e)
-					ffmpegDetails = append(ffmpegDetails, [2]string{fmt.Sprintf("AV1: %s", e), boolToEmoji(has)})
+					ffmpegDetails = append(ffmpegDetails, [2]string{e, boolToEmoji(has)})
 					if has {
 						hasAnyAV1 = true
 					}
@@ -91,12 +97,12 @@ var verifyCommand = &cli.Command{
 		// Compute common label width across all tables
 		maxLabelWidth := maxLabelLen(ffprobeRows, mkvpropeditRows, ffmpegRows)
 		renderCheckTable("🔍  ffprobe", ffprobeRows, maxLabelWidth)
-		renderCheckTable("📦  mkvpropedit", mkvpropeditRows, maxLabelWidth)
 		renderCheckTable("🎬  ffmpeg", ffmpegRows, maxLabelWidth)
+		renderCheckTable("📦  mkvpropedit", mkvpropeditRows, maxLabelWidth)
 		// Print encoder availability tables
 		if ffmpegOK {
 			fmt.Println()
-			fmt.Println("Encoder Availability")
+			fmt.Println("🎛️  Encoders Availability")
 			fmt.Println()
 			fmt.Println(renderHEVCEncodersAvailability(encoders))
 			fmt.Println(renderAV1EncodersAvailability(encoders))

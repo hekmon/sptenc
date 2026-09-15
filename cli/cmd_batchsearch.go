@@ -50,34 +50,44 @@ var batchsearchCommand = &cli.Command{
 	Category: "Advanced",
 	Usage:    "Find the optimal scene detection threshold for a given source file",
 	Description: fmt.Sprintf(
-		"Analyze a video to discover the scene detection threshold that produces the smallest encode " +
-			"which still passes your VMAF targets. It scans the source once to map all natural scene boundaries, " +
-			"then tests only thresholds that actually change the scene list, stopping automatically when " +
-			"consecutive thresholds no longer shrink the file.\n\n" +
+		"Analyze a video to discover the scene detection threshold that produces\n" +
+			"the smallest encode which still passes your VMAF targets.\n\n" +
+			"HOW IT WORKS\n" +
+			"  1. Scans the source once to map all natural scene boundaries.\n" +
+			"  2. Tests only thresholds that actually change the scene list.\n" +
+			"  3. Stops automatically when consecutive thresholds no longer shrink the file.\n\n" +
 			"SCENE THRESHOLDS\n" +
-			"Scene detection splits a video into independent segments, each starting with an I-frame. " +
-			"I-frames are large because they encode a full picture without reference to previous frames. " +
-			"By raising the scene threshold, fewer boundaries are detected and segments grow longer. " +
-			"The encoder can then keep running efficient P/B prediction across what used to be hard cuts.\n\n" +
-			"Because VMAF is checked per-segment (not per-frame), a few smeared frames at a merged boundary " +
-			"are diluted by the rest of the segment. The overall score still passes, yet the encoder avoids " +
-			"the repeated I-frame and rate-control overhead that a hard cut would force.\n\n" +
+			"Scene detection splits a video into independent segments, each starting\n" +
+			"with an I-frame. I-frames are large because they encode a full picture\n" +
+			"without reference to previous frames.\n\n" +
+			"By raising the scene threshold, fewer boundaries are detected and segments\n" +
+			"grow longer. The encoder can then keep running efficient P/B prediction\n" +
+			"across what used to be hard cuts.\n\n" +
+			"Because VMAF is checked per-segment (not per-frame), a few smeared frames\n" +
+			"at a merged boundary are diluted by the rest of the segment. The overall\n" +
+			"score still passes, yet the encoder avoids the repeated I-frame and\n" +
+			"rate-control overhead that a hard cut would force.\n\n" +
 			"TIME\n" +
-			"A single VMAF-oriented encode is already significantly slower than a regular encode, because each " +
-			"segment may be re-encoded multiple times until it passes quality validation. Batchsearch multiplies " +
-			"that cost by testing many thresholds in sequence. A GPU search may take a dozen hours or more; " +
-			"a CPU search can take several days. " +
+			"A single VMAF-oriented encode is already significantly slower than a regular\n" +
+			"encode, because each segment may be re-encoded multiple times until it passes\n" +
+			"quality validation. Batchsearch multiplies that cost by testing many thresholds\n" +
+			"in sequence.\n\n" +
+			"  * GPU search: may take a dozen hours or more.\n" +
+			"  * CPU search: can take several days.\n\n" +
 			"This command is designed to run unattended.\n\n" +
 			"ENCODERS\n" +
-			"Use --searchencoder to choose the encoder for the search loop. GPU encoders (e.g. hevc_nvenc) are " +
-			"strongly recommended for speed. If available, also enable CUDA VMAF acceleration (--vmafcuda) to avoid " +
-			"bottlenecking the search on CPU-side quality validation. A warning is raised if a non-GPU encoder is selected.\n\n" +
-			"When --finalencode is set and the search encoder is GPU-based, the command automatically derives " +
-			"the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs the final " +
-			"encode with the discovered threshold. The GPU-found threshold is usually a close enough approximation " +
+			"Use --searchencoder to choose the encoder for the search loop. GPU encoders\n" +
+			"(e.g. hevc_nvenc) are strongly recommended for speed. If available, also\n" +
+			"enable CUDA VMAF acceleration (--vmafcuda) to avoid bottlenecking the search\n" +
+			"on CPU-side quality validation. A warning is raised if a non-GPU encoder is selected.\n\n" +
+			"FINAL ENCODE\n" +
+			"When --finalencode is set and the search encoder is GPU-based, the command\n" +
+			"automatically derives the equivalent CPU encoder of the same codec\n" +
+			"(e.g. hevc_nvenc -> libx265) and performs the final encode with the discovered\n" +
+			"threshold. The GPU-found threshold is usually a close enough approximation\n" +
 			"for the CPU pass to be worth the speedup, though it may not be exactly optimal.\n\n" +
-			"If the search encoder is already CPU-based, --finalencode is a no-op because the search result " +
-			"is already the most precise result possible.",
+			"If the search encoder is already CPU-based, --finalencode is a no-op because\n" +
+			"the search result is already the most precise result possible.",
 	),
 	Flags: []cli.Flag{
 		&cli.StringFlag{

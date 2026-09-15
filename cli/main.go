@@ -44,7 +44,21 @@ func main() {
 	cmd := &cli.Command{
 		Name:        linkedName(),
 		Usage:       "Split Encoder: a perceived-quality, VMAF-driven encoder",
-		Description: "Split Encoder is a tool that performs scene-aware video encoding where each segment is independently encoded and validated against configurable VMAF thresholds. For each segment, it searches for the highest QP (smallest file size) that still passes all enabled VMAF metrics, re-encoding at a lower QP if any threshold is not met. Once all segments pass validation, they are merged into the final output file with VMAF results embedded as metadata tags. This guarantees the target perceptual quality at the smallest possible file size for the given encoder, but encoding takes significantly longer than a standard single-pass encode because multiple QP candidates are tested per segment.\n\nThe encode command can be used on its own to handle the entire pipeline, or with intermediate artifacts produced by the master and split commands for finer control.",
+		Description: "Split Encoder is a tool that performs scene-aware video encoding.\n\n" +
+			"HOW IT WORKS\n" +
+			"  1. Splits the input video into scene-aligned segments.\n" +
+			"  2. Encodes each segment independently, searching for the highest QP\n" +
+			"     (smallest file size) that still passes all enabled VMAF quality thresholds.\n" +
+			"  3. Re-encodes at a lower QP if any threshold is not met.\n" +
+			"  4. Merges all validated segments into the final output file.\n" +
+			"  5. Embeds the final VMAF results as metadata tags.\n\n" +
+			"TRADE-OFF\n" +
+			"This guarantees the target perceptual quality at the smallest possible file size,\n" +
+			"but encoding takes significantly longer than a standard single-pass encode\n" +
+			"because multiple QP candidates are tested per segment.\n\n" +
+			"PIPELINE\n" +
+			"The encode command can handle the entire pipeline in one step, or you can use\n" +
+			"the master and split commands to produce intermediate artifacts for finer control.",
 		Version:     version(),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{

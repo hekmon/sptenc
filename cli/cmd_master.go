@@ -17,11 +17,21 @@ import (
 )
 
 var masterCommand = &cli.Command{
-	Name:        "master",
-	Aliases:     []string{"m"},
-	Category:    "Tooling",
-	Usage:       "Create an intermediate lossless video master that can be cut at any frame",
-	Description: "Most video files use Group of Pictures (GoP) encoding, mixing I, P, and B frames. Cutting can only happen on I frames (keyframes), which limits where cuts are possible. Open GoPs make things worse: some B and P frames depend on data outside the GoP, so cutting at an I frame can still silently drop surrounding frames. This command re-encodes the source into a lossless all-intra master using the FFV1 codec, producing a video-only stream where every frame is self-contained. Because FFV1 is mathematically lossless, this introduces no quality degradation compared to the original, enabling precise cuts at any frame with no generational loss.",
+	Name:     "master",
+	Aliases:  []string{"m"},
+	Category: "Tooling",
+	Usage:    "Create an intermediate lossless video master that can be cut at any frame",
+	Description: "Most video files use Group of Pictures (GoP) encoding, which mixes I, P, and B frames.\n\n" +
+		"THE PROBLEM\n" +
+		"  * Cuts can only happen on I-frames (keyframes).\n" +
+		"  * Open GoPs make things worse: some B and P frames depend on data\n" +
+		"    outside their own group, so cutting at an I-frame can still silently\n" +
+		"    drop surrounding frames.\n\n" +
+		"THE SOLUTION\n" +
+		"This command re-encodes the source into a lossless all-intra master using\n" +
+		"the FFV1 codec. Every frame becomes self-contained, so you can cut precisely\n" +
+		"at any frame with no quality loss. FFV1 is mathematically lossless, so this\n" +
+		"introduces no degradation compared to the original.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "outputdir",
