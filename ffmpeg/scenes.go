@@ -184,7 +184,7 @@ func scdetProgress(ffmpegOutput io.ReadCloser, debug func(string), runtimeError 
 			scenes = append(scenes, scene)
 			if debug != nil {
 				debug(fmt.Sprintf("Scene %d detected at %v with score %s",
-					len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
+					len(scenes)+1, scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
 			}
 		}
 	}

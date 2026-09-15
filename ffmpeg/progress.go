@@ -28,40 +28,65 @@ type ProgressStats struct {
 func standardProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats), runtimeError func(error)) {
 	defer ffmpegOutput.Close()
 	scanner := bufio.NewScanner(ffmpegOutput)
-	var stats ProgressStats
+	var (
+		stats        ProgressStats
+		key, value   string
+		ok           bool
+		microSeconds int64
+		err          error
+	)
 	for scanner.Scan() {
-		key, value, ok := strings.Cut(scanner.Text(), "=")
-		if !ok {
+		if key, value, ok = strings.Cut(scanner.Text(), "="); !ok {
+			runtimeError(fmt.Errorf("error reading ffmpeg progress: uncuttable progress line: %s", scanner.Text()))
 			continue
 		}
 		switch key {
 		case "frame":
-			stats.CurrentFrame, _ = strconv.Atoi(value)
+			if stats.CurrentFrame, err = strconv.Atoi(value); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing frame: %s", value))
+			}
 		case "fps":
-			stats.FPS, _ = strconv.ParseFloat(value, 64)
+			if stats.FPS, err = strconv.ParseFloat(value, 64); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing fps: %s", value))
+			}
 		case "dup_frames":
-			stats.Dup, _ = strconv.Atoi(value)
+			if stats.Dup, err = strconv.Atoi(value); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing dup_frames: %s", value))
+			}
 		case "drop_frames":
-			stats.Drop, _ = strconv.Atoi(value)
+			if stats.Drop, err = strconv.Atoi(value); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing drop_frames: %s", value))
+			}
 		case "out_time_us":
-			if us, err := strconv.ParseInt(value, 10, 64); err == nil {
-				stats.Time = time.Duration(us) * time.Microsecond
+			if microSeconds, err = strconv.ParseInt(value, 10, 64); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing out_time: %s", value))
+			} else {
+				stats.Time = time.Duration(microSeconds) * time.Microsecond
 			}
 		case "bitrate":
 			stats.Bitrate = value
 		case "speed":
-			stats.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(value, "x"), 64)
-		case "progress":
-			if progress != nil {
-				progress(stats)
+			if stats.Speed, err = strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(value), "x"), 64); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing speed: %s", value))
 			}
-			if value == "end" {
+		case "progress":
+			switch value {
+			case "continue":
+				if progress != nil {
+					progress(stats)
+				}
+				stats = ProgressStats{}
+			case "end":
 				return
+			default:
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: unexpected progress value: %s", value))
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil && runtimeError != nil {
 		runtimeError(fmt.Errorf("error reading ffmpeg progress: %w", err))
+	} else {
+		runtimeError(errors.New("error reading ffmpeg progress: unexpected end"))
 	}
 }
 
