@@ -2,8 +2,6 @@ module github.com/hekmon/sptenc
 
 go 1.25.0
 
-replace github.com/hekmon/ffmpegutils => ../ffmpegutils
-
 require (
 	al.essio.dev/pkg/shellescape v1.6.0
 	github.com/fatih/color v1.19.0
