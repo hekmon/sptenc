@@ -76,7 +76,7 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, debug bool) (n
 	return
 }
 
-func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFrames int, debug bool) (err error) {
+func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFrames int, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (err error) {
 	// prepare live progress
 	encodeBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(nbFrames)),
@@ -97,10 +97,16 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 	progress := func(stats ffmpeg.ProgressStats) {
 		encodeBar.CurrentSet(uint64(stats.CurrentFrame))
 	}
-	// encode
-	return ffmpeg.FFV1VideoMaster(ctx, ffmpeg.FFV1VideoMasterConfig{
+	// build config
+	config := ffmpeg.FFV1VideoMasterConfig{
 		InputFilePath:  inputFilePath,
 		OutputFilePath: finalFile,
+		NVDec:          masterConfig.NVDec,
+		NVDevice:       masterConfig.NVDevice,
+		VADec:          masterConfig.VADec,
+		VADevice:       masterConfig.VADevice,
+		D3D12Dec:       masterConfig.D3D12Dec,
+		D3D12Device:    masterConfig.D3D12Device,
 		Debug: func(s string) {
 			if debug {
 				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
@@ -110,7 +116,9 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
 		},
 		StatsReport: progress,
-	})
+	}
+	// encode
+	return ffmpeg.FFV1VideoMaster(ctx, config)
 }
 
 /*
@@ -574,8 +582,6 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		ReportPath:        distorted + "_vmaf.json",
 		UltraHD:           videoStream.Height >= ffmpeg.Height4K,
 		NoEnhancementGain: vmafNeg,
-		NVDECReference:    ffmpeg.IsNVDecCompatible(videoStream.CodecName) && vmafCUDA, // source is nvdec compatible and user is indicating us there is a NVIDIA GPU (vmafCUDA)
-		NVDECDistorted:    vmafCUDA,                                                    // encoded output is in HEVC or AV1, both can be decoded by nvdec so the question is: is there a nvidia GPU ? If user requested vmafCUDA we know for sure
 		VMAFCuda:          vmafCUDA,
 		GPUID:             &gpuIndex,
 		Debug: func(s string) {

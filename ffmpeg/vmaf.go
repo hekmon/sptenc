@@ -51,9 +51,7 @@ type VMAFComputeConfig struct {
 	ReportPath        string // Path where the JSON VMAF report will be written.
 	UltraHD           bool   // Use the Ultra-HD (4K) VMAF model.
 	NoEnhancementGain bool   // Use the NEG (No Enhancement Gain) model variant.
-	NVDECReference    bool   // Enable NVDEC hardware acceleration for decoding the reference video.
-	NVDECDistorted    bool   // Enable NVDEC hardware acceleration for decoding the distorted video.
-	VMAFCuda          bool   // Enable CUDA-accelerated VMAF computation.
+	VMAFCuda          bool   // Enable CUDA-accelerated VMAF computation. NVDEC hardware decoding is automatically used for input codecs that support it.
 	GPUID             *int   // Optional GPU device ID to use for hardware acceleration.
 	// Reporting
 	Debug             func(msg string)          // Optional debug logger.
@@ -83,13 +81,32 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	version := VMAFModel(config.UltraHD, config.NoEnhancementGain)
+	// Auto-detect NVDEC compatibility when CUDA is in use
+	nvdecDistorted := false
+	nvdecReference := false
+	if config.VMAFCuda {
+		if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.DistortedPath}); err == nil {
+			if video := stats.VideoTrack(); video != nil {
+				nvdecDistorted = IsNVDecCompatible(video.CodecName)
+			}
+		} else if config.RuntimeError != nil {
+			config.RuntimeError(fmt.Errorf("failed to probe distorted file for NVDEC auto-detection: %w, falling back to software decode", err))
+		}
+		if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.ReferencePath}); err == nil {
+			if video := stats.VideoTrack(); video != nil {
+				nvdecReference = IsNVDecCompatible(video.CodecName)
+			}
+		} else if config.RuntimeError != nil {
+			config.RuntimeError(fmt.Errorf("failed to probe reference file for NVDEC auto-detection: %w, falling back to software decode", err))
+		}
+	}
 	// Build up ffmpeg args
 	args := []string{"-loglevel", "error", "-stats"}
-	if (config.NVDECReference || config.NVDECDistorted || config.VMAFCuda) && config.GPUID != nil {
+	if (nvdecDistorted || nvdecReference || config.VMAFCuda) && config.GPUID != nil {
 		args = append(args, "-init_hw_device", fmt.Sprintf("cuda=nvc:%d", *config.GPUID))
 	}
 	//// distorted file first
-	if config.NVDECDistorted {
+	if nvdecDistorted {
 		args = append(args, "-hwaccel", "cuda")
 		if config.GPUID != nil {
 			args = append(args, "-hwaccel_device", "nvc")
@@ -103,7 +120,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.DistortedPath,
 	)
 	//// ref file
-	if config.NVDECReference {
+	if nvdecReference {
 		args = append(args, "-hwaccel", "cuda")
 		if config.GPUID != nil {
 			args = append(args, "-hwaccel_device", "nvc")
@@ -122,12 +139,12 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 			args = append(args, "-filter_hw_device", "nvc")
 		}
 		var scaleDist, scaleRef string
-		if config.NVDECDistorted {
+		if nvdecDistorted {
 			scaleDist = "[syncdist]scale_cuda=format=yuv420p[dist]"
 		} else {
 			scaleDist = "[syncdist]hwupload,scale_cuda=format=yuv420p[dist]"
 		}
-		if config.NVDECReference {
+		if nvdecReference {
 			scaleRef = "[syncref]scale_cuda=format=yuv420p[ref]"
 		} else {
 			scaleRef = "[syncref]hwupload,scale_cuda=format=yuv420p[ref]"

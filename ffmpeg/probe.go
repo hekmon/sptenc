@@ -235,22 +235,6 @@ const (
 	CodecVideoMJPEG CodecName = "mjpeg" // unverified
 )
 
-// IsNVDecCompatible reports whether the given codec can be decoded by NVDEC in
-// principle. It performs a codec-level check only; it does not verify whether
-// the specific GPU has the required silicon (e.g. AV1 NVDEC requires Ampere or
-// newer, and some datacenter SKUs omit it entirely).
-//
-// Reference: https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvdec-video-decoder-api-prog-guide/index.html#supported-codecs
-func IsNVDecCompatible(codec CodecName) bool {
-	switch codec {
-	case CodecVideoMPEG1, CodecVideoMPEG2, CodecVideoMPEG4, CodecVideoVC1, CodecVideoAVC,
-		CodecVideoHEVC, CodecVideoVP8, CodecVideoVP9, CodecVideoAV1, CodecVideoMJPEG:
-		return true
-	default:
-		return false
-	}
-}
-
 // FFProbeBinaryStream holds metadata for a single stream within a media file.
 type FFProbeBinaryStream struct {
 	Index              int                            `json:"index"`

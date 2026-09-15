@@ -61,6 +61,42 @@ var splitCommand = &cli.Command{
 			Validator:        validateTmpDir,
 			ValidateDefaults: true,
 		},
+		&cli.BoolFlag{
+			Name:     "nvdec",
+			Usage:    "Use NVDEC hardware-accelerated decoding when creating the master (NVIDIA GPU required)",
+			Value:    false,
+			OnlyOnce: true,
+		},
+		&cli.BoolFlag{
+			Name:     "vadec",
+			Usage:    "Use VA-API hardware-accelerated decoding when creating the master (Intel/AMD GPU required)",
+			Value:    false,
+			OnlyOnce: true,
+		},
+		&cli.BoolFlag{
+			Name:     "d3d12dec",
+			Usage:    "Use D3D12VA hardware-accelerated decoding when creating the master (Windows, GPU required)",
+			Value:    false,
+			OnlyOnce: true,
+		},
+		&cli.IntFlag{
+			Name:     "nvidiagpuindex",
+			Usage:    "GPU to use with --nvdec",
+			Value:    ffmpeg.CUDADefaultDevice,
+			OnlyOnce: true,
+		},
+		&cli.StringFlag{
+			Name:     "vaapirendererpath",
+			Usage:    "Direct Rendering Manager render node to use with --vadec",
+			Value:    ffmpeg.VAAPIDefaultDevice,
+			OnlyOnce: true,
+		},
+		&cli.IntFlag{
+			Name:     "d3d12vagpuindex",
+			Usage:    "GPU to use with --d3d12dec",
+			Value:    ffmpeg.D3D12VADefaultDevice,
+			OnlyOnce: true,
+		},
 	},
 	Arguments: []cli.Argument{
 		&cli.StringArg{
@@ -100,6 +136,20 @@ var splitCommand = &cli.Command{
 			return ctx, errors.New("output directory path must be a directory")
 		}
 		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
+		// Validate that at most one hardware decode flag is set
+		var hwDecFlags int
+		if cmd.Bool("nvdec") {
+			hwDecFlags++
+		}
+		if cmd.Bool("vadec") {
+			hwDecFlags++
+		}
+		if cmd.Bool("d3d12dec") {
+			hwDecFlags++
+		}
+		if hwDecFlags > 1 {
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec)")
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -166,8 +216,17 @@ var splitCommand = &cli.Command{
 						}
 					}
 				}()
+				// build optional hw decode config
+				masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
+					cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"),
+					cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
+				)
+				if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec")) &&
+					!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec {
+					fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
+				}
 				// create the master within
-				if fileToProcess, duration, err = createMaster(ctx, inputFilePath, workingDir, cmd.Bool(debugFlagName)); err != nil {
+				if fileToProcess, duration, err = createMaster(ctx, inputFilePath, workingDir, cmd.Bool(debugFlagName), masterConfig); err != nil {
 					return fmt.Errorf("failed to create the master file: %w", err)
 				}
 			}

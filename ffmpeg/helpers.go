@@ -66,3 +66,61 @@ func GetEncoderQPRange(encoder Encoder) (qpMin, qpMax int, found bool) {
 		return
 	}
 }
+
+// IsNVDecCompatible reports whether the given codec can be decoded by NVDEC in
+// principle. It performs a codec-level check only; it does not verify whether
+// the specific GPU has the required silicon (e.g. AV1 NVDEC requires Ampere or
+// newer, and some datacenter SKUs omit it entirely).
+//
+// Supported codecs: H.264, HEVC, MJPEG, MPEG-1/2/4, VP8/VP9, VC-1, AV1.
+//
+// References:
+//   - https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvdec-video-decoder-api-prog-guide/index.html#supported-codecs
+//   - https://trac.ffmpeg.org/wiki/HWAccelIntro#NVDECCUVID
+func IsNVDecCompatible(codec CodecName) bool {
+	switch codec {
+	case CodecVideoMPEG1, CodecVideoMPEG2, CodecVideoMPEG4, CodecVideoVC1, CodecVideoAVC,
+		CodecVideoHEVC, CodecVideoVP8, CodecVideoVP9, CodecVideoAV1, CodecVideoMJPEG:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsVAAPIDecCompatible reports whether the given codec can be decoded by VA-API in
+// principle. It performs a codec-level check only; actual support depends on the
+// specific driver and hardware generation (e.g. AV1 VA-API decode requires Intel
+// Xe-LP+ or AMD VCN3+).
+//
+// Supported codecs: H.264, HEVC, MPEG-2, VP9, VC-1, AV1.
+//
+// Reference: https://trac.ffmpeg.org/wiki/HWAccelIntro#VA-API
+func IsVAAPIDecCompatible(codec CodecName) bool {
+	switch codec {
+	case CodecVideoMPEG2, CodecVideoVC1, CodecVideoAVC,
+		CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsD3D12DecCompatible reports whether the given codec can be decoded by D3D12VA
+// in principle. It performs a codec-level check only; actual support depends on
+// the specific GPU, driver, and Windows version (e.g. AV1 D3D12VA decode requires
+// recent hardware, and the driver must expose decode tier 2 support).
+//
+// Supported codecs: H.264, HEVC, MPEG-2, VP9, VC-1, AV1.
+//
+// References:
+//   - https://ffmpeg.org/doxygen/trunk/dir_3b1f69f89eda39a44baf4887988d54a7.html
+//   - https://ffmpeg.org/ffmpeg-codecs.html
+func IsD3D12DecCompatible(codec CodecName) bool {
+	switch codec {
+	case CodecVideoMPEG2, CodecVideoVC1, CodecVideoAVC,
+		CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
+		return true
+	default:
+		return false
+	}
+}

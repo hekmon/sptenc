@@ -366,7 +366,9 @@ var encodeCommand = &cli.Command{
 				masterFile string
 				duration   time.Duration
 			)
-			if masterFile, duration, err = createMaster(ctx, inputPath, workingDir, cmd.Bool(debugFlagName)); err != nil {
+			masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String("encoder"),
+				cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"))
+			if masterFile, duration, err = createMaster(ctx, inputPath, workingDir, cmd.Bool(debugFlagName), masterConfig); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// analyze
@@ -665,4 +667,36 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Complete split encoding took %s\n", duration.Round(time.Millisecond))
 		return
 	},
+}
+
+// buildFFV1MasterConfigForEncoder determines hardware decode settings for FFV1 master creation
+// based on the chosen encoder and input codec compatibility.
+func buildFFV1MasterConfigForEncoder(ctx context.Context, inputPath string, encoder string, nvidiaGPUIndex int, vaapiDevice string, d3d12GPUIndex int) ffmpeg.FFV1VideoMasterConfig {
+	var config ffmpeg.FFV1VideoMasterConfig
+	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: inputPath})
+	if err != nil {
+		return config
+	}
+	video := stats.VideoTrack()
+	if video == nil {
+		return config
+	}
+	switch ffmpeg.Encoder(encoder) {
+	case ffmpeg.HEVCEncoderNVEnc, ffmpeg.AV1EncoderNVEnc:
+		if ffmpeg.IsNVDecCompatible(video.CodecName) {
+			config.NVDec = true
+			config.NVDevice = nvidiaGPUIndex
+		}
+	case ffmpeg.HEVCEncoderVAAPI, ffmpeg.AV1EncoderVAAPI:
+		if ffmpeg.IsVAAPIDecCompatible(video.CodecName) {
+			config.VADec = true
+			config.VADevice = vaapiDevice
+		}
+	case ffmpeg.HEVCEncoderD3D12VA:
+		if ffmpeg.IsD3D12DecCompatible(video.CodecName) {
+			config.D3D12Dec = true
+			config.D3D12Device = d3d12GPUIndex
+		}
+	}
+	return config
 }

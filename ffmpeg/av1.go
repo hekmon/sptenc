@@ -312,8 +312,7 @@ const (
 type AV1NVEncEncodeQPConfig struct {
 	// Input
 	Input  string
-	NVDec  bool // decode in GPU, codec must be supported (AV1 NVDEC requires Ampere or newer)
-	Device int  // NVIDIA GPU index, see CUDADefaultDevice
+	Device int // NVIDIA GPU index, see CUDADefaultDevice
 	// Output
 	Preset       NVEncEncodingPreset // shared with HEVC NVENC, if unset it will be set automatically to NVEncPresetP4
 	Quantization int                 // AV1Lossless is rejected: NVENC AV1 lossless bit-exactness unverified
@@ -350,6 +349,15 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 	default:
 		return fmt.Errorf("invalid preset: %q", preset)
 	}
+	// Auto-detect NVDEC compatibility from input codec
+	nvdec := false
+	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
+		if video := stats.VideoTrack(); video != nil {
+			nvdec = IsNVDecCompatible(video.CodecName)
+		}
+	} else if config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("failed to probe input for NVDEC auto-detection: %w, falling back to software decode", err))
+	}
 	// Prepare
 	args := []string{
 		"-y",
@@ -358,7 +366,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 		"-filter_hw_device", "nv",
 	}
 	//// nvdec ?
-	if config.NVDec {
+	if nvdec {
 		args = append(args,
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
@@ -366,7 +374,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 		)
 	}
 	args = append(args, "-i", config.Input)
-	if config.NVDec {
+	if nvdec {
 		args = append(args, "-vf", "scale_cuda=format=p010le") // convert to 10bits if necessary while staying on CUDA device between nvdec and nvenc
 	} else {
 		args = append(args, "-vf", "hwupload,scale_cuda=format=p010le") // perform the 10bits conversion in CUDA for performance (as we are going to use nvenc)
@@ -455,7 +463,6 @@ const (
 type AV1VAAPIEncodeQPConfig struct {
 	// Input
 	Input  string
-	VADec  bool   // decode on GPU, codec must be supported (driver-dependent)
 	Device string // DRM render node, if unset it will be set automatically to VAAPIDefaultDevice
 	// Output
 	Quantization int    // AV1Lossless is rejected: av1_vaapi has no lossless mode
@@ -485,13 +492,22 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 	if config.Device == "" {
 		config.Device = VAAPIDefaultDevice
 	}
+	// Auto-detect VA-API decode compatibility from input codec
+	vadec := false
+	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
+		if video := stats.VideoTrack(); video != nil {
+			vadec = IsVAAPIDecCompatible(video.CodecName)
+		}
+	} else if config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("failed to probe input for VA-API decode auto-detection: %w, falling back to software decode", err))
+	}
 	// Prepare
 	args := []string{
 		"-y",
 		"-loglevel", "error", "-stats",
 	}
 	// // vaapi decoding ?
-	if config.VADec {
+	if vadec {
 		args = append(args,
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
@@ -504,7 +520,7 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 		)
 	}
 	args = append(args, "-i", config.Input)
-	if config.VADec {
+	if vadec {
 		args = append(args, "-vf", "scale_vaapi=format=p010le") // convert to 10bits if necessary while staying on the GPU between decode and encode
 	} else {
 		args = append(args, "-vf", "hwupload,scale_vaapi=format=p010le") // perform the 10bits conversion on GPU for performance (as we are going to use vaapi encode)

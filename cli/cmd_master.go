@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/hekmon/sptenc/ffmpeg"
+
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
@@ -26,6 +28,48 @@ var masterCommand = &cli.Command{
 			Usage:    "Output directory",
 			Value:    "",
 			OnlyOnce: true,
+		},
+		&cli.BoolFlag{
+			Name:     "nvdec",
+			Usage:    "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)",
+			Value:    false,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
+		},
+		&cli.BoolFlag{
+			Name:     "vadec",
+			Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
+			Value:    false,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
+		},
+		&cli.BoolFlag{
+			Name:     "d3d12dec",
+			Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
+			Value:    false,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
+		},
+		&cli.IntFlag{
+			Name:     "nvidiagpuindex",
+			Usage:    "GPU to use with --nvdec",
+			Value:    ffmpeg.CUDADefaultDevice,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
+		},
+		&cli.StringFlag{
+			Name:     "vaapirendererpath",
+			Usage:    "Direct Rendering Manager render node to use with --vadec",
+			Value:    ffmpeg.VAAPIDefaultDevice,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
+		},
+		&cli.IntFlag{
+			Name:     "d3d12vagpuindex",
+			Usage:    "GPU to use with --d3d12dec",
+			Value:    ffmpeg.D3D12VADefaultDevice,
+			OnlyOnce: true,
+			Category: "Hardware accelerated decoding",
 		},
 	},
 	Arguments: []cli.Argument{
@@ -66,6 +110,20 @@ var masterCommand = &cli.Command{
 			return ctx, errors.New("output directory path must be a directory")
 		}
 		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
+		// Validate that at most one hardware decode flag is set
+		var hwDecFlags int
+		if cmd.Bool("nvdec") {
+			hwDecFlags++
+		}
+		if cmd.Bool("vadec") {
+			hwDecFlags++
+		}
+		if cmd.Bool("d3d12dec") {
+			hwDecFlags++
+		}
+		if hwDecFlags > 1 {
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vadec, --d3d12dec)")
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -80,13 +138,55 @@ var masterCommand = &cli.Command{
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
+		// build optional hw decode config
+		masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
+			cmd.Bool("nvdec"), cmd.Bool("vadec"), cmd.Bool("d3d12dec"),
+			cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
+		)
+		if (cmd.Bool("nvdec") || cmd.Bool("vadec") || cmd.Bool("d3d12dec")) &&
+			!masterConfig.NVDec && !masterConfig.VADec && !masterConfig.D3D12Dec {
+			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
+		}
 		// create master
-		_, _, err = createMaster(ctx, inputFilePath, ctx.Value(outputDirCtxKey).(string), cmd.Bool(debugFlagName))
+		var outputFile string
+		outputFile, _, err = createMaster(ctx, inputFilePath, ctx.Value(outputDirCtxKey).(string), cmd.Bool(debugFlagName), masterConfig)
+		if err == nil {
+			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
+		}
 		return
 	},
 }
 
-func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bool) (outputFile string, duration time.Duration, err error) {
+// buildFFV1MasterConfigForFlags determines hardware decode settings for FFV1 master creation
+// based on explicit user flags and input codec compatibility.
+func buildFFV1MasterConfigForFlags(ctx context.Context, inputPath string, nvdec, vadec, d3d12dec bool, nvDevice int, vaDevice string, d3d12Device int) ffmpeg.FFV1VideoMasterConfig {
+	var config ffmpeg.FFV1VideoMasterConfig
+	if !nvdec && !vadec && !d3d12dec {
+		return config
+	}
+	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: inputPath})
+	if err != nil {
+		return config
+	}
+	video := stats.VideoTrack()
+	if video == nil {
+		return config
+	}
+	switch {
+	case nvdec && ffmpeg.IsNVDecCompatible(video.CodecName):
+		config.NVDec = true
+		config.NVDevice = nvDevice
+	case vadec && ffmpeg.IsVAAPIDecCompatible(video.CodecName):
+		config.VADec = true
+		config.VADevice = vaDevice
+	case d3d12dec && ffmpeg.IsD3D12DecCompatible(video.CodecName):
+		config.D3D12Dec = true
+		config.D3D12Device = d3d12Device
+	}
+	return config
+}
+
+func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (outputFile string, duration time.Duration, err error) {
 	// count frames
 	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
 	start := time.Now()
@@ -103,7 +203,7 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bo
 	inputFileName, _ := extractFileNameInfos(inputFilePath)
 	outputFile = filepath.Join(outputDir, fmt.Sprintf("%s - ffv1 master.mkv", inputFileName))
 	start = time.Now()
-	if err = liveFFV1Master(ctx, inputFilePath, outputFile, nbFrames, debug); err != nil {
+	if err = liveFFV1Master(ctx, inputFilePath, outputFile, nbFrames, debug, masterConfig); err != nil {
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
 		return
 	}

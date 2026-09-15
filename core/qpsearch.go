@@ -599,8 +599,6 @@ func segmentVMAF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConf
 		ReportPath:        segmentEncoded + "_vmaf.json",
 		UltraHD:           videoTrack.Height >= ffmpeg.Height4K,
 		NoEnhancementGain: config.VMAFNeg,
-		NVDECReference:    ffmpeg.IsNVDecCompatible(videoTrack.CodecName) && config.VMAFCUDA, // rare: only when user supplies their own segments (advanced mode). Default slicing produces FFV1 which is not NVDEC-compatible.
-		NVDECDistorted:    config.VMAFCUDA,                                                   // encoded segments are in HEVC or AV1, both can be decoded by nvdec so the question is: is there a nvidia GPU ? If user requested vmafCUDA we know for sure
 		VMAFCuda:          config.VMAFCUDA,
 		GPUID:             &config.NVIDIAGPUIndex,
 		Debug: func(msg string) {
