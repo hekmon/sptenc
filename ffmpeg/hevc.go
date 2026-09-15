@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/hekmon/processpriority"
 )
@@ -460,7 +461,8 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
  * HEVC D3D12VA
  * ffmpeg -h encoder=hevc_d3d12va
  * Windows only, vendor-agnostic (Intel/AMD/NVIDIA).
- * Requires FFmpeg >= 8.1 (scale_d3d12 filter, used for on-GPU 10-bit conversion).
+ * No GPU scaling filter exists for D3D12 (scale_d3d12 does not exist in FFmpeg),
+ * so 8-bit sources require a CPU round-trip (hwdownload,format=p010le,hwupload).
  */
 
 const (
@@ -493,8 +495,8 @@ type HEVCD3D12VAEncodeQPConfig struct {
 }
 
 // HEVCD3D12VAEncodeQP encodes a video file to HEVC/H.265 using the D3D12VA hardware encoder via FFmpeg.
-// Requires FFmpeg >= 8.1 (scale_d3d12). The encoder only accepts hardware frames
-// ("Supported pixel formats: d3d12"), so hwupload is mandatory on the software decode path.
+// The encoder only accepts hardware frames ("Supported pixel formats: d3d12"), so hwupload is
+// mandatory on the software decode path. 4:2:2 and 4:4:4 chroma subsampling are not supported.
 // WARNING: currently untested
 func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) (err error) {
 	// Validate inputs
@@ -511,15 +513,22 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	if config.Quantization < HEVCD3D12VAQPMin || config.Quantization > HEVCD3D12VAQPMax {
 		return fmt.Errorf("quantization must be %d-%d, got %d", HEVCD3D12VAQPMin, HEVCD3D12VAQPMax, config.Quantization)
 	}
-	// Auto-detect D3D12VA decode compatibility from input codec
+	// Auto-detect D3D12VA decode compatibility and pixel format from input
 	d3d12dec := false
+	pixFmt := ""
 	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Input}); err == nil {
 		if video := stats.VideoTrack(); video != nil {
 			d3d12dec = IsD3D12DecCompatible(video.CodecName)
+			pixFmt = video.PixFmt
 		}
 	} else if config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("failed to probe input for D3D12VA decode auto-detection: %w, falling back to software decode", err))
 	}
+	// Reject chroma formats that D3D12VA does not support
+	if strings.Contains(pixFmt, "422") || strings.Contains(pixFmt, "444") {
+		return errors.New("d3d12va does not support 4:2:2 or 4:4:4 chroma subsampling")
+	}
+	is10Bit := strings.Contains(pixFmt, "p10") || strings.Contains(pixFmt, "10le")
 	// Prepare
 	args := []string{
 		"-y",
@@ -537,10 +546,19 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 		)
 	}
 	args = append(args, "-i", config.Input)
+	//// filter chain: stay on GPU or convert to p010le when necessary
 	if d3d12dec {
-		args = append(args, "-vf", "scale_d3d12=format=p010le") // convert to 10bits if necessary while staying on the GPU between decode and encode
+		if !is10Bit {
+			// 8-bit source: round-trip through CPU for 10-bit conversion (no scale_d3d12 filter exists)
+			args = append(args, "-vf", "hwdownload,format=p010le,hwupload")
+		}
+		// 10-bit source: d3d12 frames pass straight through, no filter needed
 	} else {
-		args = append(args, "-vf", "hwupload,scale_d3d12=format=p010le") // perform the 10bits conversion on GPU for performance (as we are going to use d3d12va encode)
+		if is10Bit {
+			args = append(args, "-vf", "hwupload") // 10-bit software frames → d3d12
+		} else {
+			args = append(args, "-vf", "format=p010le,hwupload") // 8-bit → 10-bit conversion, then upload
+		}
 	}
 	//// flux selection
 	args = append(args,
