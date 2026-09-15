@@ -551,6 +551,46 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 	})
 }
 
+func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segments []string, totalDuration time.Duration, debug bool) (err error) {
+	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
+	if err != nil {
+		err = fmt.Errorf("failed to generate concat list file: %w", err)
+		return
+	}
+	concatBar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(totalDuration.Milliseconds())),
+		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "    Concat | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %s/%s", time.Duration(bar.Current())*time.Millisecond, totalDuration.Round(time.Second))
+		}),
+	)
+	defer liveprogress.RemoveBar(concatBar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		concatBar.CurrentSet(uint64(stats.Time.Milliseconds()))
+	}
+	return ffmpeg.Concat(ctx, ffmpeg.ConcatConfig{
+		ConcatListPath: concatList,
+		ConcatUnsafe:   true,
+		OutputPath:     outputFile,
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
+}
+
 func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *ffmpeg.FFProbeBinaryStream, totalFrames, gpuIndex int, vmafNeg, vmafCUDA, debug bool) (
 	stats ffmpeg.VMAFReport, err error) {
 	vmafBar := liveprogress.AddBar(

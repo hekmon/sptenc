@@ -152,7 +152,6 @@ var splitCommand = &cli.Command{
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("output directory path must be a directory")
 		}
-		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
 		if cmd.Bool("nvdec") {
@@ -285,9 +284,13 @@ var splitCommand = &cli.Command{
 		}
 
 		// split
+		outputDir := cmd.String("outputdir")
+		if outputDir == "" {
+			outputDir = filepath.Dir(inputFilePath)
+		}
 		fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes...\n")
 		start = time.Now()
-		if err = liveSplitScenes(ctx, fileToProcess, ctx.Value(outputDirCtxKey).(string), duration, scenes, cmd.Bool(debugFlagName)); err != nil {
+		if err = liveSplitScenes(ctx, fileToProcess, outputDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to split scenes: %w", err)
 		}
 		fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %s\n",

@@ -116,7 +116,6 @@ var masterCommand = &cli.Command{
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("output directory path must be a directory")
 		}
-		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
 		if cmd.Bool("nvdec") {
@@ -158,8 +157,12 @@ var masterCommand = &cli.Command{
 			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 		}
 		// create master
+		outputDir := cmd.String("outputdir")
+		if outputDir == "" {
+			outputDir = filepath.Dir(inputFilePath)
+		}
 		var outputFile string
-		outputFile, _, err = createMaster(ctx, inputFilePath, ctx.Value(outputDirCtxKey).(string), cmd.Bool(debugFlagName), masterConfig)
+		outputFile, _, err = createMaster(ctx, inputFilePath, outputDir, cmd.Bool(debugFlagName), masterConfig)
 		if err == nil {
 			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
 		}

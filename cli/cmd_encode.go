@@ -273,7 +273,6 @@ var encodeCommand = &cli.Command{
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("output directory path must be a directory")
 		}
-		ctx = context.WithValue(ctx, outputDirCtxKey, outputDir)
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String("statscachedir"), 0755); err != nil {
 			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
@@ -587,7 +586,15 @@ var encodeCommand = &cli.Command{
 		} else {
 			originalFile = inputPath
 		}
-		outputPath := computeFinalPath(originalFile, ctx.Value(outputDirCtxKey).(string), ffmpeg.Encoder(cmd.String("encoder")))
+		outputDir := cmd.String("outputdir")
+		if outputDir == "" {
+			if inputInfos.IsDir() {
+				outputDir = filepath.Dir(cmd.String("originalfile"))
+			} else {
+				outputDir = filepath.Dir(inputPath)
+			}
+		}
+		outputPath := computeFinalPath(originalFile, outputDir, ffmpeg.Encoder(cmd.String("encoder")))
 		// Determine whether to auto-convert audio to FLAC.
 		// sourceStats was probed from either the input file (single file) or the first segment (directory).
 		// Probe originalFile directly to get the correct audio stream info in both cases.
