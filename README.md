@@ -10,85 +10,156 @@ This approach produces the smallest possible file without compromising the targe
 
 > **Trade-off:** Achieving both smaller file size AND guaranteed quality comes at a cost: encoding time will be significantly longer than standard single-pass encoding, as multiple QP values are tested on each segment until all VMAF thresholds are met.
 
-> **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding.
+> **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding, and the VMAF perceptual quality models that power it.
+
+## Commands
+
+sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed usage of each.
+
+| Command | Alias | Purpose |
+|---|---|---|
+| `check` | `c` | Verify that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
+| `master` | `m` | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
+| `split` | `s` | Detect scene changes and split a video into separate segment files |
+| `encode` | `e` | Full pipeline: split (if needed), encode segments, validate VMAF, remux, and tag |
+
+Global flags (available on all commands):
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--debug` | `-d` | `false` | Print debug logs and preserve temporary directories |
+| `--ffmpegpath` | | `ffmpeg` | Path to the ffmpeg binary |
+| `--ffprobepath` | | `ffprobe` | Path to the ffprobe binary |
+| `--mkvpropeditpath` | | `mkvpropedit` | Path to the mkvpropedit binary |
 
 ## How It Works
 
-1. **Scene detection** - The input is split at scene change boundaries (FFmpeg `scdet`), producing semantically coherent segments for consistent per-segment VMAF scoring. Alternatively, scene detection can be disabled to split at every I-frame instead.
-2. **Per-segment encoding** - Each segment is encoded independently with `libx265` or `NVENC`.
+1. **Scene detection** - For a single input file, a lossless FFV1 master is created first so every frame is self-contained and can be cut precisely at any point. The master is then analyzed with FFmpeg `scdet` to find scene boundaries, producing semantically coherent segments for consistent per-segment VMAF scoring.
+2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `svtav1`).
 3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
-4. **Adaptive QP search** - sptenc maintains a QP statistics database per VMAF profile across runs (see below). This significantly accelerates convergence on subsequent runs.
-5. **Best effort** - If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs. An alternative VMAF minimum can be set/used for such cases to avoid the large output of QP 0 encodes.
-6. **Muxing & tagging** - Segments are merged into a single output file. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags.
+4. **Adaptive QP search** - sptenc maintains a QP statistics database per encoder and VMAF profile across runs (see below). This significantly accelerates convergence on subsequent runs.
+5. **Best effort** - If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
+6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
 
 ## Key Features
 
 - 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
-- 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality (default mode); can be disabled to split at every I-frame instead
+- 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
 - 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
-- 🔍 **4 VMAF models, auto-selected** - Automatically uses 1080p or 4K model based on input resolution; add `-vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
+- 🔍 **4 VMAF models, auto-selected** - Automatically uses 1080p or 4K model based on input resolution; add `--vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
 - 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
-- 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to dramatically reduce QP search iterations (see below)
-- ⚡ **NVENC support** - GPU encoding for fast VMAF profile prototyping before the final `libx265` encode (which produces significantly smaller files at the cost of longer encoding times)
-- 🌸 **Anime tuning** - `-anime` flag for `libx265` parameters optimized for animation
-- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `-vmafcuda` flag. See the building guide below.
+- 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
+- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`) and AV1 (`libaom-av1`, `svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
+- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmafcuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
+- 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
+- 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
 
 ## Input Requirements
 
-### Closed GOP Structure
-**sptenc requires all input files to have a closed GOP (Group of Pictures) structure.** This means each GOP must be self-contained and not reference frames from previous or subsequent GOPs. This is essential because:
-- When slicing an open GOP video, frames referencing other GOPs become undecodable and are dropped at decoding
-- Accumulated dropped frames shorten the video duration, causing audio/video desynchronization
-- VMAF comparison requires frame-exact alignment between source and encoded segments
-
-If your source is not closed GOP, convert it first:
-
-```bash
-# TODO
-```
-
-> **Note:** Bluray remuxes are typically closed GOP, but often use a fixed length GOPs (e.g. 10s). This will lower the QP variation range and may result in lower efficiency. Even for Bluray remuxes with closed GOP, it's recommended to run the above command to use the encoder heuristics to recreate variable GOP length.
+### Constant Frame Rate (CFR)
+**Variable frame rate (VFR) content is not supported.** VMAF requires frame-exact alignment between reference and distorted videos. VFR content causes FFmpeg to duplicate or drop frames when forced to a constant rate, invalidating VMAF scores. sptenc rejects VFR inputs at startup.
 
 ### Pre-segmented Input (Optional)
 
-Instead of letting sptenc split the input automatically, you can provide an already-split directory of closed GOP segments:
+Instead of letting sptenc split the input automatically, you can provide an already-split directory of segments. Files must be `.mkv` or `.mp4` and are processed in **alphabetical order** — name them accordingly (e.g. `seg_01.mkv`, `seg_02.mkv`) to preserve scene order. All segments must share the same codec and frame rate.
 
 ```bash
-./sptenc -input ./gop_dir/ -source original_with_audio.mkv
+./sptenc encode ./gop_dir/ --originalfile original_with_audio.mkv
 ```
-When using a pre-segmented directory, you can also use `-source` to specify the original file with audio tracks for final remuxing.
+
+When using a pre-segmented directory, `--originalfile` (alias `-f`) is **required** so sptenc can remux audio, subtitles, and other streams into the final output.
 
 ## Quick Start
 
-### Basic encode - VMAF mean ≥ 93 (default)
+### Check your environment
 ```bash
-./sptenc -input video.mkv
+./sptenc check
+```
+
+### Basic encode - VMAF harmonic mean ≥ 93 (default)
+```bash
+./sptenc encode video.mkv
 ```
 
 ### Strict quality with multiple thresholds
 ```bash
-./sptenc -input video.mkv -vmafmean 95 -vmafp5 85 -vmafmin 70
-```
-
-### Anime source
-```bash
-./sptenc -input anime.mkv -anime -vmafmean 95 -vmafp5 85
+./sptenc encode video.mkv --vmafmean 95 --vmafp5 85 --vmafmin 70
 ```
 
 ### Upscaled or denoised source - use VMAF NEG
 ```bash
-./sptenc -input upscaled.mkv -vmafneg -vmafmean 93
+./sptenc encode upscaled.mkv --vmafneg --vmafmean 93
 ```
 
 ### Fast VMAF profile prototyping with NVENC on the second GPU
 ```bash
-./sptenc -input video.mkv -nvenc -nvdec -vmafcuda -gpu 1 -vmafmean 93
-# Once happy with the profile, re-run without -nvenc for the final smaller encode
+./sptenc encode video.mkv --encoder hevc_nvenc --vmafcuda --nvidiagpuindex 1 --vmafmean 93
+# Once happy with the profile, re-run with the default libx265 for the final smaller encode
 ```
 
-### Pre-segmented GOP directory
+### Pre-segmented directory
 ```bash
-./sptenc -input ./gop_dir/ -source original_with_audio.mkv -vmafmean 95
+./sptenc encode ./gop_dir/ --originalfile original_with_audio.mkv --vmafmean 95
+```
+
+### Manual pipeline (master → split → encode)
+```bash
+./sptenc master video.mkv
+./sptenc split "video - ffv1 master.mkv" --master --threshold 12 --outputdir ./segments/
+./sptenc encode ./segments/ --originalfile video.mkv
+```
+
+> Use `--analyze` with the `split` command to preview detected scenes without splitting. Experiment with `--threshold` (1–100, default 10): higher values detect fewer scenes, lower values detect more.
+
+## Encoders
+
+sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`) selects which one to use.
+
+| Encoder | Codec | Type | Platforms |
+|---|---|---|---|
+| `libx265` | HEVC | CPU | All |
+| `hevc_nvenc` | HEVC | NVIDIA GPU | All (NVIDIA GPU required) |
+| `hevc_vaapi` | HEVC | VAAPI GPU | Linux |
+| `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
+| `libaom-av1` | AV1 | CPU | All |
+| `svtav1` | AV1 | CPU | All |
+| `av1_nvenc` | AV1 | NVIDIA GPU | All |
+| `av1_vaapi` | AV1 | VAAPI GPU | Linux |
+
+> **Tip:** `svtav1` is preferred over `libaom-av1` for speed when using CPU AV1 encoding. Run `sptenc check` to see which encoders your ffmpeg build supports.
+
+### Encoder selection vs file size
+
+| | CPU encoders (`libx265`, `svtav1`) | GPU encoders (`*_nvenc`, `*_vaapi`) |
+|---|---|---|
+| Output file size | ✅ Optimal | ❌ ~1.5–2× larger |
+| Speed | Slower | ✅ Much faster |
+| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search |
+
+### GPU selection flags
+
+When using a GPU encoder, you can target a specific device:
+
+| Flag | Default | Used with |
+|---|---|---|
+| `--nvidiagpuindex` | `0` | `hevc_nvenc`, `av1_nvenc` |
+| `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
+| `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
+
+### Base ffmpeg encode options
+
+Under the hood, here are the base ffmpeg encoding options used by sptenc.
+
+#### libx265
+
+```bash
+ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset 'slow' -qp 'X' -x265-params 'aq-mode=3' [...]
+```
+
+#### NVENC
+
+```bash
+ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial_aq 1 -temporal_aq 1 [...]
 ```
 
 ## VMAF
@@ -97,10 +168,10 @@ When using a pre-segmented directory, you can also use `-source` to specify the 
 
 | Resolution | Standard Model | NEG Model |
 |---|---|---|
-| < 4K | `vmaf_v0.6.1` | `vmaf_v0.6.1_neg` |
-| ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1_neg` |
+| < 4K | `vmaf_v0.6.1` | `vmaf_v0.6.1neg` |
+| ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1neg` |
 
-The model is **automatically selected** based on input resolution. Use `-vmafneg` when the source has been upscaled, sharpened, or denoised - standard models will over-score such content.
+The model is **automatically selected** based on input resolution. Use `--vmafneg` when the source has been upscaled, sharpened, or denoised — standard models will over-score such content.
 
 > **Note:** NEG stands for **No Enhancement Gain**. These variants are designed to avoid over-scoring processed content (upscaled, denoised, sharpened). See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models.md#disabling-enhancement-gain-neg-mode) for details.
 
@@ -120,47 +191,52 @@ The model is **automatically selected** based on input resolution. Use `-vmafneg
 
 ### sptenc thresholds
 
-| Flag | Description | Default | Use Case |
+VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND**
+(Just Noticeable Difference — detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%). See [Netflix via StreamingLearningCenter — Just Noticeable Difference](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html).
+
+| Metric | Flag | Default | Meaning (threshold T) |
 |---|---|---|---|
-| `-vmafmean` | Arithmetic mean of all frames | **93** | General quality targeting |
-| `-vmafhmean` | Harmonic mean (penalizes outliers) | disabled | Stricter than mean; enforces consistency |
-| `-vmafmedian` | Median (P50) | disabled | Ensures 50% of frames meet threshold |
-| `-vmafp25` | 25th percentile | disabled | Ensures 75% of frames meet threshold |
-| `-vmafp10` | 10th percentile | disabled | Ensures 90% of frames meet threshold |
-| `-vmafp5` | 5th percentile | disabled | Ensures 95% of frames meet threshold |
-| `-vmafp1` | 1st percentile | disabled | Ensures 99% of frames meet threshold |
-| `-vmafmin` | Worst single frame | disabled | Ensures 100% of frames meet threshold - may inflate bitrate |
-| `-vmafminalt` | Fallback for best-effort segments | disabled | For segments that cannot meet `-vmafmin` even at QP 0 |
+| Harmonic mean | `--vmafhmean` | **93** | Penalizes local dips; **default gate** because it cannot under-deliver: hmean ≥ T mathematically implies mean ≥ T |
+| Arithmetic mean | `--vmafmean` | disabled | Average quality. Redundant as a gate whenever hmean or a low percentile is enabled — kept for reporting and for external comparability (Netflix 93 convention, all published ladders use arithmetic mean) |
+| Median | `--vmafmedian` | disabled | ≥ 50% of frames at or above T |
+| Percentile 25 | `--vmafp25` | disabled | ≥ 75% of frames at or above T |
+| Percentile 10 | `--vmafp10` | disabled | ≥ 90% of frames at or above T |
+| Percentile 5 | `--vmafp5` | disabled | ≥ 95% of frames at or above T |
+| Percentile 1 | `--vmafp1` | disabled | ≥ 99% of frames at or above T |
+| Min | `--vmafmin` | disabled | 100% of frames at or above T — strictest floor. Can over-fire on transient frames (title cards, flash frames) and inflate bitrate |
+
+**Fixed relationship:** `min ≤ p1 ≤ p5 ≤ … ≤ hmean ≤ mean`
+
+Consequences used everywhere below:
+- **Gate composition:** one strict measure > several modest ones. Enabling `--vmafhmean T` makes `--vmafmean T` a tautology — don't gate both.
+- **Diagnostic inversion:** the **mean − hmean gap** is the signal for "uniformly good" (small gap → QP is well tuned) vs "good on average with bad patches" (large gap → per-scene splitter cut, or QP granularity issue, or move the gate to hmean/min). The mean is always logged for this reason even when it's not gated.
 
 **Rules:**
 - All enabled thresholds must pass simultaneously (AND logic)
 - Set any threshold to `-1` to disable it
 
-> 💡 **Tip:** Start with `-vmafmean 93` alone with the `-debug` flag to inspect each encode attempt VMAF score to identify problematic scenes, then add `-vmafp5` or `-vmafp1` if needed.
+> 💡 **Tip:** Start with `--vmafmean 93` alone with the `--debug` flag to inspect each encode attempt's VMAF score and identify problematic scenes, then move the actual gate to `--vmafhmean 93`, and add `--vmafp5` or `--vmafp1` only if a profile demands explicit percentile guarantees. Running mean + hmean gates at the same value is redundant — only one of them is real work.
 
 ### Recommended Values
 
-VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND** (Just Noticeable Difference -
-detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%) ([Netflix via StreamingLearningCenter](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html)).
-
-| Use Case | Recommended metric | Target value |
+| Use Case | Gate | Target value |
 |---|---|---|
-| "I am afraid of deleting my lossless master file" | `-vmafmean` + `-vmafmin` | `99` + `93` |
-| Archival / mastering | `-vmafhmean` | `95` |
-| General streaming / VOD | `-vmafmean` | `93` |
-| Live sports / fast motion | `-vmafmean` + `-vmafp10` | `93` + `88` |
-| Mobile / bandwidth-constrained | `-vmafmean` | `85–90` |
-| Quality consistency critical | `-vmafp5` or `-vmafp1` | `85` |
+| "I am afraid of deleting my lossless master file" | `--vmafhmean` + `--vmafmin` | `99` + `93` |
+| Archival / mastering | `--vmafhmean` | `95` |
+| General streaming / VOD | `--vmafhmean` | `93` (default) |
+| Live sports / fast motion | `--vmafhmean` | `93` |
+| Mobile / bandwidth-constrained | `--vmafmean` | `85–90` |
+| Quality consistency critical | `--vmafhmean` or `--vmafp5` | `90` |
 
-> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is
-> *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers.
-> The 95 target, from a more recent paper, is the lowest score at which content is *"on average
-> subjectively indistinguishable from the original"* - a higher bar that costs ~1400 kbps extra at the
-> top rung ([StreamingLearningCenter](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)).
+**Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `--vmafmean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
+
+**Why the paranoid-master row is hmean + min and not mean + min:** `hmean ≥ 99` entails `mean ≥ 99`, so gating mean 99 was redundant. The `--vmafmin 93` floor survives alongside because harmonic mean punishes dips it *recognizes* but still tolerates genuinely isolated single frames; min closes that last gap.
+
+> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers ([StreamingLearningCenter — analysis](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)). The 95 target, from a more recent paper, is the lowest score at which content is *"on average subjectively indistinguishable from the original"* — a higher bar that costs ~1400 kbps extra at the top rung. With `--vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
 
 ## Adaptive QP Search
 
-One of sptenc's core performance features. After each complete encode job finishes (all segments processed), sptenc stores QP statistics **per VMAF profile** (i.e. the combination of enabled metrics and their target values), weighted by the number of GOPs/segments.
+One of sptenc's core performance features. After each complete encode job finishes (all segments processed), sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments.
 
 This results in significantly fewer encode iterations and improved encode time. Here are some examples:
 
@@ -169,11 +245,11 @@ This results in significantly fewer encode iterations and improved encode time. 
 | Small episode | ~7h30 | ~4h |
 | Film | ~85h | ~60h |
 
-The stats files are **profile-specific**: changing any VMAF threshold value will change the file name and start a fresh learning curve for this new profile.
+The stats files are **profile-specific**: changing the encoder or any VMAF threshold value will change the file name and start a fresh learning curve for this new combination.
 
 ### Persistent Stats from Previous Runs
 
-QP statistics are persisted across runs and used to accelerate future encodes with the same VMAF profile:
+QP statistics are persisted across runs and used to accelerate future encodes with the same encoder and VMAF profile:
 
 - **Mean QP** - used as the starting point for the QP search on the next encode, avoiding blind starts from an arbitrary default
 - **Standard deviation** - used as the QP search increment when exploring QP values outside the already-observed range
@@ -182,29 +258,38 @@ QP statistics are persisted across runs and used to accelerate future encodes wi
 
 When the next QP to test falls **inside the already-observed range** (e.g., QP 19 and QP 23 have been computed and QP 19 is ok but QP 23 is not, the next candidate will be somewhere between them), sptenc uses **Fritsch-Butland monotone cubic interpolation** on N dimensions (one per active VMAF metric) to predict the next QP candidate, rather than probing blindly.
 
-## NVENC vs libx265
+### Cache isolation with profiles
 
-| | libx265 (default) | NVENC (`-nvenc`) |
-|---|---|---|
-| Output file size | ✅ Optimal | ❌ ~2× larger |
-| Speed | Slower | ✅ Much faster |
-| Recommended for | Final archival encode | VMAF profile prototyping |
+Because a given VMAF target can require very different QP distributions depending on the source (e.g. clean animation vs. grainy film), mixing them into the same cache effectively poisons it. Use `--cacheprofile <name>` (e.g. `pixar_animation`, `grainy_90s`) to keep these histories separate. Without a profile, all runs with the same encoder and VMAF profile share the same cache.
 
-### Base ffmpeg encode options
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--statscachedir` | `-s` | OS cache dir (`~/.cache/sptenc` or equivalent) | Directory where QP statistics are stored |
+| `--cacheprofile` | `-c` | *(none)* | Isolate cache history between content types |
 
-Under the hood, here are the base ffmpeg encoding options used by `sptenc`. There can be others depending on options specified to `sptenc` (like `-nvdec`).
+## Output
 
-#### libx265
+The final output file is named:
 
-```bash
-ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -preset 'slow' -qp 'X' -x265-params 'aq-mode=3:hevc-aq=1' [...]
-``` 
-
-#### NVENC
-
-```bash
-ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 3 -spatial_aq 1 -temporal_aq 1 [...]
 ```
+<basename> [<encoder> SptEncoded].mkv
+```
+
+For example, encoding `Movie.mkv` with `libx265` produces `Movie [libx265 SptEncoded].mkv`.
+
+The output is always Matroska (`.mkv`) because it is the most permissive container for stream copy.
+
+### Metadata tags
+
+The output file contains the following metadata tags on the video stream:
+
+- `sptenc_url` and `sptenc_version` — tool provenance
+- `sptenc_encoder` and `sptenc_encoder_preset` — encoder used
+- `sptenc_segments_count` — number of segments
+- `sptenc_stats_min_qp`, `sptenc_stats_max_qp`, `sptenc_stats_weighted_qp` — QP statistics
+- `sptenc_vmaf_model` — VMAF model used
+- `sptenc_vmaf_conf_*` — all enabled VMAF threshold values
+- `sptenc_vmaf_result_*` — final VMAF scores (min, p1, p5, p10, p25, median, hmean, mean, max)
 
 ## Installation
 
@@ -213,7 +298,7 @@ TODO
 ```
 
 **External Dependencies:**
-- `ffmpeg` - compiled with `libx265` and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128))
+- `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128))
 - `ffprobe` - bundled with ffmpeg build
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
 

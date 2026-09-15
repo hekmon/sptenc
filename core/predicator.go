@@ -1,14 +1,14 @@
-package main
+package core
 
 import (
 	"fmt"
 
-	"github.com/hekmon/ffmpegutils"
-	"github.com/hekmon/liveprogress/v2"
+	"github.com/hekmon/sptenc/ffmpeg"
+
 	"gonum.org/v1/gonum/interp"
 )
 
-func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator, err error) {
+func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predicator, err error) {
 	// Spawn the interpolators
 	p.minInterpolator = new(interp.FritschButland)
 	p.p1Interpolator = new(interp.FritschButland)
@@ -29,7 +29,7 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 	p.hmeans = make([]float64, len(existingResults))
 	p.means = make([]float64, len(existingResults))
 	index := 0
-	for qp := ffmpegutils.QPMinimum; qp <= ffmpegutils.QPMaximum; qp++ {
+	for qp := qpMin; qp <= qpMax; qp++ {
 		result, ok := existingResults[qp]
 		if ok {
 			p.qps[index] = float64(qp)
@@ -44,8 +44,9 @@ func NewPredicator(existingResults map[int]ffmpegutils.VMAFStats) (p Predicator,
 			index++
 		}
 	}
-	if *debug {
-		fmt.Fprintf(liveprogress.Bypass(), "Initializing FritschButland predicator with %d points: %+v\n",
+	p.debug = debug
+	if p.debug != nil {
+		p.debug("Initializing FritschButland predicator with %d points: %+v",
 			len(existingResults), p.qps)
 	}
 	// Init with known points
@@ -84,9 +85,10 @@ type Predicator struct {
 	hmeanInterpolator   interp.FittablePredictor
 	means               []float64
 	meanInterpolator    interp.FittablePredictor
+	debug               func(format string, a ...any)
 }
 
-func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
+func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic encountered: %+v", r)
@@ -114,7 +116,7 @@ func (p *Predicator) Predict(qp int) (stats ffmpegutils.VMAFStats, err error) {
 	return
 }
 
-func (p *Predicator) adapt(qp int, stats ffmpegutils.VMAFStats) (adapted ffmpegutils.VMAFStats) {
+func (p *Predicator) adapt(qp int, stats ffmpeg.VMAFStats) (adapted ffmpeg.VMAFStats) {
 	adapted = stats
 	var preIndex, postIndex int
 	// Find known values indexes sourrounding qp
@@ -150,7 +152,7 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 		// safety
 		return predicatedValue
 	}
-	if ys[preIndex] == 100 && ys[postIndex] < 100 {
+	if ys[preIndex] == VMAFMaxValue && ys[postIndex] < VMAFMaxValue {
 		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
 		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one
 		// by one defeating the purpose of interpolation. The idea here is to lower the value only after the second half between pre and post
@@ -158,11 +160,12 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 		// and post by hoping the actual computed value won't be 100 for the next interpolation and avoid a one by one search.
 		middleQP := int(p.qps[preIndex]) + (int(p.qps[postIndex])-int(p.qps[preIndex]))/2
 		if predictedForQP <= middleQP {
-			// For the first half, we return the pre value (100)
+			// For the first half, we return the pre value (VMAFMaxValue)
 			adaptedValue = ys[preIndex]
-			if *debug {
-				fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value for first half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f\n",
-					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex])
+			if p.debug != nil {
+				p.debug("Adapting predicted value for first half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
+					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex],
+				)
 			}
 			return
 		}
@@ -182,7 +185,7 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 			if index == preIndex {
 				newValues = append(newValues, y)
 				// add the new false data point just after
-				newValues = append(newValues, 100)
+				newValues = append(newValues, VMAFMaxValue)
 			} else {
 				newValues = append(newValues, y)
 			}
@@ -190,9 +193,10 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 		predicator := new(interp.FritschButland)
 		_ = predicator.Fit(newqps, newValues)
 		adaptedValue = predicator.Predict(float64(predictedForQP))
-		if *debug {
-			fmt.Fprintf(liveprogress.Bypass(), "Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f\n",
-				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex])
+		if p.debug != nil {
+			p.debug("Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
+				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex],
+			)
 		}
 		return
 	}
