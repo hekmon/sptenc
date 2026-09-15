@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"syscall"
+	"time"
 
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
@@ -20,7 +21,14 @@ import (
 const (
 	// set SoT for flag accessed across several cmds
 	debugFlagName = "debug"
+	// terminal update freq
+	updateUIFreq = 100 * time.Millisecond
 )
+
+func init() {
+	liveterm.RefreshInterval = updateUIFreq
+	ffmpeg.StatsPeriod = updateUIFreq
+}
 
 func main() {
 	// Application-wide signal handling

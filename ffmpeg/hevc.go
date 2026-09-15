@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hekmon/processpriority"
 )
@@ -102,8 +103,8 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 	}
 	// Prepare
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		"-i", config.Input,
 		"-map", "0", // "-map", "-0:d?",
 		"-c", "copy",
@@ -134,7 +135,12 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
@@ -147,13 +153,19 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
@@ -227,8 +239,8 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	}
 	// Prepare
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		"-init_hw_device", fmt.Sprintf("cuda=nv:%d", config.Device),
 		"-filter_hw_device", "nv",
 	}
@@ -288,7 +300,12 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
@@ -301,13 +318,19 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
@@ -382,8 +405,8 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	}
 	// Prepare
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
 	//// vaapi decoding ?
 	if vaapidec {
@@ -430,7 +453,12 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
@@ -443,13 +471,19 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
@@ -531,8 +565,8 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	is10Bit := strings.Contains(pixFmt, "p10") || strings.Contains(pixFmt, "10le")
 	// Prepare
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		// named device shared by decoder, filters and encoder: same GPU guaranteed
 		"-init_hw_device", "d3d12va=d12:" + strconv.Itoa(config.Device),
 		"-filter_hw_device", "d12",
@@ -586,7 +620,12 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
@@ -599,13 +638,19 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
@@ -677,8 +722,8 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	is10Bit := strings.Contains(pixFmt, "p10") || strings.Contains(pixFmt, "10le")
 	// Prepare
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
 	//// videotoolbox decoding ?
 	if vtdec {
@@ -723,7 +768,12 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
@@ -736,13 +786,19 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return

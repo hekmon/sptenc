@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/hekmon/processpriority"
 )
@@ -52,8 +53,8 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	}
 	// Prepare arguments
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
 	// Hardware decode paths
 	if config.NVDec {
@@ -89,9 +90,14 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
 	}
 	// Start program
@@ -102,13 +108,19 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.StatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.StatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return

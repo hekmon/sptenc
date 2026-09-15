@@ -2,7 +2,6 @@ package ffmpeg
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -93,8 +92,8 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	}
 	// Prepare command
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:2", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
 	// Hardware decode paths
 	if config.NVDec {
@@ -127,7 +126,7 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	// Prepare output handling
 	outputPipe, err := cmd.StderrPipe()
 	if err != nil {
-		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
 	}
 	// Start program
@@ -153,61 +152,64 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 }
 
 func scdetProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats), debug func(string), runtimeError func(error)) (scenes []Scene) {
-	output := bufio.NewReader(ffmpegOutput)
-	var (
-		err         error
-		r           rune
-		currentLine string
-		stats       ProgressStats
-	)
-	// Read rune by rune until EOF
-	lineBuffer := bytes.NewBuffer(nil)
-	for {
-		// Read a rune a write it to our buffer
-		if r, _, err = output.ReadRune(); err != nil {
-			if !errors.Is(err, io.EOF) && runtimeError != nil {
-				runtimeError(fmt.Errorf("error while reading rune from ffmpeg output: %w", err))
-			}
-			return
-		}
-		lineBuffer.WriteRune(r)
-		// Is this a complete line ?
-		switch r {
-		case '\n':
-			currentLine = lineBuffer.String()
-			if strings.Contains(currentLine, "[scdet") {
-				var scene Scene
-				if scene, err = parseScdet(currentLine); err != nil {
-					if runtimeError != nil {
-						runtimeError(fmt.Errorf("error while parsing scdet informations: %w", err))
-					}
-				} else {
-					scenes = append(scenes, scene)
-					if debug != nil {
-						debug(fmt.Sprintf("Scene %d detected at %v with score %s",
-							1+len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
-					}
-				}
-			}
-			lineBuffer.Reset()
-		case 'x':
-			currentLine = lineBuffer.String()
-			if !strings.Contains(currentLine, "speed=") {
-				continue
-			}
-			// We are near the end of a line (speed=00.0x) before line clear
-			if stats, err = parseProgressStats(currentLine); err != nil {
+	defer ffmpegOutput.Close()
+	scanner := bufio.NewScanner(ffmpegOutput)
+	var stats ProgressStats
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "[scdet") {
+			var scene Scene
+			var err error
+			if scene, err = parseScdet(line); err != nil {
 				if runtimeError != nil {
-					runtimeError(fmt.Errorf("error while parsing ffmpeg progress line: %w", err))
+					runtimeError(fmt.Errorf("error while parsing scdet informations: %w", err))
 				}
-				continue
+			} else {
+				scenes = append(scenes, scene)
+				if debug != nil {
+					debug(fmt.Sprintf("Scene %d detected at %v with score %s",
+						len(scenes), scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, float64Precision)))
+				}
 			}
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			if runtimeError != nil && line != "" {
+				runtimeError(errors.New(line))
+			}
+			continue
+		}
+		switch key {
+		case "frame":
+			stats.CurrentFrame, _ = strconv.Atoi(value)
+		case "fps":
+			stats.FPS, _ = strconv.ParseFloat(value, 64)
+		case "dup_frames":
+			stats.Dup, _ = strconv.Atoi(value)
+		case "drop_frames":
+			stats.Drop, _ = strconv.Atoi(value)
+		case "out_time_us":
+			if us, err := strconv.ParseInt(value, 10, 64); err == nil {
+				stats.Time = time.Duration(us) * time.Microsecond
+			}
+		case "bitrate":
+			stats.Bitrate = value
+		case "speed":
+			stats.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(value, "x"), 64)
+		case "progress":
 			if progress != nil {
 				progress(stats)
 			}
-			lineBuffer.Reset()
+			if value == "end" {
+				return
+			}
 		}
 	}
+	if err := scanner.Err(); err != nil && runtimeError != nil {
+		runtimeError(fmt.Errorf("error reading ffmpeg output: %w", err))
+	}
+	return
 }
 
 // Scene detection constants

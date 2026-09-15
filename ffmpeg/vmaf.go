@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hekmon/processpriority"
 	"github.com/olekukonko/tablewriter"
@@ -101,7 +102,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		}
 	}
 	// Build up ffmpeg args
-	args := []string{"-loglevel", "error", "-stats"}
+	args := []string{
+		"-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
+	}
 	if (nvdecDistorted || nvdecReference || config.VMAFCuda) && config.GPUID != nil {
 		args = append(args, "-init_hw_device", fmt.Sprintf("cuda=nvc:%d", *config.GPUID))
 	}
@@ -172,11 +176,15 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		config.Debug(fmt.Sprintf("Compute VMAF with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
-	cmd.Stdout = nil
 	//// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
 	}
 	// Start program
@@ -188,12 +196,18 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	progressDone := make(chan struct{})
 	go func() {
 		defer close(progressDone)
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return

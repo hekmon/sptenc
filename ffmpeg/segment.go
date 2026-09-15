@@ -45,8 +45,8 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	}
 	// Prepare command
 	args := []string{
-		"-y",
-		"-loglevel", "error", "-stats",
+		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		"-i", config.Input,
 		"-map", "0:v:0",
 		"-c:v", "copy",
@@ -60,9 +60,14 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	// Prepare output handling
-	outputPipe, err := cmd.StderrPipe()
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		err = fmt.Errorf("error setting up stdout pipe: %w", err)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		err = fmt.Errorf("error setting up stderr pipe: %w", err)
 		return
 	}
 	// Start program
@@ -73,13 +78,19 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	// Start progress monitoring (after cmd.Start to avoid goroutine leak on error)
 	progressDone := make(chan struct{})
 	go func() {
-		standardProgress(outputPipe, config.FFMPEGStatsReport, config.RuntimeError)
+		standardProgress(stdoutPipe, config.FFMPEGStatsReport, config.RuntimeError)
 		close(progressDone)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		stderrForwarder(stderrPipe, config.RuntimeError)
+		close(stderrDone)
 	}()
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFMPEGBinary, err))
 	}
 	<-progressDone
+	<-stderrDone
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
