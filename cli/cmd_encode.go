@@ -220,6 +220,16 @@ var encodeCommand = &cli.Command{
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}
+		// Check CUDA VMAF support if requested
+		if cmd.Bool("vmafcuda") {
+			filters, err := ffmpeg.GetFilters(ctx)
+			if err != nil {
+				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
+			}
+			if !filters.HasLibVMAFCUDA() {
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
+			}
+		}
 		// Input path argument
 		if cmd.Args().Len() != 1 {
 			return ctx, errors.New("only one input file is required")
