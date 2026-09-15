@@ -124,6 +124,10 @@ var concatCommand = &cli.Command{
 			Execute
 		*/
 
+		fmt.Fprintf(bypass, "Concatenating video files from %s\n",
+			shellescape.Quote(inputDir),
+		)
+
 		// get segments
 		segmentsPaths, err := getSegmentsFromDir(inputDir)
 		if err != nil {
@@ -133,13 +137,18 @@ var concatCommand = &cli.Command{
 			return errors.New("no video files found in input directory")
 		}
 
-		fmt.Fprintf(bypass, "Concatenating %d video files from %s\n",
-			len(segmentsPaths), shellescape.Quote(inputDir),
+		// Calculate total duration and size
+		var (
+			fileInfo      os.FileInfo
+			totalSize     int64
+			totalDuration time.Duration
 		)
-
-		// Calculate total duration for progress bar
-		var totalDuration time.Duration
 		for _, path := range segmentsPaths {
+			if fileInfo, err = os.Stat(path); err != nil {
+				err = fmt.Errorf("failed to access %s: %w", shellescape.Quote(path), err)
+				return
+			}
+			totalSize += fileInfo.Size()
 			stats, probeErr := getStreamsInfos(ctx, path, cmd.Bool(debugFlagName))
 			if probeErr != nil {
 				fmt.Fprintf(bypass, "WARNING: failed to probe %s for duration: %s\n",
@@ -148,7 +157,17 @@ var concatCommand = &cli.Command{
 				continue
 			}
 			totalDuration += stats.Format.Duration
+			if cmd.Bool(debugFlagName) {
+				fmt.Fprintf(bypass, "DEBUG: %s %s (%s)\n",
+					shellescape.Quote(path),
+					stats.Format.Duration.Round(time.Millisecond),
+					cunits.ImportInBytes(float64(fileInfo.Size())),
+				)
+			}
 		}
+		fmt.Fprintf(bypass, "\t%d video files with a total duration of %s and a total size of %s\n",
+			len(segmentsPaths), totalDuration.Round(time.Millisecond), cunits.ImportInBytes(float64(totalSize)),
+		)
 
 		// concat
 		start := time.Now()
@@ -165,7 +184,7 @@ var concatCommand = &cli.Command{
 		} else {
 			outputSizeStr = fmt.Sprintf(" (%s)", cunits.ImportInBytes(float64(outputSize)))
 		}
-		fmt.Fprintf(bypass, "\tConcatenated %d files into %s in %s%s\n",
+		fmt.Fprintf(bypass, "\tConcatenated %d files into %s%s in %s\n",
 			len(segmentsPaths), shellescape.Quote(outputPath), duration.Round(time.Second), outputSizeStr,
 		)
 
