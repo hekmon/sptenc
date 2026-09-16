@@ -48,6 +48,10 @@ var (
 			},
 		},
 	}
+	// Override the Colorized renderer defaults to remove the background color
+	// (BgBlack) from borders and separators while keeping a white foreground.
+	// This makes tables easier to read without introducing colorful styling
+	// that might conflict with user terminal themes.
 	tableColorCfg = renderer.ColorizedConfig{
 		Header: renderer.Tint{
 			FG: renderer.Colors{color.Bold},
@@ -59,6 +63,12 @@ var (
 			Columns: []renderer.Tint{
 				{FG: renderer.Colors{color.Bold}}, // column 0
 			},
+		},
+		Border: renderer.Tint{
+			FG: renderer.Colors{color.FgWhite},
+		},
+		Separator: renderer.Tint{
+			FG: renderer.Colors{color.FgWhite},
 		},
 	}
 )
