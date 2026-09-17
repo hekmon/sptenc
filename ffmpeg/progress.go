@@ -18,10 +18,11 @@ var StatsPeriod = 100 * time.Millisecond
 type ProgressStats struct {
 	CurrentFrame int
 	FPS          float64
-	Dup          int // images extract only
-	Drop         int // images extract only
+	Bitrate      string
+	TotalSize    int
 	Time         time.Duration
-	Bitrate      string // encode only
+	Dup          int
+	Drop         int
 	Speed        float64
 }
 
@@ -37,37 +38,56 @@ func standardProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressSt
 	)
 	for scanner.Scan() {
 		if key, value, ok = strings.Cut(scanner.Text(), "="); !ok {
-			runtimeError(fmt.Errorf("error reading ffmpeg progress: uncuttable progress line: %s", scanner.Text()))
+			runtimeError(fmt.Errorf("error reading ffmpeg progress: uncuttable progress line: %q", scanner.Text()))
 			continue
 		}
 		switch key {
 		case "frame":
 			if stats.CurrentFrame, err = strconv.Atoi(value); err != nil {
-				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing frame: %s", value))
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing frame: %q", value))
 			}
 		case "fps":
 			if stats.FPS, err = strconv.ParseFloat(value, 64); err != nil {
-				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing fps: %s", value))
-			}
-		case "dup_frames":
-			if stats.Dup, err = strconv.Atoi(value); err != nil {
-				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing dup_frames: %s", value))
-			}
-		case "drop_frames":
-			if stats.Drop, err = strconv.Atoi(value); err != nil {
-				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing drop_frames: %s", value))
-			}
-		case "out_time_us":
-			if microSeconds, err = strconv.ParseInt(value, 10, 64); err != nil {
-				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing out_time: %s", value))
-			} else {
-				stats.Time = time.Duration(microSeconds) * time.Microsecond
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing fps: %q", value))
 			}
 		case "bitrate":
 			stats.Bitrate = value
+		case "total_size":
+			if value == "N/A" {
+				continue
+			}
+			if stats.TotalSize, err = strconv.Atoi(value); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing total_size: %q", value))
+			}
+		case "out_time_ms":
+			// old field misnamed for ms for microseconds, see out_time_us
+			continue
+		case "out_time_us":
+			if value == "N/A" {
+				continue
+			}
+			if microSeconds, err = strconv.ParseInt(value, 10, 64); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing out_time_us: %q", value))
+			} else {
+				stats.Time = time.Duration(microSeconds) * time.Microsecond
+			}
+		case "out_time":
+			// human representation of time, we don't care we parse out_time_us
+			continue
+		case "dup_frames":
+			if stats.Dup, err = strconv.Atoi(value); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing dup_frames: %q", value))
+			}
+		case "drop_frames":
+			if stats.Drop, err = strconv.Atoi(value); err != nil {
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing drop_frames: %q", value))
+			}
 		case "speed":
+			if value == "N/A" {
+				continue
+			}
 			if stats.Speed, err = strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(value), "x"), 64); err != nil {
-				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing speed: %s", value))
+				runtimeError(fmt.Errorf("error reading ffmpeg progress: error parsing speed: %q", value))
 			}
 		case "progress":
 			switch value {
@@ -81,6 +101,11 @@ func standardProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressSt
 			default:
 				runtimeError(fmt.Errorf("error reading ffmpeg progress: unexpected progress value: %s", value))
 			}
+		default:
+			if strings.HasPrefix(key, "stream_") {
+				continue
+			}
+			runtimeError(fmt.Errorf("unknown progress field: %q=%q", key, value))
 		}
 	}
 	if err := scanner.Err(); err != nil && runtimeError != nil {
