@@ -60,8 +60,8 @@ var encodeCommand = &cli.Command{
 			"compressed to FLAC during the final remux step. This reduces file size with\n"+
 			"no quality loss.",
 		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
-	Flags: func() []cli.Flag {
-		flags := []cli.Flag{
+	Flags: func() (flags []cli.Flag) {
+		flags = []cli.Flag{
 			&cli.StringFlag{
 				Name:             encoderFlagName,
 				Aliases:          []string{"e"},
@@ -71,18 +71,6 @@ var encodeCommand = &cli.Command{
 				Validator:        encoderValidator,
 				ValidateDefaults: true,
 			},
-			&cli.StringFlag{
-				Name:     cacheProfileFlagName,
-				Aliases:  []string{"c"},
-				Usage:    "Cache profile name to isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile.",
-				Value:    "",
-				OnlyOnce: true,
-				Category: "Directories",
-			},
-		}
-		flags = append(flags, newGPUSelectionFlags()...)
-		flags = append(flags, newDirectoryFlags()...)
-		flags = append(flags,
 			&cli.Float64Flag{
 				Name:    thresholdFlagName,
 				Aliases: []string{"T"},
@@ -102,9 +90,19 @@ var encodeCommand = &cli.Command{
 				OnlyOnce: true,
 				Category: "Pre-Split Video Files",
 			},
-		)
+			&cli.StringFlag{
+				Name:     cacheProfileFlagName,
+				Aliases:  []string{"c"},
+				Usage:    "Cache profile name to further isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile of the encoder + VMAF profile combination.",
+				Value:    "",
+				OnlyOnce: true,
+				Category: "Cache isolation",
+			},
+		}
+		flags = append(flags, newGPUSelectionFlags()...)
+		flags = append(flags, newDirectoryFlags(true)...)
 		flags = append(flags, newVMAFFlags()...)
-		return flags
+		return
 	}(),
 	Arguments: []cli.Argument{
 		&cli.StringArg{
@@ -639,12 +637,18 @@ const (
 )
 
 // newDirectoryFlags returns the output, stats cache and temporary directory flags.
-func newDirectoryFlags() []cli.Flag {
+func newDirectoryFlags(segmented bool) []cli.Flag {
+	var outputDefault string
+	if segmented {
+		outputDefault = " (defaults to input file directory, or original file directory for segment inputs)"
+	} else {
+		outputDefault = " (defaults to input file directory)"
+	}
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:     outputDirFlagName,
 			Aliases:  []string{"o"},
-			Usage:    "Output directory (defaults to input file directory, or original file directory for segment inputs)",
+			Usage:    "Output directory" + outputDefault,
 			Value:    "",
 			OnlyOnce: true,
 			Category: "Directories",

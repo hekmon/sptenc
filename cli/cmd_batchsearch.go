@@ -91,15 +91,16 @@ var batchsearchCommand = &cli.Command{
 			&cli.StringFlag{
 				Name:     cacheProfileFlagName,
 				Aliases:  []string{"c"},
-				Usage:    "Cache profile name to isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile.",
+				Usage:    "Cache profile name to further isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile of the encoder + VMAF profile combination.",
 				Value:    "",
 				OnlyOnce: true,
+				Category: "Cache isolation",
 			},
 		}
 		flags = append(flags, newGPUSelectionFlags()...)
-		flags = append(flags, newDirectoryFlags()...)
+		flags = append(flags, newDirectoryFlags(false)...)
 		flags = append(flags, newVMAFFlags()...)
-		return flags
+		return
 	}(),
 	Arguments: []cli.Argument{
 		&cli.StringArg{
@@ -152,7 +153,6 @@ var batchsearchCommand = &cli.Command{
 			return ctx, errors.New("input path must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
-		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		// Resolve and check output directory
 		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
