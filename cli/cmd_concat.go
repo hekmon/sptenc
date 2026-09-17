@@ -36,7 +36,7 @@ var concatCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used for intermediate files",
+			Usage:            "Temporary directory location that will be used to create the working dir for intermediate files",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,

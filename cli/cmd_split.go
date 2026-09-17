@@ -78,7 +78,7 @@ var splitCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
-			Usage:            "temporary directory location that will be used for intermediate files if needed",
+			Usage:            "Temporary directory location that will be used to create the working dir for intermediate files if needed",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,

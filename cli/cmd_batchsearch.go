@@ -14,48 +14,9 @@ import (
 
 // Flag names for batchsearch-specific flags.
 const (
-	searchEncoderFlagName  = "searchencoder"
-	finalEncodeFlagName    = "finalencode"
-	thresholdStartFlagName = "thresholdstart"
+	finalEncodeFlagName = "finalencode"
 )
 
-// batchsearch finds the optimal scene detection threshold for a given source file.
-//
-// Scene detection splits a video into independent segments, each starting with an
-// I-frame. I-frames are large because they encode a full picture without reference
-// to previous frames. Rate control also resets at every segment boundary, forcing
-// the encoder to "warm up" again before it can efficiently use P and B frames.
-//
-// By raising the scene threshold, fewer boundaries are detected. Segments grow
-// longer, and the encoder can keep running open-GOP prediction across what used
-// to be hard cuts. With per-segment VMAF validation, brief visual inconsistencies
-// at merged transitions are averaged out over the longer segment, so the quality
-// target still passes while the overall bitrate drops.
-//
-// This command searches for the sweet spot for your specific content: the highest
-// threshold that still shrinks the file before merging real scene changes starts
-// costing more in prediction accuracy than it saves in I-frame overhead. It
-// analyzes the source once to map all boundary scores, then tests only the
-// structurally distinct thresholds, stopping automatically when consecutive steps
-// inflate the size.
-//
-// # SEARCH ENCODER VS FINAL ENCODER
-//
-// The search phase uses whatever encoder you specify (e.g. hevc_nvenc for speed).
-// If the search encoder is GPU-based, a warning is issued because the search is
-// designed to be fast. The winning threshold from the search is then reused for
-// the final encode.
-//
-// When --finalencode is set and the search encoder is GPU-based, the command
-// derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc ->
-// libx265) and runs a full-quality final encode at the discovered threshold.
-// The sweet spot is usually close enough across encoders of the same codec
-// family that the GPU-found threshold is a good approximation for the CPU pass,
-// while being far faster to discover than a full CPU search. This is the intended
-// speed-vs-accuracy tradeoff of GPU search mode.
-//
-// If the search encoder is already CPU-based, --finalencode is a no-op: the
-// winning result from the search is the definitive output.
 var batchsearchCommand = &cli.Command{
 	Name:     "batchsearch",
 	Aliases:  []string{"bs"},
@@ -101,10 +62,10 @@ var batchsearchCommand = &cli.Command{
 			"If the search encoder is already CPU-based, --finalencode is a no-op because\n" +
 			"the search result is already the most precise result possible.",
 	),
-	Flags: func() []cli.Flag {
-		flags := []cli.Flag{
+	Flags: func() (flags []cli.Flag) {
+		flags = []cli.Flag{
 			&cli.StringFlag{
-				Name:     searchEncoderFlagName,
+				Name:     encoderFlagName,
 				Aliases:  []string{"e"},
 				Usage:    "Encoder to use during the threshold search loop. GPU encoders (e.g. hevc_nvenc) are strongly recommended for speed.",
 				Value:    "hevc_nvenc",
@@ -118,7 +79,7 @@ var batchsearchCommand = &cli.Command{
 				OnlyOnce: true,
 			},
 			&cli.Float64Flag{
-				Name:    thresholdStartFlagName,
+				Name:    thresholdFlagName,
 				Aliases: []string{"T"},
 				Usage: fmt.Sprintf("Start threshold search at this value (valid values: %d-%d).",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
@@ -135,7 +96,7 @@ var batchsearchCommand = &cli.Command{
 				OnlyOnce: true,
 			},
 		}
-		flags = append(flags, newGPUFlags(searchEncoderFlagName, "GPU Accelerated Encoders")...)
+		flags = append(flags, newGPUSelectionFlags()...)
 		flags = append(flags, newDirectoryFlags()...)
 		flags = append(flags, newVMAFFlags()...)
 		return flags
@@ -162,7 +123,7 @@ var batchsearchCommand = &cli.Command{
 		if err != nil {
 			return ctx, fmt.Errorf("failed to list ffmpeg encoders: %w", err)
 		}
-		requestedEncoder := cmd.String(searchEncoderFlagName)
+		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}

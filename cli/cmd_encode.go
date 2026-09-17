@@ -80,7 +80,7 @@ var encodeCommand = &cli.Command{
 				Category: "Directories",
 			},
 		}
-		flags = append(flags, newGPUFlags(encoderFlagName, "GPU Accelerated Encoders")...)
+		flags = append(flags, newGPUSelectionFlags()...)
 		flags = append(flags, newDirectoryFlags()...)
 		flags = append(flags,
 			&cli.Float64Flag{
@@ -605,30 +605,29 @@ const (
 	d3d12vaGPUIndexFlagName   = "d3d12vagpuindex"
 )
 
-// newGPUFlags returns the GPU encoder flags. encoderFlagName is the name of the
-// encoder flag to reference in descriptions (e.g. "encoder" or "searchencoder").
-func newGPUFlags(encoderFlagName, category string) []cli.Flag {
+// newGPUSelectionFlags returns the GPU encoder flags.
+func newGPUSelectionFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.IntFlag{
 			Name:     nvidiaGPUIndexFlagName,
 			Usage:    fmt.Sprintf("GPU to use when --%s is an NVIDIA NVENC encoder", encoderFlagName),
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
-			Category: category,
+			Category: "GPU Selection",
 		},
 		&cli.StringFlag{
 			Name:     vaapiRendererPathFlagName,
 			Usage:    fmt.Sprintf("Direct Rendering Manager render node to use when --%s is a VA-API encoder", encoderFlagName),
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
-			Category: category,
+			Category: "GPU Selection",
 		},
 		&cli.IntFlag{
 			Name:     d3d12vaGPUIndexFlagName,
 			Usage:    fmt.Sprintf("GPU to use when --%s is a D3D12VA encoder", encoderFlagName),
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
-			Category: category,
+			Category: "GPU Selection",
 		},
 	}
 }
@@ -661,7 +660,7 @@ func newDirectoryFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used for intermediate files",
+			Usage:            "Temporary directory location that will be used to create the working dir for intermediate files",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,
