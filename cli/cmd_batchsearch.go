@@ -46,12 +46,11 @@ var batchsearchCommand = &cli.Command{
 			"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
 			"  4. Stops after consecutive candidates fail to reduce file size (strikes).\n\n" +
 			"WHY THRESHOLD SELECTION MATTERS\n" +
-			"Scene detection splits a video into independent segments. A threshold set too low\n" +
-			"produces too many short scenes — each gets its own I-frame, leaving too few\n" +
-			"continuous frames for efficient B/P frame compression. A threshold set too high\n" +
-			"produces fewer, longer scenes — the entire scene must be encoded at the QP\n" +
-			"demanded by its hardest passage, forcing easy sections to unnecessarily high\n" +
-			"quality and inflating file size.\n\n" +
+			"Scene detection splits a video into independent segments. Each segment gets\n" +
+			"its own QP, so splitting finely lets hard passages use low QP and easy ones high.\n" +
+			"But every split forces an I-frame, and short runs starve B/P compression. Split\n" +
+			"coarsely and B/P frames thrive across long runs, yet the whole scene must bow\n" +
+			"to its hardest passage — easy sections pay for quality they do not need.\n\n" +
 			"The sweet spot is a threshold that gives each scene enough freedom to use its\n" +
 			"own QP while leaving enough continuous frames for the encoder to compress\n" +
 			"efficiently. batchsearch finds this automatically by testing candidates across\n" +
