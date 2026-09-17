@@ -46,6 +46,33 @@ const (
 	nvEncMaxLookahead = 32 // max frames buffered for adaptive I/B decisions (iadapt/badapt): in constqp this is a pure compression win, same QP for smaller files (verified effective even in lossless: at 0 the driver falls back to all-intra)
 )
 
+/*
+ * GPU/CPU encoders relationship
+ */
+
+func getCPURelative(encoder Encoder) (isGPU bool, cpuRelative Encoder) {
+	switch encoder {
+	// HEVC
+	case HEVCEncoderLibx265:
+		return false, HEVCEncoderLibx265
+	case HEVCEncoderNVEnc, HEVCEncoderVAAPI,
+		HEVCEncoderD3D12VA, HEVCEncoderVideoToolbox:
+		return true, HEVCEncoderLibx265
+	// AV1
+	case AV1EncoderSVTAV1:
+		return false, AV1EncoderSVTAV1
+	case AV1EncoderNVEnc, AV1EncoderVAAPI:
+		return true, AV1EncoderSVTAV1
+	// unsupported
+	default:
+		return false, ""
+	}
+}
+
+/*
+ * encoders infos from ffmpeg
+ */
+
 // GetEncoders runs ffmpeg -encoders and parses its output.
 func GetEncoders(ctx context.Context) (info EncodersInfo, err error) {
 	args := []string{"-encoders"}
