@@ -263,7 +263,7 @@ var splitCommand = &cli.Command{
 					fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 				}
 				// create the master within
-				if fileToProcess, duration, err = createMaster(ctx, inputFilePath, workingDir, cmd.Bool(debugFlagName), masterConfig); err != nil {
+				if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
 					return fmt.Errorf("failed to create the master file: %w", err)
 				}
 			}

@@ -171,7 +171,7 @@ var masterCommand = &cli.Command{
 			outputDir = filepath.Dir(inputFilePath)
 		}
 		var outputFile string
-		outputFile, _, err = createMaster(ctx, inputFilePath, outputDir, cmd.Bool(debugFlagName), masterConfig)
+		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig)
 		if err == nil {
 			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
 		}
@@ -210,24 +210,25 @@ func buildFFV1MasterConfigForFlags(ctx context.Context, inputPath string, nvdec,
 	return config
 }
 
-func createMaster(ctx context.Context, inputFilePath, outputDir string, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (outputFile string, duration time.Duration, err error) {
+func createMaster(ctx context.Context, inputFilePath, outputDir string, inputFileSize int64, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (
+	outputFile string, totalFrames int, duration time.Duration, err error) {
 	// count frames
 	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
 	start := time.Now()
-	nbFrames, codec, duration, err := liveCountNbFrames(ctx, inputFilePath, debug)
+	totalFrames, codec, duration, err := liveCountNbFrames(ctx, inputFilePath, inputFileSize, debug)
 	if err != nil {
 		err = fmt.Errorf("failed to count number of frames: %w", err)
 		return
 	}
 	fmt.Fprintf(liveprogress.Bypass(), "\tCounted %d %s frames in %s\n",
-		nbFrames, codec, time.Since(start).Round(time.Second),
+		totalFrames, codec, time.Since(start).Round(time.Second),
 	)
 	// ffv1 encode
 	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
 	inputFileName, _ := extractFileNameInfos(inputFilePath)
 	outputFile = filepath.Join(outputDir, fmt.Sprintf("%s - ffv1 master.mkv", inputFileName))
 	start = time.Now()
-	if err = liveFFV1Master(ctx, inputFilePath, outputFile, nbFrames, debug, masterConfig); err != nil {
+	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, masterConfig); err != nil {
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
 		return
 	}

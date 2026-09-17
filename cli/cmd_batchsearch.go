@@ -5,15 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 
+	"al.essio.dev/pkg/shellescape"
+	"github.com/hekmon/cunits/v3"
+	"github.com/hekmon/liveprogress/v2"
 	"github.com/urfave/cli/v3"
 )
 
 // Flag names for batchsearch-specific flags.
 const (
-	finalEncodeFlagName = "finalencode"
+	finalEncodeFlagName            = "finalencode"
+	searchIncrementMinimumFlagName = "searchincrement"
+	searchIncrementMinimum         = 1
+	nbStrikesFlagName              = "nbstrikes"
+	nbStrikesMinimum               = 3
 )
 
 var batchsearchCommand = &cli.Command{
@@ -27,7 +39,8 @@ var batchsearchCommand = &cli.Command{
 			"HOW IT WORKS\n" +
 			"  1. Scans the source once to map all natural scene boundaries.\n" +
 			"  2. Tests only thresholds that actually change the scene list.\n" +
-			"  3. Stops automatically when consecutive thresholds no longer shrink the file.\n\n" +
+			"  3. Incrementally tests higher thresholds and stops after consecutive\n" +
+			"     ones no longer shrink the file.\n\n" +
 			"SCENE THRESHOLDS\n" +
 			"Scene detection splits a video into independent segments, each starting\n" +
 			"with an I-frame. I-frames are large because they encode a full picture\n" +
@@ -72,8 +85,8 @@ var batchsearchCommand = &cli.Command{
 			&cli.StringFlag{
 				Name:     encoderFlagName,
 				Aliases:  []string{"e"},
-				Usage:    "Encoder to use during the threshold search loop. GPU encoders (e.g. hevc_nvenc) are strongly recommended for speed.",
-				Value:    "hevc_nvenc",
+				Usage:    fmt.Sprintf("Encoder to use during the threshold search loop. Valid values: %s", strings.Join(allEncoders, ", ")),
+				Value:    string(ffmpeg.HEVCEncoderNVEnc),
 				OnlyOnce: true,
 			},
 			&cli.BoolFlag{
@@ -92,6 +105,35 @@ var batchsearchCommand = &cli.Command{
 				Value:     10,
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
+				Category:  "Threshold Search",
+			},
+			&cli.IntFlag{
+				Name:     searchIncrementMinimumFlagName,
+				Aliases:  []string{"i"},
+				Usage:    "The minimum search increment",
+				Value:    searchIncrementMinimum,
+				OnlyOnce: true,
+				Validator: func(v int) error {
+					if v < searchIncrementMinimum {
+						return fmt.Errorf("%s must be %d at minimum", searchIncrementMinimumFlagName, searchIncrementMinimum)
+					}
+					return nil
+				},
+				Category: "Threshold Search",
+			},
+			&cli.IntFlag{
+				Name:     nbStrikesFlagName,
+				Aliases:  []string{"s"},
+				Usage:    "Stop the search after this many consecutive thresholds fail to reduce file size",
+				Value:    nbStrikesMinimum,
+				OnlyOnce: true,
+				Validator: func(v int) error {
+					if v < nbStrikesMinimum {
+						return fmt.Errorf("%s must be %d at minimum", nbStrikesFlagName, nbStrikesMinimum)
+					}
+					return nil
+				},
+				Category: "Threshold Search",
 			},
 			&cli.StringFlag{
 				Name:     cacheProfileFlagName,
@@ -158,7 +200,6 @@ var batchsearchCommand = &cli.Command{
 			return ctx, errors.New("input path must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
-		// Check output directory
 		// Check output directory if explicitly provided
 		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
 			if fileInfos, err = os.Stat(outputDir); err != nil {
@@ -174,16 +215,144 @@ var batchsearchCommand = &cli.Command{
 		}
 		return ctx, nil
 	},
-	Action: func(ctx context.Context, cmd *cli.Command) error {
-		// TODO: Implement the batchsearch algorithm:
-		//  1. Analyze at a low threshold (e.g. 8) to get all boundary scores
-		//  2. Sort scores and collapse to distinct integer candidates (skip integers that remove no new boundaries)
-		//  3. Encode at each candidate with --searchencoder, tracking minimum size
-		//  4. Stop after 3 consecutive candidates fail to beat the best size found so far.
-		//     A flat result (same size as best) counts as a strike. This handles plateaus
-		//     without chasing local jitter past the global minimum.
-		//  5. Report the winning threshold
-		//  6. If --finalencode and searchencoder is GPU: derive CPU equivalent of same codec, run final encode with winning threshold
+	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
+		/*
+		 * Prepare
+		 */
+
+		// retreive input infos
+		inputPath := cmd.StringArg("inputpath")
+		inputInfos := ctx.Value(inputFileInfosCtxKey).(os.FileInfo)
+
+		// start live progress
+		if err = liveprogress.Start(); err != nil {
+			return fmt.Errorf("failed to start live progress: %w", err)
+		}
+		defer liveprogress.Stop(false)
+		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
+
+		// create a temporary directory
+		var workingDir string
+		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
+			return fmt.Errorf("failed to create temporary working directory in %s: %w",
+				shellescape.Quote(cmd.String(tmpDirFlagName)), err,
+			)
+		}
+		defer func() {
+			if err != nil || cmd.Bool(debugFlagName) {
+				fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
+					shellescape.Quote(workingDir),
+				)
+			} else {
+				if removeErr := os.RemoveAll(workingDir); removeErr != nil {
+					fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
+						shellescape.Quote(workingDir), removeErr,
+					)
+				}
+			}
+		}()
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
+		}
+
+		// Create the VMAF auditor
+		vmafAuditor, err := core.NewVMAFChecker(
+			cmd.Float64(vmafMinFlagName), cmd.Float64(vmafP1FlagName), cmd.Float64(vmafP5FlagName), cmd.Float64(vmafP10FlagName),
+			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafHMeanFlagName), cmd.Float64(vmafMeanFlagName))
+		if err != nil {
+			err = fmt.Errorf("failed to create VMAF auditor: %w", err)
+			return
+		}
+
+		// Get the stats cache
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), ffmpeg.Encoder(cmd.String(encoderFlagName)),
+			vmafAuditor, cmd.String(cacheProfileFlagName))
+		if err != nil {
+			err = fmt.Errorf("failed to create stats cache: %w", err)
+			return
+		}
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
+		}
+
+		/*
+		 * Execute process
+		 */
+		// completeRunStart := time.Now()
+
+		fmt.Fprintf(bypass, "\nStarting batch search encoding of %s (%s) with %s.\n",
+			shellescape.Quote(filepath.Base(inputPath)),
+			cunits.ImportInBytes(float64(inputInfos.Size())),
+			cmd.String(encoderFlagName),
+		)
+		fmt.Fprintf(bypass, "\t• search starts at threshold %s\n", strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64))
+		fmt.Fprintf(bypass, "\t• each candidate must have a minimum increment of %d\n", cmd.Int(searchIncrementMinimumFlagName))
+		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(nbStrikesFlagName))
+		fmt.Fprintf(bypass, "\nEach segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
+
+		// Step 1 - Create the master
+		masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String(encoderFlagName),
+			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
+		)
+		masterFile, _, totalDuration, err := createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), masterConfig)
+		if err != nil {
+			return fmt.Errorf("failed to create the master file: %w", err)
+		}
+
+		// Step 2 - Retreive scenes markers
+		fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
+			strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
+		)
+		start := time.Now()
+		scenes, err := liveDetectScenes(ctx, masterFile, cmd.Float64(thresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
+			ffmpeg.ScenesDetectionConfig{
+				NVDec:           masterConfig.NVDec,
+				NVDevice:        masterConfig.NVDevice,
+				VAAPIDec:        masterConfig.VAAPIDec,
+				VAAPIDevice:     masterConfig.VAAPIDevice,
+				D3D12Dec:        masterConfig.D3D12Dec,
+				D3D12Device:     masterConfig.D3D12Device,
+				VideoToolboxDec: masterConfig.VideoToolboxDec,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("failed to detect scenes: %w", err)
+		}
+		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
+			1+len(scenes), time.Since(start).Round(time.Second),
+		)
+		candidates := getSearchThresholdCandidates(scenes, cmd.Int(searchIncrementMinimumFlagName))
+		fmt.Fprintf(bypass, "\tCandidates: %+v\n", candidates)
+
+		// TODO
+
 		return nil
 	},
+}
+
+func getSearchThresholdCandidates(scenes []ffmpeg.Scene, increment int) (candidates []float64) {
+	candidates = make([]float64, 0, len(scenes))
+	// First candidate is the smallest
+	var candidate float64
+	for index, scene := range scenes {
+		if index == 0 || scene.Score < candidate {
+			candidate = scene.Score
+		}
+	}
+	candidates = append(candidates, candidate)
+	// Compute nexts
+	for minimum := candidate + float64(increment); minimum <= float64(ffmpeg.SceneThresholdMax); minimum = candidate + float64(increment) {
+		candidate = -1
+		for _, scene := range scenes {
+			if scene.Score >= minimum && (candidate == -1 || scene.Score < candidate) {
+				candidate = scene.Score
+			}
+		}
+		if candidate == -1 {
+			return
+		}
+		candidates = append(candidates, candidate)
+	}
+	return
 }

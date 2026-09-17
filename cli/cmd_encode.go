@@ -267,13 +267,10 @@ var encodeCommand = &cli.Command{
 			)
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// create master
-			var (
-				masterFile string
-				duration   time.Duration
-			)
+			var masterFile string
 			masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String(encoderFlagName),
 				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName))
-			if masterFile, duration, err = createMaster(ctx, inputPath, workingDir, cmd.Bool(debugFlagName), masterConfig); err != nil {
+			if masterFile, _, totalDuration, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// analyze
@@ -291,7 +288,8 @@ var encodeCommand = &cli.Command{
 				D3D12Device:     masterConfig.D3D12Device,
 				VideoToolboxDec: masterConfig.VideoToolboxDec,
 			}
-			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64(thresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig); err != nil {
+			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64(thresholdFlagName), totalDuration,
+				cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
@@ -304,7 +302,7 @@ var encodeCommand = &cli.Command{
 				return fmt.Errorf("failed to create segments directory: %w", err)
 			}
 			start = time.Now()
-			if err = liveSplitScenes(ctx, masterFile, segmentsDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
+			if err = liveSplitScenes(ctx, masterFile, segmentsDir, totalDuration, scenes, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
@@ -316,12 +314,6 @@ var encodeCommand = &cli.Command{
 			for i := range segmentsPaths {
 				segmentsPaths[i] = filepath.Join(segmentsDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
 			}
-			// get stream infos
-			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
-				err = fmt.Errorf("Failed to probe input file: %w", err)
-				return
-			}
-			totalDuration = sourceStats.Format.Duration
 		} else {
 			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
