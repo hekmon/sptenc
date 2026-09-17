@@ -2,9 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/hekmon/sptenc/ffmpeg"
 
 	"github.com/urfave/cli/v3"
+)
+
+// Flag names for batchsearch-specific flags.
+const (
+	searchEncoderFlagName  = "searchencoder"
+	finalEncodeFlagName    = "finalencode"
+	thresholdStartFlagName = "thresholdstart"
 )
 
 // batchsearch finds the optimal scene detection threshold for a given source file.
@@ -89,32 +101,112 @@ var batchsearchCommand = &cli.Command{
 			"If the search encoder is already CPU-based, --finalencode is a no-op because\n" +
 			"the search result is already the most precise result possible.",
 	),
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     "searchencoder",
-			Aliases:  []string{"e"},
-			Usage:    "Encoder to use during the threshold search loop. GPU encoders (e.g. hevc_nvenc) are strongly recommended for speed.",
-			Value:    "hevc_nvenc",
-			OnlyOnce: true,
-		},
-		&cli.BoolFlag{
-			Name:     "finalencode",
-			Aliases:  []string{"f"},
-			Usage:    "Run a final CPU encode after GPU search (no-op if search encoder is already CPU).",
-			Value:    false,
-			OnlyOnce: true,
-		},
-		// TODO: Add remaining flags for tmpdir, outputdir, vmaf thresholds, etc.
-	},
+	Flags: func() []cli.Flag {
+		flags := []cli.Flag{
+			&cli.StringFlag{
+				Name:     searchEncoderFlagName,
+				Aliases:  []string{"e"},
+				Usage:    "Encoder to use during the threshold search loop. GPU encoders (e.g. hevc_nvenc) are strongly recommended for speed.",
+				Value:    "hevc_nvenc",
+				OnlyOnce: true,
+			},
+			&cli.BoolFlag{
+				Name:     finalEncodeFlagName,
+				Aliases:  []string{"f"},
+				Usage:    "Run a final CPU encode after GPU search (no-op if search encoder is already CPU).",
+				Value:    false,
+				OnlyOnce: true,
+			},
+			&cli.Float64Flag{
+				Name:    thresholdStartFlagName,
+				Aliases: []string{"T"},
+				Usage: fmt.Sprintf("Start threshold search at this value (valid values: %d-%d).",
+					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
+				),
+				Value:     10,
+				OnlyOnce:  true,
+				Validator: validateSceneThreshold,
+			},
+			&cli.StringFlag{
+				Name:     cacheProfileFlagName,
+				Aliases:  []string{"c"},
+				Usage:    "Cache profile name to isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile.",
+				Value:    "",
+				OnlyOnce: true,
+			},
+		}
+		flags = append(flags, newGPUFlags(searchEncoderFlagName, "GPU Accelerated Encoders")...)
+		flags = append(flags, newDirectoryFlags()...)
+		flags = append(flags, newVMAFFlags()...)
+		return flags
+	}(),
 	Arguments: []cli.Argument{
 		&cli.StringArg{
-			Name:      "inputfile",
-			UsageText: "<input file>",
+			Name:      "inputpath",
+			UsageText: "<input path>",
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-		// TODO: Validate ffmpeg/ffprobe, input file, output directory, encoder, etc.
-		// TODO: Warn if searchencoder is not GPU-based
+		// Check required tools
+		if err := checkFFMPEG(ctx); err != nil {
+			return ctx, err
+		}
+		if err := checkFFProbe(ctx); err != nil {
+			return ctx, err
+		}
+		if err := checkMKVPropEdit(ctx); err != nil {
+			return ctx, err
+		}
+		// Check requested encoder is available
+		encoders, err := ffmpeg.GetEncoders(ctx)
+		if err != nil {
+			return ctx, fmt.Errorf("failed to list ffmpeg encoders: %w", err)
+		}
+		requestedEncoder := cmd.String(searchEncoderFlagName)
+		if !encoders.Has(requestedEncoder) {
+			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
+		}
+		// Check CUDA VMAF support if requested
+		if cmd.Bool(vmafCUDAFlagName) {
+			filters, err := ffmpeg.GetFilters(ctx)
+			if err != nil {
+				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
+			}
+			if !filters.HasLibVMAFCUDA() {
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
+			}
+		}
+		// Input path argument: batchsearch only accepts a single regular file
+		if cmd.Args().Len() != 1 {
+			return ctx, errors.New("only one input file is required")
+		}
+		fileInfos, err := os.Stat(cmd.Args().First())
+		if err != nil {
+			return ctx, fmt.Errorf("failed to access input file: %w", err)
+		}
+		if fileInfos.IsDir() {
+			return ctx, errors.New("input path must be a regular file")
+		}
+		if !fileInfos.Mode().IsRegular() {
+			return ctx, errors.New("input path must be a regular file")
+		}
+		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
+		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
+		// Resolve and check output directory
+		outputDir := cmd.String(outputDirFlagName)
+		if outputDir == "" {
+			outputDir = filepath.Dir(cmd.Args().First())
+		}
+		if fileInfos, err = os.Stat(outputDir); err != nil {
+			return ctx, fmt.Errorf("failed to access output directory: %w", err)
+		}
+		if !fileInfos.IsDir() {
+			return ctx, errors.New("output directory path must be a directory")
+		}
+		// Create the cache dir if necessary
+		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {
+			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) error {

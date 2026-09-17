@@ -18,9 +18,15 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// Global flag names
 const (
-	// set SoT for flag accessed across several cmds
-	debugFlagName = "debug"
+	debugFlagName           = "debug"
+	ffmpegPathFlagName      = "ffmpegpath"
+	ffprobePathFlagName     = "ffprobepath"
+	mkvpropeditPathFlagName = "mkvpropeditpath"
+)
+
+const (
 	// terminal update freq
 	updateUIFreq = 100 * time.Millisecond
 )
@@ -42,8 +48,8 @@ func main() {
 
 	// Start application
 	cmd := &cli.Command{
-		Name:        linkedName(),
-		Usage:       "Split Encoder: a perceived-quality, VMAF-driven encoder",
+		Name:  linkedName(),
+		Usage: "Split Encoder: a perceived-quality, VMAF-driven encoder",
 		Description: "Split Encoder is a tool that performs scene-aware video encoding.\n\n" +
 			"HOW IT WORKS\n" +
 			"  1. Splits the input video into scene-aligned segments.\n" +
@@ -59,7 +65,7 @@ func main() {
 			"PIPELINE\n" +
 			"The encode command can handle the entire pipeline in one step, or you can use\n" +
 			"the master and split commands to produce intermediate artifacts for finer control.",
-		Version:     version(),
+		Version: version(),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:     debugFlagName,
@@ -69,39 +75,39 @@ func main() {
 				OnlyOnce: true,
 			},
 			&cli.StringFlag{
-				Name:     "ffmpegpath",
+				Name:     ffmpegPathFlagName,
 				Usage:    "ffmpeg binary path",
 				Value:    ffmpeg.FFMPEGBinary,
 				OnlyOnce: true,
 			},
 			&cli.StringFlag{
-				Name:     "ffprobepath",
+				Name:     ffprobePathFlagName,
 				Usage:    "ffprobe binary path",
 				Value:    ffmpeg.FFProbeBinary,
 				OnlyOnce: true,
 			},
 			&cli.StringFlag{
-				Name:     "mkvpropeditpath",
+				Name:     mkvpropeditPathFlagName,
 				Usage:    "mkvpropedit binary path",
 				Value:    mkvtoolnix.MKVPropEdit,
 				OnlyOnce: true,
 			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			if cmd.String("ffmpegpath") != ffmpeg.FFMPEGBinary {
-				ffmpeg.FFMPEGBinary = cmd.String("ffmpegpath")
+			if cmd.String(ffmpegPathFlagName) != ffmpeg.FFMPEGBinary {
+				ffmpeg.FFMPEGBinary = cmd.String(ffmpegPathFlagName)
 				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom ffmpeg path\n", shellescape.Quote(ffmpeg.FFMPEGBinary))
 				}
 			}
-			if cmd.String("ffprobepath") != ffmpeg.FFProbeBinary {
-				ffmpeg.FFProbeBinary = cmd.String("ffprobepath")
+			if cmd.String(ffprobePathFlagName) != ffmpeg.FFProbeBinary {
+				ffmpeg.FFProbeBinary = cmd.String(ffprobePathFlagName)
 				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom ffprobe path\n", shellescape.Quote(ffmpeg.FFProbeBinary))
 				}
 			}
-			if cmd.String("mkvpropeditpath") != mkvtoolnix.MKVPropEdit {
-				mkvtoolnix.MKVPropEdit = cmd.String("mkvpropeditpath")
+			if cmd.String(mkvpropeditPathFlagName) != mkvtoolnix.MKVPropEdit {
+				mkvtoolnix.MKVPropEdit = cmd.String(mkvpropeditPathFlagName)
 				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom mkvpropedit path\n", shellescape.Quote(mkvtoolnix.MKVPropEdit))
 				}
@@ -116,6 +122,8 @@ func main() {
 			masterCommand,
 			splitCommand,
 			concatCommand,
+			// advanced
+			batchsearchCommand,
 		},
 	}
 	if err := cmd.Run(ctx, os.Args); err != nil {

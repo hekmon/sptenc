@@ -26,7 +26,7 @@ var concatCommand = &cli.Command{
 		"without re-encoding.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "outputdir",
+			Name:     outputDirFlagName,
 			Aliases:  []string{"o"},
 			Usage:    "Output directory for the concatenated file",
 			Value:    "",
@@ -34,7 +34,7 @@ var concatCommand = &cli.Command{
 			Category: "Directories",
 		},
 		&cli.StringFlag{
-			Name:             "tmpdir",
+			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
 			Usage:            "Temporary directory location that will be used for intermediate files",
 			Value:            os.TempDir(),
@@ -70,7 +70,7 @@ var concatCommand = &cli.Command{
 			return ctx, errors.New("input path must be a directory")
 		}
 		// Resolve and check output directory
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			outputDir = cmd.Args().First()
 		}
@@ -87,7 +87,7 @@ var concatCommand = &cli.Command{
 			Prepare
 		*/
 		inputDir := cmd.StringArg("inputdir")
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			outputDir = inputDir
 		}
@@ -101,9 +101,9 @@ var concatCommand = &cli.Command{
 		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s-concat.mkv", filepath.Base(inputDir)))
 		// create a temporary directory
 		var workingDir string
-		if workingDir, err = createTempDir(cmd.String("tmpdir")); err != nil {
+		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
 			return fmt.Errorf("failed to create temporary working directory in %s: %w",
-				shellescape.Quote(cmd.String("tmpdir")), err,
+				shellescape.Quote(cmd.String(tmpDirFlagName)), err,
 			)
 		}
 		defer func() {

@@ -19,6 +19,14 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// Flag names for encode-specific flags and shared helpers defined in this file.
+const (
+	encoderFlagName      = "encoder"
+	cacheProfileFlagName = "cacheprofile"
+	originalFileFlagName = "originalfile"
+	thresholdFlagName    = "threshold"
+)
+
 var encodeCommand = &cli.Command{
 	Name:    "encode",
 	Aliases: []string{"e"},
@@ -52,175 +60,52 @@ var encodeCommand = &cli.Command{
 			"compressed to FLAC during the final remux step. This reduces file size with\n"+
 			"no quality loss.",
 		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
-	Flags: []cli.Flag{
-		// encoding
-		&cli.StringFlag{
-			Name:             "encoder",
-			Aliases:          []string{"e"},
-			Usage:            fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(allEncoders, ", ")),
-			Value:            string(ffmpeg.HEVCEncoderLibx265),
-			OnlyOnce:         true,
-			Validator:        encoderValidator,
-			ValidateDefaults: true,
-		},
-		// GPU Accelerated Encoders
-		&cli.IntFlag{
-			Name:     "nvidiagpuindex",
-			Usage:    "GPU to use when --encoder is an NVIDIA NVENC encoder",
-			Value:    ffmpeg.CUDADefaultDevice,
-			OnlyOnce: true,
-			Category: "GPU Accelerated Encoders",
-		},
-		&cli.StringFlag{
-			Name:     "vaapirendererpath",
-			Usage:    "Direct Rendering Manager render node to use when --encoder is a VA-API encoder",
-			Value:    ffmpeg.VAAPIDefaultDevice,
-			OnlyOnce: true,
-			Category: "GPU Accelerated Encoders",
-		},
-		&cli.IntFlag{
-			Name:     "d3d12vagpuindex",
-			Usage:    "GPU to use when --encoder is a D3D12VA encoder",
-			Value:    ffmpeg.D3D12VADefaultDevice,
-			OnlyOnce: true,
-			Category: "GPU Accelerated Encoders",
-		},
-		// directories
-		&cli.StringFlag{
-			Name:     "outputdir",
-			Aliases:  []string{"o"},
-			Usage:    "Output directory (defaults to input file directory, or original file directory for segment inputs)",
-			Value:    "",
-			OnlyOnce: true,
-			Category: "Directories",
-		},
-		&cli.StringFlag{
-			Name:     "statscachedir",
-			Aliases:  []string{"s"},
-			Usage:    "Stats cache directory. Used to save encoding QP history to speed up future encoding.",
-			Value:    getCacheDir(),
-			OnlyOnce: true,
-			Category: "Directories",
-		},
-		&cli.StringFlag{
-			Name:     "cacheprofile",
-			Aliases:  []string{"c"},
-			Usage:    "Cache profile name to isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile.",
-			Value:    "",
-			OnlyOnce: true,
-			Category: "Directories",
-		},
-		&cli.StringFlag{
-			Name:             "tmpdir",
-			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used for intermediate files",
-			Value:            os.TempDir(),
-			OnlyOnce:         true,
-			Validator:        validateTmpDir,
-			ValidateDefaults: true,
-			Category:         "Directories",
-		},
-		// single video file
-		&cli.Float64Flag{
-			Name:    "threshold",
-			Aliases: []string{"T"},
-			Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value for your video with the split command.",
-				ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
-			),
-			Value:     10,
-			OnlyOnce:  true,
-			Category:  "Single Video File",
-			Validator: validateSceneThreshold,
-		},
-		// pre-split video files
-		&cli.StringFlag{
-			Name:     "originalfile",
-			Aliases:  []string{"f"},
-			Usage:    "Original file to use when performing the final remuxing (used to recover all other streams: audio, subtitles, etc.)",
-			Value:    "",
-			OnlyOnce: true,
-			Category: "Pre-Split Video Files",
-		},
-		// VMAF
-		&cli.BoolFlag{
-			Name:     "vmafcuda",
-			Usage:    "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support in the ffmpeg build.",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "VMAF",
-		},
-		&cli.BoolFlag{
-			Name:     "vmafneg",
-			Usage:    "Use VMAF NEG models",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "VMAF",
-		},
-		&cli.Float64Flag{
-			Name:      "vmafmin",
-			Usage:     "Minimum acceptable VMAF score for the worst frame.",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafp1",
-			Usage:     "Minimum acceptable VMAF score for the 1st percentile.",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafp5",
-			Usage:     "Minimum acceptable VMAF score for the 5th percentile.",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafp10",
-			Usage:     "Minimum acceptable VMAF score for the 10th percentile.",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafp25",
-			Usage:     "Minimum acceptable VMAF score for the 25th percentile.",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafmedian",
-			Usage:     "Minimum acceptable VMAF score for the median (50th percentile).",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafhmean",
-			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
-			Value:     93,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-		&cli.Float64Flag{
-			Name:      "vmafmean",
-			Usage:     "Minimum acceptable VMAF score for mean.",
-			Value:     core.VMAFOffValue,
-			OnlyOnce:  true,
-			Category:  "VMAF",
-			Validator: vmafValueValidator,
-		},
-	},
+	Flags: func() []cli.Flag {
+		flags := []cli.Flag{
+			&cli.StringFlag{
+				Name:             encoderFlagName,
+				Aliases:          []string{"e"},
+				Usage:            fmt.Sprintf("Encoder to use. Valid values: %s", strings.Join(allEncoders, ", ")),
+				Value:            string(ffmpeg.HEVCEncoderLibx265),
+				OnlyOnce:         true,
+				Validator:        encoderValidator,
+				ValidateDefaults: true,
+			},
+			&cli.StringFlag{
+				Name:     cacheProfileFlagName,
+				Aliases:  []string{"c"},
+				Usage:    "Cache profile name to isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile.",
+				Value:    "",
+				OnlyOnce: true,
+				Category: "Directories",
+			},
+		}
+		flags = append(flags, newGPUFlags(encoderFlagName, "GPU Accelerated Encoders")...)
+		flags = append(flags, newDirectoryFlags()...)
+		flags = append(flags,
+			&cli.Float64Flag{
+				Name:    thresholdFlagName,
+				Aliases: []string{"T"},
+				Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value with the split command (also check batchsearch).",
+					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
+				),
+				Value:     10,
+				OnlyOnce:  true,
+				Category:  "Single Video File",
+				Validator: validateSceneThreshold,
+			},
+			&cli.StringFlag{
+				Name:     originalFileFlagName,
+				Aliases:  []string{"f"},
+				Usage:    "Original file to use when performing the final remuxing (used to recover all other streams: audio, subtitles, etc.)",
+				Value:    "",
+				OnlyOnce: true,
+				Category: "Pre-Split Video Files",
+			},
+		)
+		flags = append(flags, newVMAFFlags()...)
+		return flags
+	}(),
 	Arguments: []cli.Argument{
 		&cli.StringArg{
 			Name:      "inputpath",
@@ -243,12 +128,12 @@ var encodeCommand = &cli.Command{
 		if err != nil {
 			return ctx, fmt.Errorf("failed to list ffmpeg encoders: %w", err)
 		}
-		requestedEncoder := cmd.String("encoder")
+		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}
 		// Check CUDA VMAF support if requested
-		if cmd.Bool("vmafcuda") {
+		if cmd.Bool(vmafCUDAFlagName) {
 			filters, err := ffmpeg.GetFilters(ctx)
 			if err != nil {
 				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
@@ -273,15 +158,15 @@ var encodeCommand = &cli.Command{
 			}
 			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 			// --originalfile is only meaningful with directory input; reject it for single files
-			if cmd.String("originalfile") != "" {
+			if cmd.String(originalFileFlagName) != "" {
 				return ctx, errors.New("--originalfile can not be used when input path is a single file")
 			}
 		} else {
 			// Directory input: need original file for remuxing audio/subs
-			if cmd.String("originalfile") == "" {
+			if cmd.String(originalFileFlagName) == "" {
 				return ctx, errors.New("when input path is a directory, you must specify the --originalfile flag")
 			}
-			if fileInfos, err = os.Stat(cmd.String("originalfile")); err != nil {
+			if fileInfos, err = os.Stat(cmd.String(originalFileFlagName)); err != nil {
 				return ctx, fmt.Errorf("failed to access original file: %w", err)
 			}
 			if !fileInfos.Mode().IsRegular() {
@@ -290,10 +175,10 @@ var encodeCommand = &cli.Command{
 			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		}
 		// Resolve and check output directory
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			if inputIsDir {
-				outputDir = filepath.Dir(cmd.String("originalfile"))
+				outputDir = filepath.Dir(cmd.String(originalFileFlagName))
 			} else {
 				outputDir = filepath.Dir(cmd.Args().First())
 			}
@@ -305,7 +190,7 @@ var encodeCommand = &cli.Command{
 			return ctx, errors.New("output directory path must be a directory")
 		}
 		// Create the cache dir if necessary
-		if err = os.MkdirAll(cmd.String("statscachedir"), 0755); err != nil {
+		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {
 			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
 		}
 		return ctx, nil
@@ -329,9 +214,9 @@ var encodeCommand = &cli.Command{
 
 		// create a temporary directory
 		var workingDir string
-		if workingDir, err = createTempDir(cmd.String("tmpdir")); err != nil {
+		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
 			return fmt.Errorf("failed to create temporary working directory in %s: %w",
-				shellescape.Quote(cmd.String("tmpdir")), err,
+				shellescape.Quote(cmd.String(tmpDirFlagName)), err,
 			)
 		}
 		defer func() {
@@ -353,15 +238,15 @@ var encodeCommand = &cli.Command{
 
 		// Create the VMAF auditor
 		vmafAuditor, err := core.NewVMAFChecker(
-			cmd.Float64("vmafmin"), cmd.Float64("vmafp1"), cmd.Float64("vmafp5"), cmd.Float64("vmafp10"),
-			cmd.Float64("vmafp25"), cmd.Float64("vmafmedian"), cmd.Float64("vmafhmean"), cmd.Float64("vmafmean"))
+			cmd.Float64(vmafMinFlagName), cmd.Float64(vmafP1FlagName), cmd.Float64(vmafP5FlagName), cmd.Float64(vmafP10FlagName),
+			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafHMeanFlagName), cmd.Float64(vmafMeanFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create VMAF auditor: %w", err)
 			return
 		}
 
 		// Get the stats cache
-		statsCache, err := core.NewStatsCacheHistory(cmd.String("statscachedir"), ffmpeg.Encoder(cmd.String("encoder")), vmafAuditor, cmd.String("cacheprofile"))
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), ffmpeg.Encoder(cmd.String(encoderFlagName)), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create stats cache: %w", err)
 			return
@@ -386,7 +271,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				cunits.ImportInBytes(float64(inputInfos.Size())),
-				cmd.String("encoder"),
+				cmd.String(encoderFlagName),
 			)
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// create master
@@ -394,14 +279,14 @@ var encodeCommand = &cli.Command{
 				masterFile string
 				duration   time.Duration
 			)
-			masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String("encoder"),
-				cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"))
+			masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String(encoderFlagName),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName))
 			if masterFile, duration, err = createMaster(ctx, inputPath, workingDir, cmd.Bool(debugFlagName), masterConfig); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// analyze
 			fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
-				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
 			)
 			var scenes []ffmpeg.Scene
 			start := time.Now()
@@ -414,7 +299,7 @@ var encodeCommand = &cli.Command{
 				D3D12Device:     masterConfig.D3D12Device,
 				VideoToolboxDec: masterConfig.VideoToolboxDec,
 			}
-			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName), scenesConfig); err != nil {
+			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64(thresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
@@ -448,9 +333,9 @@ var encodeCommand = &cli.Command{
 		} else {
 			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
-				shellescape.Quote(filepath.Base(cmd.String("originalfile"))),
+				shellescape.Quote(filepath.Base(cmd.String(originalFileFlagName))),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				cmd.String("encoder"),
+				cmd.String(encoderFlagName),
 			)
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// get segments
@@ -501,12 +386,12 @@ var encodeCommand = &cli.Command{
 				WorkingDir:        workingDir,
 				StatsCache:        statsCache,
 				KeepInvalidQP:     cmd.Bool(debugFlagName),
-				Encoder:           ffmpeg.Encoder(cmd.String("encoder")),
-				NVIDIAGPUIndex:    cmd.Int("nvidiagpuindex"),
-				VAAPIRendererPath: cmd.String("vaapirendererpath"),
-				D3D12VAGPUIndex:   cmd.Int("d3d12vagpuindex"),
-				VMAFNeg:           cmd.Bool("vmafneg"),
-				VMAFCUDA:          cmd.Bool("vmafcuda"),
+				Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
+				NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
+				VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
+				D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
+				VMAFNeg:           cmd.Bool(vmafNegFlagName),
+				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
 			},
 		)
 		if err != nil {
@@ -597,7 +482,7 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, cmd.Int("nvidiagpuindex"), cmd.Bool("vmafneg"), cmd.Bool("vmafcuda"), cmd.Bool(debugFlagName),
+			results.TotalSegmentsFrames, cmd.Int(nvidiaGPUIndexFlagName), cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName),
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)
@@ -611,19 +496,19 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Remuxing to final file...")
 		var originalFile string
 		if inputInfos.IsDir() {
-			originalFile = cmd.String("originalfile")
+			originalFile = cmd.String(originalFileFlagName)
 		} else {
 			originalFile = inputPath
 		}
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			if inputInfos.IsDir() {
-				outputDir = filepath.Dir(cmd.String("originalfile"))
+				outputDir = filepath.Dir(cmd.String(originalFileFlagName))
 			} else {
 				outputDir = filepath.Dir(inputPath)
 			}
 		}
-		outputPath := computeFinalPath(originalFile, outputDir, ffmpeg.Encoder(cmd.String("encoder")))
+		outputPath := computeFinalPath(originalFile, outputDir, ffmpeg.Encoder(cmd.String(encoderFlagName)))
 		// Determine whether to auto-convert audio to FLAC.
 		// sourceStats was probed from either the input file (single file) or the first segment (directory).
 		// Probe originalFile directly to get the correct audio stream info in both cases.
@@ -636,8 +521,8 @@ var encodeCommand = &cli.Command{
 		if encodeToFlac {
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
-		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String("encoder")),
-			results, finalVMAFStats, cmd.Bool("vmafneg"), videoStream.Height >= ffmpeg.Height4K, len(segmentsPaths))
+		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(segmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {
@@ -712,6 +597,175 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Complete split encoding took %s\n", duration.Round(time.Millisecond))
 		return
 	},
+}
+
+const (
+	nvidiaGPUIndexFlagName    = "nvidiagpuindex"
+	vaapiRendererPathFlagName = "vaapirendererpath"
+	d3d12vaGPUIndexFlagName   = "d3d12vagpuindex"
+)
+
+// newGPUFlags returns the GPU encoder flags. encoderFlagName is the name of the
+// encoder flag to reference in descriptions (e.g. "encoder" or "searchencoder").
+func newGPUFlags(encoderFlagName, category string) []cli.Flag {
+	return []cli.Flag{
+		&cli.IntFlag{
+			Name:     nvidiaGPUIndexFlagName,
+			Usage:    fmt.Sprintf("GPU to use when --%s is an NVIDIA NVENC encoder", encoderFlagName),
+			Value:    ffmpeg.CUDADefaultDevice,
+			OnlyOnce: true,
+			Category: category,
+		},
+		&cli.StringFlag{
+			Name:     vaapiRendererPathFlagName,
+			Usage:    fmt.Sprintf("Direct Rendering Manager render node to use when --%s is a VA-API encoder", encoderFlagName),
+			Value:    ffmpeg.VAAPIDefaultDevice,
+			OnlyOnce: true,
+			Category: category,
+		},
+		&cli.IntFlag{
+			Name:     d3d12vaGPUIndexFlagName,
+			Usage:    fmt.Sprintf("GPU to use when --%s is a D3D12VA encoder", encoderFlagName),
+			Value:    ffmpeg.D3D12VADefaultDevice,
+			OnlyOnce: true,
+			Category: category,
+		},
+	}
+}
+
+const (
+	outputDirFlagName     = "outputdir"
+	statsCacheDirFlagName = "statscachedir"
+	tmpDirFlagName        = "tmpdir"
+)
+
+// newDirectoryFlags returns the output, stats cache and temporary directory flags.
+func newDirectoryFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:     outputDirFlagName,
+			Aliases:  []string{"o"},
+			Usage:    "Output directory (defaults to input file directory, or original file directory for segment inputs)",
+			Value:    "",
+			OnlyOnce: true,
+			Category: "Directories",
+		},
+		&cli.StringFlag{
+			Name:     statsCacheDirFlagName,
+			Aliases:  []string{"s"},
+			Usage:    "Stats cache directory. Used to save encoding QP history to speed up future encoding.",
+			Value:    getCacheDir(),
+			OnlyOnce: true,
+			Category: "Directories",
+		},
+		&cli.StringFlag{
+			Name:             tmpDirFlagName,
+			Aliases:          []string{"t"},
+			Usage:            "Temporary directory location that will be used for intermediate files",
+			Value:            os.TempDir(),
+			OnlyOnce:         true,
+			Validator:        validateTmpDir,
+			ValidateDefaults: true,
+			Category:         "Directories",
+		},
+	}
+}
+
+const (
+	vmafCUDAFlagName   = "vmafcuda"
+	vmafNegFlagName    = "vmafneg"
+	vmafMinFlagName    = "vmafmin"
+	vmafP1FlagName     = "vmafp1"
+	vmafP5FlagName     = "vmafp5"
+	vmafP10FlagName    = "vmafp10"
+	vmafP25FlagName    = "vmafp25"
+	vmafMedianFlagName = "vmafmedian"
+	vmafHMeanFlagName  = "vmafhmean"
+	vmafMeanFlagName   = "vmafmean"
+)
+
+// newVMAFFlags returns the VMAF quality metric flags.
+func newVMAFFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.BoolFlag{
+			Name:     vmafCUDAFlagName,
+			Usage:    "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support in the ffmpeg build.",
+			Value:    false,
+			OnlyOnce: true,
+			Category: "VMAF",
+		},
+		&cli.BoolFlag{
+			Name:     vmafNegFlagName,
+			Usage:    "Use VMAF NEG models",
+			Value:    false,
+			OnlyOnce: true,
+			Category: "VMAF",
+		},
+		&cli.Float64Flag{
+			Name:      vmafMinFlagName,
+			Usage:     "Minimum acceptable VMAF score for the worst frame.",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafP1FlagName,
+			Usage:     "Minimum acceptable VMAF score for the 1st percentile.",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafP5FlagName,
+			Usage:     "Minimum acceptable VMAF score for the 5th percentile.",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafP10FlagName,
+			Usage:     "Minimum acceptable VMAF score for the 10th percentile.",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafP25FlagName,
+			Usage:     "Minimum acceptable VMAF score for the 25th percentile.",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafMedianFlagName,
+			Usage:     "Minimum acceptable VMAF score for the median (50th percentile).",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafHMeanFlagName,
+			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
+			Value:     93,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+		&cli.Float64Flag{
+			Name:      vmafMeanFlagName,
+			Usage:     "Minimum acceptable VMAF score for mean.",
+			Value:     core.VMAFOffValue,
+			OnlyOnce:  true,
+			Category:  "VMAF",
+			Validator: vmafValueValidator,
+		},
+	}
 }
 
 // buildFFV1MasterConfigForEncoder determines hardware decode settings for FFV1 master creation

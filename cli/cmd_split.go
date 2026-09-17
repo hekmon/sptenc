@@ -17,6 +17,16 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// Flag names for split-specific flags (HW dec flags are also used by master).
+const (
+	analyzeFlagName         = "analyze"
+	masterFlagName          = "master"
+	nvdecFlagName           = "nvdec"
+	vaapiDecFlagName        = "vaapidec"
+	d3d12DecFlagName        = "d3d12dec"
+	videoToolboxDecFlagName = "videotoolboxdec"
+)
+
 var splitCommand = &cli.Command{
 	Name:     "split",
 	Aliases:  []string{"s"},
@@ -35,7 +45,7 @@ var splitCommand = &cli.Command{
 		"use --master to skip the master creation phase.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
-			Name:      "threshold",
+			Name:      thresholdFlagName,
 			Aliases:   []string{"T"},
 			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
 			Value:     10,
@@ -43,14 +53,14 @@ var splitCommand = &cli.Command{
 			Validator: validateSceneThreshold,
 		},
 		&cli.BoolFlag{
-			Name:     "analyze",
+			Name:     analyzeFlagName,
 			Aliases:  []string{"a"},
 			Usage:    "Simply analyze the input file (skip the master creation phase)",
 			Value:    false,
 			OnlyOnce: true,
 		},
 		&cli.BoolFlag{
-			Name:     "master",
+			Name:     masterFlagName,
 			Aliases:  []string{"m"},
 			Usage:    "Use if the input file is an already-processed master file (see the master command). Without this flag, the split command will create one before splitting it.",
 			Value:    false,
@@ -58,7 +68,7 @@ var splitCommand = &cli.Command{
 		},
 		// Directories
 		&cli.StringFlag{
-			Name:     "outputdir",
+			Name:     outputDirFlagName,
 			Aliases:  []string{"o"},
 			Usage:    "Output directory for split scenes",
 			Value:    "",
@@ -66,7 +76,7 @@ var splitCommand = &cli.Command{
 			Category: "Directories",
 		},
 		&cli.StringFlag{
-			Name:             "tmpdir",
+			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
 			Usage:            "temporary directory location that will be used for intermediate files if needed",
 			Value:            os.TempDir(),
@@ -77,49 +87,49 @@ var splitCommand = &cli.Command{
 		},
 		// HW dec
 		&cli.BoolFlag{
-			Name:     "nvdec",
+			Name:     nvdecFlagName,
 			Usage:    "Use NVDEC hardware-accelerated decoding when creating the master or detecting scenes (NVIDIA GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "vaapidec",
+			Name:     vaapiDecFlagName,
 			Usage:    "Use VA-API hardware-accelerated decoding when creating the master or detecting scenes (Intel/AMD GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "d3d12dec",
+			Name:     d3d12DecFlagName,
 			Usage:    "Use D3D12VA hardware-accelerated decoding when creating the master or detecting scenes (Windows, GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "videotoolboxdec",
+			Name:     videoToolboxDecFlagName,
 			Usage:    "Use VideoToolbox hardware-accelerated decoding when creating the master or detecting scenes (macOS, Apple Silicon)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
-			Name:     "nvidiagpuindex",
+			Name:     nvidiaGPUIndexFlagName,
 			Usage:    "GPU to use with --nvdec for master creation or scene detection",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.StringFlag{
-			Name:     "vaapirendererpath",
+			Name:     vaapiRendererPathFlagName,
 			Usage:    "Direct Rendering Manager render node to use with --vaapidec for master creation or scene detection",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
-			Name:     "d3d12vagpuindex",
+			Name:     d3d12vaGPUIndexFlagName,
 			Usage:    "GPU to use with --d3d12dec for master creation or scene detection",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
@@ -153,7 +163,7 @@ var splitCommand = &cli.Command{
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		// Resolve and check output directory
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			outputDir = filepath.Dir(cmd.Args().First())
 		}
@@ -165,16 +175,16 @@ var splitCommand = &cli.Command{
 		}
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
-		if cmd.Bool("nvdec") {
+		if cmd.Bool(nvdecFlagName) {
 			hwDecFlags++
 		}
-		if cmd.Bool("vaapidec") {
+		if cmd.Bool(vaapiDecFlagName) {
 			hwDecFlags++
 		}
-		if cmd.Bool("d3d12dec") {
+		if cmd.Bool(d3d12DecFlagName) {
 			hwDecFlags++
 		}
-		if cmd.Bool("videotoolboxdec") {
+		if cmd.Bool(videoToolboxDecFlagName) {
 			hwDecFlags++
 		}
 		if hwDecFlags > 1 {
@@ -209,24 +219,24 @@ var splitCommand = &cli.Command{
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
 		duration := stats.Format.Duration
-		if cmd.Bool("analyze") {
+		if cmd.Bool(analyzeFlagName) {
 			fmt.Fprintf(bypass, "Analyzing scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
 			)
 		} else {
 			fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
 			)
-			if !cmd.Bool("master") {
+			if !cmd.Bool(masterFlagName) {
 				// create a temporary directory
 				var workingDir string
-				if workingDir, err = createTempDir(cmd.String("tmpdir")); err != nil {
+				if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
 					return fmt.Errorf("failed to create temporary working directory in %s: %w",
-						shellescape.Quote(cmd.String("tmpdir")), err,
+						shellescape.Quote(cmd.String(tmpDirFlagName)), err,
 					)
 				}
 				defer func() {
@@ -247,10 +257,10 @@ var splitCommand = &cli.Command{
 				}
 				// build optional hw decode config
 				masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
-					cmd.Bool("nvdec"), cmd.Bool("vaapidec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
-					cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
+					cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
+					cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
 				)
-				if (cmd.Bool("nvdec") || cmd.Bool("vaapidec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
+				if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
 					!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 					fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 				}
@@ -267,26 +277,26 @@ var splitCommand = &cli.Command{
 
 		// analyze
 		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
-			strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
+			strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
 		scenesConfig := ffmpeg.ScenesDetectionConfig{
-			NVDec:           cmd.Bool("nvdec"),
-			NVDevice:        cmd.Int("nvidiagpuindex"),
-			VAAPIDec:        cmd.Bool("vaapidec"),
-			VAAPIDevice:     cmd.String("vaapirendererpath"),
-			D3D12Dec:        cmd.Bool("d3d12dec"),
-			D3D12Device:     cmd.Int("d3d12vagpuindex"),
-			VideoToolboxDec: cmd.Bool("videotoolboxdec"),
+			NVDec:           cmd.Bool(nvdecFlagName),
+			NVDevice:        cmd.Int(nvidiaGPUIndexFlagName),
+			VAAPIDec:        cmd.Bool(vaapiDecFlagName),
+			VAAPIDevice:     cmd.String(vaapiRendererPathFlagName),
+			D3D12Dec:        cmd.Bool(d3d12DecFlagName),
+			D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
+			VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
 		}
-		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64("threshold"), duration, cmd.Bool(debugFlagName), scenesConfig)
+		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64(thresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-		if cmd.Bool("analyze") {
+		if cmd.Bool(analyzeFlagName) {
 			if !cmd.Bool(debugFlagName) {
 				for i, scene := range scenes {
 					fmt.Fprintf(bypass, "Scene #%d at %s with score %s\n",
@@ -298,7 +308,7 @@ var splitCommand = &cli.Command{
 		}
 
 		// split
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			outputDir = filepath.Dir(inputFilePath)
 		}

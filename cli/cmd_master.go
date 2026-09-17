@@ -34,56 +34,56 @@ var masterCommand = &cli.Command{
 		"introduces no degradation compared to the original.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "outputdir",
+			Name:     outputDirFlagName,
 			Aliases:  []string{"o"},
 			Usage:    "Output directory",
 			Value:    "",
 			OnlyOnce: true,
 		},
 		&cli.BoolFlag{
-			Name:     "nvdec",
+			Name:     nvdecFlagName,
 			Usage:    "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "vaapidec",
+			Name:     vaapiDecFlagName,
 			Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "d3d12dec",
+			Name:     d3d12DecFlagName,
 			Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
-			Name:     "videotoolboxdec",
+			Name:     videoToolboxDecFlagName,
 			Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
-			Name:     "nvidiagpuindex",
+			Name:     nvidiaGPUIndexFlagName,
 			Usage:    "GPU to use with --nvdec",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.StringFlag{
-			Name:     "vaapirendererpath",
+			Name:     vaapiRendererPathFlagName,
 			Usage:    "Direct Rendering Manager render node to use with --vaapidec",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
-			Name:     "d3d12vagpuindex",
+			Name:     d3d12vaGPUIndexFlagName,
 			Usage:    "GPU to use with --d3d12dec",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
@@ -117,7 +117,7 @@ var masterCommand = &cli.Command{
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		// Resolve and check output directory
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			outputDir = filepath.Dir(cmd.Args().First())
 		}
@@ -129,16 +129,16 @@ var masterCommand = &cli.Command{
 		}
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
-		if cmd.Bool("nvdec") {
+		if cmd.Bool(nvdecFlagName) {
 			hwDecFlags++
 		}
-		if cmd.Bool("vaapidec") {
+		if cmd.Bool(vaapiDecFlagName) {
 			hwDecFlags++
 		}
-		if cmd.Bool("d3d12dec") {
+		if cmd.Bool(d3d12DecFlagName) {
 			hwDecFlags++
 		}
-		if cmd.Bool("videotoolboxdec") {
+		if cmd.Bool(videoToolboxDecFlagName) {
 			hwDecFlags++
 		}
 		if hwDecFlags > 1 {
@@ -160,15 +160,15 @@ var masterCommand = &cli.Command{
 		defer liveprogress.Stop(false)
 		// build optional hw decode config
 		masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
-			cmd.Bool("nvdec"), cmd.Bool("vaapidec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
-			cmd.Int("nvidiagpuindex"), cmd.String("vaapirendererpath"), cmd.Int("d3d12vagpuindex"),
+			cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
+			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
 		)
-		if (cmd.Bool("nvdec") || cmd.Bool("vaapidec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
+		if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
 			!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 		}
 		// create master
-		outputDir := cmd.String("outputdir")
+		outputDir := cmd.String(outputDirFlagName)
 		if outputDir == "" {
 			outputDir = filepath.Dir(inputFilePath)
 		}
