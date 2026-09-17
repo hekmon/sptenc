@@ -157,10 +157,10 @@ var masterCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		// build optional hw decode config
-		masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
+		masterConfig := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
 			cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
 			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-		)
+		).ToFFV1MasterConfig()
 		if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
 			!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
@@ -179,36 +179,6 @@ var masterCommand = &cli.Command{
 	},
 }
 
-// buildFFV1MasterConfigForFlags determines hardware decode settings for FFV1 master creation
-// based on explicit user flags and input codec compatibility.
-func buildFFV1MasterConfigForFlags(ctx context.Context, inputPath string, nvdec, vaapidec, d3d12dec, videotoolboxdec bool, nvDevice int, vaDevice string, d3d12Device int) ffmpeg.FFV1VideoMasterConfig {
-	var config ffmpeg.FFV1VideoMasterConfig
-	if !nvdec && !vaapidec && !d3d12dec && !videotoolboxdec {
-		return config
-	}
-	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: inputPath})
-	if err != nil {
-		return config
-	}
-	video := stats.VideoTrack()
-	if video == nil {
-		return config
-	}
-	switch {
-	case nvdec && ffmpeg.IsNVDecCompatible(video.CodecName):
-		config.NVDec = true
-		config.NVDevice = nvDevice
-	case vaapidec && ffmpeg.IsVAAPIDecCompatible(video.CodecName):
-		config.VAAPIDec = true
-		config.VAAPIDevice = vaDevice
-	case d3d12dec && ffmpeg.IsD3D12DecCompatible(video.CodecName):
-		config.D3D12Dec = true
-		config.D3D12Device = d3d12Device
-	case videotoolboxdec && ffmpeg.IsVideoToolboxDecCompatible(video.CodecName):
-		config.VideoToolboxDec = true
-	}
-	return config
-}
 
 func createMaster(ctx context.Context, inputFilePath, outputDir string, inputFileSize int64, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (
 	outputFile string, totalFrames int, duration time.Duration, err error) {

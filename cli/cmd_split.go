@@ -254,10 +254,10 @@ var splitCommand = &cli.Command{
 					fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
 				}
 				// build optional hw decode config
-				masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
+				masterConfig := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
 					cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
 					cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-				)
+				).ToFFV1MasterConfig()
 				if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
 					!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
 					fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")

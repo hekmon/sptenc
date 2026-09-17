@@ -303,30 +303,26 @@ var batchsearchCommand = &cli.Command{
 		}
 		fmt.Fprintf(bypass, "\nEach segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 
-		// Step 1 - Create the master
-		masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String(encoderFlagName),
+		// Build decoder config independently so scene detection can run on the source
+		// before the master is created.
+		decoderCfg := ffmpeg.SelectDecoderForEncoder(ctx, inputPath, ffmpeg.Encoder(cmd.String(encoderFlagName)),
 			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
 		)
-		masterFile, _, totalDuration, err := createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), masterConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create the master file: %w", err)
-		}
 
-		// Step 2 - Retreive scenes markers
+		// Get source duration for progress reporting
+		sourceStats, err := getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName))
+		if err != nil {
+			return fmt.Errorf("failed to get source stream info: %w", err)
+		}
+		totalDuration := sourceStats.Format.Duration
+
+		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
 		fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
 			strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
-		scenes, err := liveDetectScenes(ctx, masterFile, cmd.Float64(thresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
-			ffmpeg.ScenesDetectionConfig{
-				NVDec:           masterConfig.NVDec,
-				NVDevice:        masterConfig.NVDevice,
-				VAAPIDec:        masterConfig.VAAPIDec,
-				VAAPIDevice:     masterConfig.VAAPIDevice,
-				D3D12Dec:        masterConfig.D3D12Dec,
-				D3D12Device:     masterConfig.D3D12Device,
-				VideoToolboxDec: masterConfig.VideoToolboxDec,
-			},
+		scenes, err := liveDetectScenes(ctx, inputPath, cmd.Float64(thresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
+			decoderCfg.ToScenesDetectionConfig(),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
@@ -336,6 +332,12 @@ var batchsearchCommand = &cli.Command{
 		)
 		candidates := getSearchThresholdCandidates(scenes, cmd.Int(searchIncrementMinimumFlagName))
 		fmt.Fprintf(bypass, "\tCandidates: %+v\n", candidates)
+
+		// Step 2 - Create the master for encoding
+		_, _, _, err = createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
+		if err != nil {
+			return fmt.Errorf("failed to create the master file: %w", err)
+		}
 
 		// TODO
 

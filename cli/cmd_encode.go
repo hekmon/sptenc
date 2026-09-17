@@ -268,8 +268,8 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// create master
 			var masterFile string
-			masterConfig := buildFFV1MasterConfigForEncoder(ctx, inputPath, cmd.String(encoderFlagName),
-				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName))
+			masterConfig := ffmpeg.SelectDecoderForEncoder(ctx, inputPath, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName)).ToFFV1MasterConfig()
 			if masterFile, _, totalDuration, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
@@ -757,38 +757,3 @@ func newVMAFFlags() []cli.Flag {
 	}
 }
 
-// buildFFV1MasterConfigForEncoder determines hardware decode settings for FFV1 master creation
-// based on the chosen encoder and input codec compatibility.
-func buildFFV1MasterConfigForEncoder(ctx context.Context, inputPath string, encoder string, nvidiaGPUIndex int, vaapiDevice string, d3d12GPUIndex int) ffmpeg.FFV1VideoMasterConfig {
-	var config ffmpeg.FFV1VideoMasterConfig
-	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: inputPath})
-	if err != nil {
-		return config
-	}
-	video := stats.VideoTrack()
-	if video == nil {
-		return config
-	}
-	switch ffmpeg.Encoder(encoder) {
-	case ffmpeg.HEVCEncoderNVEnc, ffmpeg.AV1EncoderNVEnc:
-		if ffmpeg.IsNVDecCompatible(video.CodecName) {
-			config.NVDec = true
-			config.NVDevice = nvidiaGPUIndex
-		}
-	case ffmpeg.HEVCEncoderVAAPI, ffmpeg.AV1EncoderVAAPI:
-		if ffmpeg.IsVAAPIDecCompatible(video.CodecName) {
-			config.VAAPIDec = true
-			config.VAAPIDevice = vaapiDevice
-		}
-	case ffmpeg.HEVCEncoderD3D12VA:
-		if ffmpeg.IsD3D12DecCompatible(video.CodecName) {
-			config.D3D12Dec = true
-			config.D3D12Device = d3d12GPUIndex
-		}
-	case ffmpeg.HEVCEncoderVideoToolbox:
-		if ffmpeg.IsVideoToolboxDecCompatible(video.CodecName) {
-			config.VideoToolboxDec = true
-		}
-	}
-	return config
-}

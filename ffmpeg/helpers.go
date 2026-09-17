@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -36,6 +37,89 @@ func init() {
 		fmt.Fprintf(os.Stderr, "WARNING: Failed to recover physical CPU cores count (will default to %d): %s\n", NbThreadsToUse, err)
 	} else if physicalCores > 0 {
 		NbThreadsToUse = physicalCores
+	}
+}
+
+// HWDecoderConfig holds hardware decoder selection settings.
+type HWDecoderConfig struct {
+	NVDec           bool
+	NVDevice        int
+	VAAPIDec        bool
+	VAAPIDevice     string
+	D3D12Dec        bool
+	D3D12Device     int
+	VideoToolboxDec bool
+}
+
+// SelectCompatibleDecoders probes the input file and returns an HWDecoderConfig
+// with only the hardware decoders that are both requested and compatible.
+func SelectCompatibleDecoders(ctx context.Context, inputPath string, wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec bool, nvDevice int, vaDevice string, d3d12Device int) (dec HWDecoderConfig) {
+	stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: inputPath})
+	if err != nil {
+		return
+	}
+	video := stats.VideoTrack()
+	if video == nil {
+		return
+	}
+	if wantNVDec && IsNVDecCompatible(video.CodecName) {
+		dec.NVDec = true
+		dec.NVDevice = nvDevice
+	}
+	if wantVAAPIDec && IsVAAPIDecCompatible(video.CodecName) {
+		dec.VAAPIDec = true
+		dec.VAAPIDevice = vaDevice
+	}
+	if wantD3D12Dec && IsD3D12DecCompatible(video.CodecName) {
+		dec.D3D12Dec = true
+		dec.D3D12Device = d3d12Device
+	}
+	if wantVideoToolboxDec && IsVideoToolboxDecCompatible(video.CodecName) {
+		dec.VideoToolboxDec = true
+	}
+	return
+}
+
+// SelectDecoderForEncoder infers hardware decode preferences from the chosen
+// encoder and returns an HWDecoderConfig filtered by input compatibility.
+func SelectDecoderForEncoder(ctx context.Context, inputPath string, encoder Encoder, nvidiaGPUIndex int, vaapiDevice string, d3d12GPUIndex int) HWDecoderConfig {
+	var wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec bool
+	switch encoder {
+	case HEVCEncoderNVEnc, AV1EncoderNVEnc:
+		wantNVDec = true
+	case HEVCEncoderVAAPI, AV1EncoderVAAPI:
+		wantVAAPIDec = true
+	case HEVCEncoderD3D12VA:
+		wantD3D12Dec = true
+	case HEVCEncoderVideoToolbox:
+		wantVideoToolboxDec = true
+	}
+	return SelectCompatibleDecoders(ctx, inputPath, wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec, nvidiaGPUIndex, vaapiDevice, d3d12GPUIndex)
+}
+
+// ToFFV1MasterConfig copies decoder settings into an FFV1VideoMasterConfig.
+func (dec HWDecoderConfig) ToFFV1MasterConfig() FFV1VideoMasterConfig {
+	return FFV1VideoMasterConfig{
+		NVDec:           dec.NVDec,
+		NVDevice:        dec.NVDevice,
+		VAAPIDec:        dec.VAAPIDec,
+		VAAPIDevice:     dec.VAAPIDevice,
+		D3D12Dec:        dec.D3D12Dec,
+		D3D12Device:     dec.D3D12Device,
+		VideoToolboxDec: dec.VideoToolboxDec,
+	}
+}
+
+// ToScenesDetectionConfig copies decoder settings into a ScenesDetectionConfig.
+func (dec HWDecoderConfig) ToScenesDetectionConfig() ScenesDetectionConfig {
+	return ScenesDetectionConfig{
+		NVDec:           dec.NVDec,
+		NVDevice:        dec.NVDevice,
+		VAAPIDec:        dec.VAAPIDec,
+		VAAPIDevice:     dec.VAAPIDevice,
+		D3D12Dec:        dec.D3D12Dec,
+		D3D12Device:     dec.D3D12Device,
+		VideoToolboxDec: dec.VideoToolboxDec,
 	}
 }
 
