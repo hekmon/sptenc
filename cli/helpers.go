@@ -63,8 +63,8 @@ func isASCII(s string) bool {
 	return true
 }
 
-func generateWorkingDirectoryPath(basePath string) string {
-	return filepath.Join(basePath, fmt.Sprintf("sptenc-%d", time.Now().Nanosecond()))
+func createTempDir(basePath string) (path string, err error) {
+	return os.MkdirTemp(basePath, "sptenc-*")
 }
 
 func validateSceneThreshold(v float64) error {

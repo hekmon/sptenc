@@ -324,15 +324,10 @@ var encodeCommand = &cli.Command{
 		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
 		// create a temporary directory
-		workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
-		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Creating temporary working directory %s\n",
-				shellescape.Quote(workingDir),
-			)
-		}
-		if err = os.MkdirAll(workingDir, 0755); err != nil {
-			return fmt.Errorf("failed to create temporary working directory %s: %w",
-				shellescape.Quote(workingDir), err,
+		var workingDir string
+		if workingDir, err = createTempDir(cmd.String("tmpdir")); err != nil {
+			return fmt.Errorf("failed to create temporary working directory in %s: %w",
+				shellescape.Quote(cmd.String("tmpdir")), err,
 			)
 		}
 		defer func() {
@@ -348,6 +343,9 @@ var encodeCommand = &cli.Command{
 				}
 			}
 		}()
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
+		}
 
 		// Create the VMAF auditor
 		vmafAuditor, err := core.NewVMAFChecker(

@@ -18,21 +18,21 @@ import (
 )
 
 var splitCommand = &cli.Command{
-	Name:        "split",
-	Aliases:     []string{"s"},
-	Category:    "Tooling",
-	Usage:       "Split a video file by scenes",
+	Name:     "split",
+	Aliases:  []string{"s"},
+	Category: "Tooling",
+	Usage:    "Split a video file by scenes",
 	Description: "Detect scene changes in a video and split it into separate files at each transition.\n\n" +
-			"HOW IT WORKS\n" +
-			"By default, the command first creates a lossless FFV1 master to ensure\n" +
-			"frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter\n" +
-			"to find scene boundaries.\n\n" +
-			"WORKFLOW\n" +
-			"  1. Use --analyze to preview detected scenes without splitting.\n" +
-			"  2. Tune --threshold to control sensitivity (experiment first).\n" +
-			"  3. Validate with the original file before performing the actual split.\n\n" +
-			"If the input has already been converted with the master command,\n" +
-			"use --master to skip the master creation phase.",
+		"HOW IT WORKS\n" +
+		"By default, the command first creates a lossless FFV1 master to ensure\n" +
+		"frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter\n" +
+		"to find scene boundaries.\n\n" +
+		"WORKFLOW\n" +
+		"  1. Use --analyze to preview detected scenes without splitting.\n" +
+		"  2. Tune --threshold to control sensitivity (experiment first).\n" +
+		"  3. Validate with the original file before performing the actual split.\n\n" +
+		"If the input has already been converted with the master command,\n" +
+		"use --master to skip the master creation phase.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
 			Name:      "threshold",
@@ -190,6 +190,7 @@ var splitCommand = &cli.Command{
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
+		bypass := liveprogress.Bypass()
 
 		// handle modes and master preparation
 		fileToProcess := inputFilePath
@@ -198,54 +199,52 @@ var splitCommand = &cli.Command{
 			Path: inputFilePath,
 			Debug: func(s string) {
 				if cmd.Bool(debugFlagName) {
-					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+					fmt.Fprintf(bypass, "DEBUG: %s\n", s)
 				}
 			},
 			RuntimeError: func(err error) {
-				fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+				fmt.Fprintf(bypass, "ERROR: %s\n", err)
 			},
 		}); err != nil {
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
 		duration := stats.Format.Duration
 		if cmd.Bool("analyze") {
-			fmt.Fprintf(liveprogress.Bypass(), "Analyzing scenes of %s (%s) with threshold %s\n",
+			fmt.Fprintf(bypass, "Analyzing scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 			)
 		} else {
-			fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes of %s (%s) with threshold %s\n",
+			fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 				strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 			)
 			if !cmd.Bool("master") {
 				// create a temporary directory
-				workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
-				if cmd.Bool(debugFlagName) {
-					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: Creating temporary working directory %s\n",
-						shellescape.Quote(workingDir),
-					)
-				}
-				if err = os.MkdirAll(workingDir, 0755); err != nil {
-					return fmt.Errorf("failed to create temporary working directory %s: %w",
-						shellescape.Quote(workingDir), err,
+				var workingDir string
+				if workingDir, err = createTempDir(cmd.String("tmpdir")); err != nil {
+					return fmt.Errorf("failed to create temporary working directory in %s: %w",
+						shellescape.Quote(cmd.String("tmpdir")), err,
 					)
 				}
 				defer func() {
 					if err != nil || cmd.Bool(debugFlagName) {
-						fmt.Fprintf(liveprogress.Bypass(), "Temporary directory left for inspection: %s\n",
+						fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
 							shellescape.Quote(workingDir),
 						)
 					} else {
 						if removeErr := os.RemoveAll(workingDir); removeErr != nil {
-							fmt.Fprintf(liveprogress.Bypass(), "Failed to delete temporary working directory %s: %s\n",
+							fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
 								shellescape.Quote(workingDir), removeErr,
 							)
 						}
 					}
 				}()
+				if cmd.Bool(debugFlagName) {
+					fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
+				}
 				// build optional hw decode config
 				masterConfig := buildFFV1MasterConfigForFlags(ctx, inputFilePath,
 					cmd.Bool("nvdec"), cmd.Bool("vaapidec"), cmd.Bool("d3d12dec"), cmd.Bool("videotoolboxdec"),
@@ -253,7 +252,7 @@ var splitCommand = &cli.Command{
 				)
 				if (cmd.Bool("nvdec") || cmd.Bool("vaapidec") || cmd.Bool("d3d12dec") || cmd.Bool("videotoolboxdec")) &&
 					!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
-					fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
+					fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 				}
 				// create the master within
 				if fileToProcess, duration, err = createMaster(ctx, inputFilePath, workingDir, cmd.Bool(debugFlagName), masterConfig); err != nil {
@@ -262,8 +261,12 @@ var splitCommand = &cli.Command{
 			}
 		}
 
+		/*
+		 * Execute
+		 */
+
 		// analyze
-		fmt.Fprintf(liveprogress.Bypass(), "Detecting scenes with threshold at %s...\n",
+		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64("threshold"), 'f', -1, 64),
 		)
 		start := time.Now()
@@ -280,13 +283,13 @@ var splitCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
-		fmt.Fprintf(liveprogress.Bypass(), "\tDetected %d scenes in %s\n",
+		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 		if cmd.Bool("analyze") {
 			if !cmd.Bool(debugFlagName) {
 				for i, scene := range scenes {
-					fmt.Fprintf(liveprogress.Bypass(), "Scene #%d at %s with score %s\n",
+					fmt.Fprintf(bypass, "Scene #%d at %s with score %s\n",
 						2+i, scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64),
 					)
 				}
@@ -299,12 +302,12 @@ var splitCommand = &cli.Command{
 		if outputDir == "" {
 			outputDir = filepath.Dir(inputFilePath)
 		}
-		fmt.Fprintf(liveprogress.Bypass(), "Splitting scenes...\n")
+		fmt.Fprintf(bypass, "Splitting scenes...\n")
 		start = time.Now()
 		if err = liveSplitScenes(ctx, fileToProcess, outputDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to split scenes: %w", err)
 		}
-		fmt.Fprintf(liveprogress.Bypass(), "\tSplit %d scenes in %s\n",
+		fmt.Fprintf(bypass, "\tSplit %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 

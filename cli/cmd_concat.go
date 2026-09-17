@@ -100,15 +100,10 @@ var concatCommand = &cli.Command{
 		// Build output path from directory name
 		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s-concat.mkv", filepath.Base(inputDir)))
 		// create a temporary directory
-		workingDir := generateWorkingDirectoryPath(cmd.String("tmpdir"))
-		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Creating temporary working directory %s\n",
-				shellescape.Quote(workingDir),
-			)
-		}
-		if err = os.MkdirAll(workingDir, 0755); err != nil {
-			return fmt.Errorf("failed to create temporary working directory %s: %w",
-				shellescape.Quote(workingDir), err,
+		var workingDir string
+		if workingDir, err = createTempDir(cmd.String("tmpdir")); err != nil {
+			return fmt.Errorf("failed to create temporary working directory in %s: %w",
+				shellescape.Quote(cmd.String("tmpdir")), err,
 			)
 		}
 		defer func() {
@@ -124,6 +119,9 @@ var concatCommand = &cli.Command{
 				}
 			}
 		}()
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
+		}
 
 		/*
 			Execute
