@@ -50,22 +50,26 @@ const (
  * GPU/CPU encoders relationship
  */
 
-func getCPURelative(encoder Encoder) (isGPU bool, cpuRelative Encoder) {
+// GetCPURelative returns whether the given encoder is a GPU encoder and its CPU equivalent.
+// For GPU encoders (e.g. hevc_nvenc, av1_nvenc), it returns true and the corresponding CPU
+// encoder in the same codec family (libx265 for HEVC, svtav1 for AV1). For CPU encoders,
+// it returns false and the encoder itself. For unsupported encoders, it returns false and "".
+func GetCPURelative(encoder Encoder) (cpuRelative Encoder, alreadyCPU bool) {
 	switch encoder {
 	// HEVC
 	case HEVCEncoderLibx265:
-		return false, HEVCEncoderLibx265
+		return HEVCEncoderLibx265, true
 	case HEVCEncoderNVEnc, HEVCEncoderVAAPI,
 		HEVCEncoderD3D12VA, HEVCEncoderVideoToolbox:
-		return true, HEVCEncoderLibx265
+		return HEVCEncoderLibx265, false
 	// AV1
 	case AV1EncoderSVTAV1:
-		return false, AV1EncoderSVTAV1
+		return AV1EncoderSVTAV1, true
 	case AV1EncoderNVEnc, AV1EncoderVAAPI:
-		return true, AV1EncoderSVTAV1
+		return AV1EncoderSVTAV1, false
 	// unsupported
 	default:
-		return false, ""
+		return "", false
 	}
 }
 

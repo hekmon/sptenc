@@ -276,6 +276,15 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
 		}
 
+		// final encoding ?
+		var finalEncoder ffmpeg.Encoder
+		if cmd.Bool(finalEncodeFlagName) {
+			cpuEncoder, alreadyCPU := ffmpeg.GetCPURelative(ffmpeg.Encoder(cmd.String(encoderFlagName)))
+			if !alreadyCPU {
+				finalEncoder = cpuEncoder
+			}
+		}
+
 		/*
 		 * Execute process
 		 */
@@ -289,6 +298,9 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\t• search starts at threshold %s\n", strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64))
 		fmt.Fprintf(bypass, "\t• each candidate must have a minimum increment of %d\n", cmd.Int(searchIncrementMinimumFlagName))
 		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(nbStrikesFlagName))
+		if finalEncoder != "" {
+			fmt.Fprintf(bypass, "\t• one the best treshold is found, a final encoding will be performed with %s\n", finalEncoder)
+		}
 		fmt.Fprintf(bypass, "\nEach segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 
 		// Step 1 - Create the master
