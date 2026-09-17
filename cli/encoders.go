@@ -22,7 +22,7 @@ var (
 	}
 	encodersAV1 = []string{
 		// AV1
-		string(ffmpeg.AV1EncoderLibaom), string(ffmpeg.AV1EncoderSVTAV1),
+		string(ffmpeg.AV1EncoderSVTAV1),
 		string(ffmpeg.AV1EncoderNVEnc), string(ffmpeg.AV1EncoderVAAPI),
 	}
 	allEncoders = append(encodersHEVC, encodersAV1...)
@@ -115,10 +115,7 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		tablewriter.WithRenderer(renderer.NewColorized(tableColorCfg)),
 	)
 	table.Header("AV1", "CPU", "NVIDIA GPU", "AMD GPU", "Intel GPU", "Apple Silicon")
-	cpuLinux := fmt.Sprintf("%s / %s",
-		strikeIfUnavailable(string(ffmpeg.AV1EncoderLibaom), encoders.Has(string(ffmpeg.AV1EncoderLibaom))),
-		strikeIfUnavailable(string(ffmpeg.AV1EncoderSVTAV1), encoders.Has(string(ffmpeg.AV1EncoderSVTAV1))),
-	)
+	cpuLinux := strikeIfUnavailable(string(ffmpeg.AV1EncoderSVTAV1), encoders.Has(string(ffmpeg.AV1EncoderSVTAV1)))
 	table.Append([]string{
 		"Linux",
 		cpuLinux,
@@ -144,8 +141,6 @@ func renderAV1EncodersAvailability(encoders ffmpeg.EncodersInfo) string {
 		"unsupported",
 	})
 	table.Render()
-	buff.WriteString(fmt.Sprintf("\tCPU: %s is slow and single-instance rarely saturates many cores (by design),\n\t     prefer %s when possible.\n",
-		ffmpeg.AV1EncoderLibaom, ffmpeg.AV1EncoderSVTAV1))
 	return buff.String()
 }
 
