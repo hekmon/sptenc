@@ -162,16 +162,14 @@ var splitCommand = &cli.Command{
 			return ctx, errors.New("input file must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
-		// Resolve and check output directory
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = filepath.Dir(cmd.Args().First())
-		}
-		if fileInfos, err = os.Stat(outputDir); err != nil {
-			return ctx, fmt.Errorf("failed to access output directory: %w", err)
-		}
-		if !fileInfos.IsDir() {
-			return ctx, errors.New("output directory path must be a directory")
+		// Check output directory if explicitly provided
+		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
+			if fileInfos, err = os.Stat(outputDir); err != nil {
+				return ctx, fmt.Errorf("failed to access output directory: %w", err)
+			}
+			if !fileInfos.IsDir() {
+				return ctx, errors.New("output directory path must be a directory")
+			}
 		}
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int

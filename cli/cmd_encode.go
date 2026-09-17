@@ -128,7 +128,7 @@ var encodeCommand = &cli.Command{
 		}
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
-			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
+			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc verify' to see available encoders", requestedEncoder)
 		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
@@ -137,7 +137,7 @@ var encodeCommand = &cli.Command{
 				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
 			}
 			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
 			}
 		}
 		// Input path argument
@@ -172,20 +172,14 @@ var encodeCommand = &cli.Command{
 			}
 			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		}
-		// Resolve and check output directory
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			if inputIsDir {
-				outputDir = filepath.Dir(cmd.String(originalFileFlagName))
-			} else {
-				outputDir = filepath.Dir(cmd.Args().First())
+		// Check output directory if explicitly provided
+		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
+			if fileInfos, err = os.Stat(outputDir); err != nil {
+				return ctx, fmt.Errorf("failed to access output directory: %w", err)
 			}
-		}
-		if fileInfos, err = os.Stat(outputDir); err != nil {
-			return ctx, fmt.Errorf("failed to access output directory: %w", err)
-		}
-		if !fileInfos.IsDir() {
-			return ctx, errors.New("output directory path must be a directory")
+			if !fileInfos.IsDir() {
+				return ctx, errors.New("output directory path must be a directory")
+			}
 		}
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {

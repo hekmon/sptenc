@@ -71,9 +71,9 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 
 ## Quick Start
 
-### Check your environment
+### Verify your environment
 ```bash
-./sptenc check
+./sptenc verify
 ```
 
 ### Basic encode - VMAF harmonic mean ≥ 93 (default)
@@ -127,7 +127,7 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `av1_nvenc` | AV1 | NVIDIA GPU | All |
 | `av1_vaapi` | AV1 | VAAPI GPU | Linux |
 
-> **Tip:** `svtav1` is preferred over `libaom-av1` for speed when using CPU AV1 encoding. Run `sptenc check` to see which encoders your ffmpeg build supports.
+> **Tip:** `svtav1` is preferred over `libaom-av1` for speed when using CPU AV1 encoding. Run `sptenc verify` to see which encoders your ffmpeg build supports.
 
 ### Encoder selection vs file size
 

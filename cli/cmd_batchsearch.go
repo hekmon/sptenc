@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/hekmon/sptenc/ffmpeg"
 
@@ -132,7 +131,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
-			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
+			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc verify' to see available encoders", requestedEncoder)
 		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
@@ -141,7 +140,7 @@ var batchsearchCommand = &cli.Command{
 				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
 			}
 			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
 			}
 		}
 		// Input path argument: batchsearch only accepts a single regular file
@@ -159,16 +158,15 @@ var batchsearchCommand = &cli.Command{
 			return ctx, errors.New("input path must be a regular file")
 		}
 		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
-		// Resolve and check output directory
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = filepath.Dir(cmd.Args().First())
-		}
-		if fileInfos, err = os.Stat(outputDir); err != nil {
-			return ctx, fmt.Errorf("failed to access output directory: %w", err)
-		}
-		if !fileInfos.IsDir() {
-			return ctx, errors.New("output directory path must be a directory")
+		// Check output directory
+		// Check output directory if explicitly provided
+		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
+			if fileInfos, err = os.Stat(outputDir); err != nil {
+				return ctx, fmt.Errorf("failed to access output directory: %w", err)
+			}
+			if !fileInfos.IsDir() {
+				return ctx, errors.New("output directory path must be a directory")
+			}
 		}
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {

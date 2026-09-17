@@ -69,16 +69,14 @@ var concatCommand = &cli.Command{
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("input path must be a directory")
 		}
-		// Resolve and check output directory
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = cmd.Args().First()
-		}
-		if fileInfos, err = os.Stat(outputDir); err != nil {
-			return ctx, fmt.Errorf("failed to access output directory: %w", err)
-		}
-		if !fileInfos.IsDir() {
-			return ctx, errors.New("output directory path must be a directory")
+		// Check output directory if explicitly provided
+		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
+			if fileInfos, err = os.Stat(outputDir); err != nil {
+				return ctx, fmt.Errorf("failed to access output directory: %w", err)
+			}
+			if !fileInfos.IsDir() {
+				return ctx, errors.New("output directory path must be a directory")
+			}
 		}
 		return ctx, nil
 	},
