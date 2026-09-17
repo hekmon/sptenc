@@ -272,6 +272,10 @@ var encodeCommand = &cli.Command{
 				return ctx, errors.New("input path must be a directory or a regular file")
 			}
 			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
+			// --originalfile is only meaningful with directory input; reject it for single files
+			if cmd.String("originalfile") != "" {
+				return ctx, errors.New("--originalfile can not be used when input path is a single file")
+			}
 		} else {
 			// Directory input: need original file for remuxing audio/subs
 			if cmd.String("originalfile") == "" {
