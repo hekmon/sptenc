@@ -18,17 +18,24 @@ const (
 	nvEncPreset            = ffmpeg.NVEncPresetP7
 )
 
-// QPSearchCallbacks is implemented by the caller to observe and present the search process.
-type QPSearchCallbacks interface {
-	// Logging
+// Logger emits debug, warning, and error output during QP search.
+type Logger interface {
 	Debug(format string, a ...any)
 	Warning(format string, a ...any)
 	Error(err error)
-	// Segment lifecycle
+}
+
+// SegmentLifecycle marks the boundaries of a single segment's search.
+type SegmentLifecycle interface {
 	OnSegmentStart(segmentIndex int, segmentPath string)
+	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
+}
+
+// ProgressReporter receives fine-grained progress for UI and diagnostics.
+type ProgressReporter interface {
 	OnSegmentNewCandidate(qpCandidate int)
 	OnSegmentAnalysisStart(fileSize int64)
-	OnSegmentAnalysisProgress(read int64) // not total, additionnal
+	OnSegmentAnalysisProgress(read int64) // not total, additional
 	OnSegmentAnalysisStop()
 	OnSegmentEncodeStart(totalFrames int)
 	OnSegmentEncodeProgress(stats ffmpeg.ProgressStats)
@@ -36,7 +43,15 @@ type QPSearchCallbacks interface {
 	OnSegmentVMAFStart(totalFrames int)
 	OnSegmentVMAFProgress(stats ffmpeg.ProgressStats)
 	OnSegmentVMAFStop()
-	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
+}
+
+// QPSearchCallbacks is the complete surface expected by FindAllSegmentsQP and its helpers.
+// It is composed of smaller role interfaces so callers can satisfy only what they need
+// (e.g. a test harness may embed Logger and SegmentLifecycle while ignoring ProgressReporter).
+type QPSearchCallbacks interface {
+	Logger
+	SegmentLifecycle
+	ProgressReporter
 }
 
 // QPSearchConfig holds the invariants for a QP search run.
