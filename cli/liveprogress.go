@@ -21,11 +21,11 @@ import (
  * Master
  */
 
-func liveCountNbFrames(ctx context.Context, inputFilePath string, fielSize int64, debug bool) (
+func liveCountNbFrames(ctx context.Context, inputFilePath string, fileSize int64, debug bool) (
 	nbFrames int, codec string, duration time.Duration, err error) {
 	// prepare live progress
 	analyzeBar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(fielSize)),
+		liveprogress.WithTotal(uint64(fileSize)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
