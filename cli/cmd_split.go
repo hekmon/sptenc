@@ -37,10 +37,10 @@ var splitCommand = &cli.Command{
 		"By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts,\n" +
 		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
 		"WORKFLOW\n" +
-		"  1. Use --analyze to preview detected scenes without splitting.\n" +
-		"  2. Tune --threshold to control sensitivity (experiment first).\n" +
+		"  1. Use --" + analyzeFlagName + " to preview detected scenes without splitting.\n" +
+		"  2. Tune --" + thresholdFlagName + " to control sensitivity (experiment first).\n" +
 		"  3. Validate with the original file before performing the actual split.\n\n" +
-		"If the input has already been converted with the master command, use --master to skip the\n" +
+		"If the input has already been converted with the master command, use --" + masterFlagName + " to skip the\n" +
 		"master creation phase.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{

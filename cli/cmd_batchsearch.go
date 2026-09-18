@@ -24,8 +24,8 @@ const (
 	finalEncodeFlagName   = "finalencode"
 	maxCandidatesFlagName = "maxcandidates"
 	maxCandidatesDefault  = 40
-	nbStrikesFlagName     = "nbstrikes"
-	nbStrikesMinimum      = 3
+	strikesFlagName       = "strikes"
+	strikesMinimum        = 3
 )
 
 var batchsearchCommand = &cli.Command{
@@ -39,9 +39,9 @@ var batchsearchCommand = &cli.Command{
 		"  1. Scans the source once to map all natural scene boundaries starting at --" + thresholdFlagName + ".\n" +
 		"  2. Automatically selects thresholds so that each one eliminates at least N scenes compared\n" +
 		"     to the previous candidate. N is tuned internally so the total number of candidates never\n" +
-		"     exceeds your --maxcandidates budget.\n" +
+		"     exceeds your --" + maxCandidatesFlagName + " budget.\n" +
 		"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
-		"  4. Stops after consecutive candidates fail to reduce file size (strikes).\n\n" +
+		"  4. Stops after --" + strikesFlagName + " consecutive candidates fail to reduce file size.\n\n" +
 		"WHY THRESHOLD SELECTION MATTERS\n" +
 		"Scene detection splits a video into independent segments. Each segment gets its own QP, so\n" +
 		"splitting finely lets hard passages use low QP and easy ones high. But every split forces an\n" +
@@ -55,14 +55,22 @@ var batchsearchCommand = &cli.Command{
 		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
 		"  * GPU search: may take several days in total.\n" +
 		"  * CPU search: can take several weeks in total.\n\n" +
-		"Use --maxcandidates to set your budget. The default (40) is a reasonable balance between\n" +
+		"Use --" + maxCandidatesFlagName + " to set your budget. The default (40) is a reasonable balance between\n" +
 		"thoroughness and total search time. Lower values (20-30) reduce overall duration but may miss\n" +
 		"the optimal threshold. Higher values increase precision at a linear time cost. Internally, the\n" +
 		"algorithm tunes the 'scene drop' — how many scene boundaries disappear between two tested\n" +
 		"thresholds — to fit within your budget.\n\n" +
+		"Use --" + strikesFlagName + " to set how many consecutive candidates must fail to reduce file size\n" +
+		"before the search gives up. File size does not decrease monotonically: candidates can sit on a\n" +
+		"plateau or even regress slightly before a later threshold yields a significant drop. Strikes acts\n" +
+		"as both an early-exit mechanism and a safety buffer — it prevents the search from running forever\n" +
+		"once the minimum is passed, while tolerating short noisy plateaus so it does not bail out too soon.\n" +
+		"The default (3) is usually enough to ride out temporary regressions without paying for a long tail\n" +
+		"of diminishing returns. Lower values make the search more aggressive; higher values increase patience\n" +
+		"at the cost of additional full encode passes.\n\n" +
 		"ENCODERS\n" +
 		"Use --" + encoderFlagName + " to choose the encoder for the search loop. GPU encoders (e.g. hevc_nvenc)\n" +
-		"are strongly recommended for speed. If available, also enable CUDA VMAF acceleration (--vmafcuda)\n" +
+		"are strongly recommended for speed. If available, also enable CUDA VMAF acceleration (--" + vmafCUDAFlagName + ")\n" +
 		"to avoid bottlenecking the search on CPU-side quality validation.\n\n" +
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
@@ -118,14 +126,14 @@ var batchsearchCommand = &cli.Command{
 				Category: "Threshold Search",
 			},
 			&cli.IntFlag{
-				Name:     nbStrikesFlagName,
+				Name:     strikesFlagName,
 				Aliases:  []string{"S"},
 				Usage:    "Stop the search after this many consecutive thresholds fail to reduce file size",
-				Value:    nbStrikesMinimum,
+				Value:    strikesMinimum,
 				OnlyOnce: true,
 				Validator: func(v int) error {
-					if v < nbStrikesMinimum {
-						return fmt.Errorf("%s must be %d at minimum", nbStrikesFlagName, nbStrikesMinimum)
+					if v < strikesMinimum {
+						return fmt.Errorf("%s must be %d at minimum", strikesFlagName, strikesMinimum)
 					}
 					return nil
 				},
@@ -291,7 +299,7 @@ var batchsearchCommand = &cli.Command{
 		)
 		fmt.Fprintf(bypass, "\t• search starts at threshold %s\n", strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64))
 		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
-		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(nbStrikesFlagName))
+		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\t• once the best threshold is found, a final encoding will be performed with %s\n", finalEncoder)
 		}
@@ -323,8 +331,6 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-
-		// Find optimal candidates within budget
 		candidates, effectiveMinDrop := core.GetOptimalMinDrop(scenes, cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within --%s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
@@ -336,7 +342,7 @@ var batchsearchCommand = &cli.Command{
 			return fmt.Errorf("failed to create the master file: %w", err)
 		}
 
-		// TODO
+		// Step 3 - start the search
 
 		return nil
 	},

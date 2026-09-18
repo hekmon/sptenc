@@ -49,7 +49,7 @@ var encodeCommand = &cli.Command{
 			"STATS CACHE\n"+
 			"The cache records QP search statistics to speed up future encodes with the same encoder\n"+
 			"and VMAF profile. Different content types (clean animation vs grainy film) need very\n"+
-			"different QP distributions, so mixing them slows convergence. Use --cacheprofile to keep\n"+
+			"different QP distributions, so mixing them slows convergence. Use --"+cacheProfileFlagName+" to keep\n"+
 			"these histories separate.\n\n"+
 			"ENCODERS\n"+
 			"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final\n"+
