@@ -16,12 +16,14 @@ This approach produces the smallest possible file without compromising the targe
 
 sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed usage of each.
 
-| Command | Alias | Purpose |
-|---|---|---|
-| `check` | `c` | Verify that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
-| `master` | `m` | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
-| `split` | `s` | Detect scene changes and split a video into separate segment files |
-| `encode` | `e` | Full pipeline: split (if needed), encode segments, validate VMAF, remux, and tag |
+| Command | Alias | Category | Purpose |
+|---|---|---|---|
+| `encode` | `e` | Main | Full pipeline: split (if needed), encode segments, validate VMAF, remux, and tag |
+| `verify` | `v` | Main | Verify that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
+| `master` | `m` | Tooling | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
+| `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
+| `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
+| `batchsearch` | `bs` | Advanced | Automatically search for the optimal scene detection threshold by encoding multiple candidates |
 
 Global flags (available on all commands):
 
@@ -53,6 +55,7 @@ Global flags (available on all commands):
 - 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmafcuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
 - 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
 - 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
+- 🔬 **Automatic threshold search** - `batchsearch` tests multiple scene detection thresholds to find the one that produces the smallest file while still meeting your VMAF targets
 
 ## Input Requirements
 
@@ -102,6 +105,18 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 ./sptenc encode ./gop_dir/ --originalfile original_with_audio.mkv --vmafmean 95
 ```
 
+### Concatenate segments without re-encoding
+```bash
+./sptenc concat ./segments/ --outputdir ./merged/
+```
+
+### Find the optimal scene threshold automatically
+```bash
+./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmafcuda --vmafhmean 93
+# Once the optimal threshold is found, run the final CPU encode
+./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmafcuda --vmafhmean 93 --finalencode
+```
+
 ### Manual pipeline (master → split → encode)
 ```bash
 ./sptenc master video.mkv
@@ -110,6 +125,8 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 ```
 
 > Use `--analyze` with the `split` command to preview detected scenes without splitting. Experiment with `--threshold` (1–100, default 10): higher values detect fewer scenes, lower values detect more.
+>
+> Both `master` and `split` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` to speed up lossless master creation.
 
 ## Encoders
 
@@ -146,6 +163,8 @@ When using a GPU encoder, you can target a specific device:
 | `--nvidiagpuindex` | `0` | `hevc_nvenc`, `av1_nvenc` |
 | `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
 | `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
+
+> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
 
 ### Base ffmpeg encode options
 
@@ -294,8 +313,12 @@ The output file contains the following metadata tags on the video stream:
 
 ## Installation
 
-```
-TODO
+Build from source (Go 1.23+ required):
+
+```bash
+git clone https://github.com/hekmon/sptenc.git
+cd sptenc
+go build -o sptenc ./cli/
 ```
 
 **External Dependencies:**
