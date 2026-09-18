@@ -30,7 +30,7 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, fileSize int64
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "   Analyze | "
+			return "    Analyze | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -85,7 +85,7 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Encode | "
+			return "     Encode | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -136,7 +136,7 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Detecting | "
+			return "  Detecting | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -177,7 +177,7 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 		// liveprogress.WithWidth(barsWidth),
 		// liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " Splitting | "
+			return "  Splitting | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -234,7 +234,7 @@ func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segm
 		liveprogress.WithMultiplyRunes(),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Concat | "
+			return "     Concat | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -298,7 +298,7 @@ func getStreamsInfosCF(ctx context.Context, path string, debug bool) (stats ffmp
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "   Analyze | "
+			return "    Analyze | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
@@ -358,7 +358,7 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Global | "
+			return "   Progress | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -430,9 +430,9 @@ func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
 		defer to.segmentCandidatesAccess.Unlock()
 		if len(to.segmentCandidates) == 0 {
 			// first step is to analyse source files for total number of frames, no candidate yet
-			return fmt.Sprintf("   Segment | #%d - Searching for best QP...", segmentIndex)
+			return fmt.Sprintf("    Segment | #%d - Searching for best QP...", segmentIndex)
 		}
-		return fmt.Sprintf("   Segment | #%d - Searching for best QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
+		return fmt.Sprintf("    Segment | #%d - Searching for best QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
 	})
 }
 
@@ -452,7 +452,7 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize int64) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "   Analyze | "
+			return "    Analyze | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
@@ -486,7 +486,7 @@ func (to *LiveQPSearch) OnSegmentEncodeStart(totalFrames int) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Encode | "
+			return "     Encode | "
 		}),
 		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -520,7 +520,7 @@ func (to *LiveQPSearch) OnSegmentVMAFStart(totalFrames int) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "      VMAF | "
+			return "       VMAF | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
@@ -569,7 +569,7 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Concat | "
+			return "     Concat | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -606,7 +606,7 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "      VMAF | "
+			return "       VMAF | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -688,7 +688,7 @@ func liveGenerateMKVStats(ctx context.Context, outputPath string, debug bool) (e
 		liveprogress.WithMultiplyRunes(),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return " MKV Stats | "
+			return "  MKV Stats | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),

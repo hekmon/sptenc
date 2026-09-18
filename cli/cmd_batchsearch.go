@@ -454,7 +454,7 @@ var batchsearchCommand = &cli.Command{
 					runScenes = append(runScenes, scene)
 				}
 			}
-			fmt.Fprintf(bypass, "\tWill produce %d scenes\n", len(runScenes))
+			fmt.Fprintf(bypass, "\tWill produce %d scenes\n", 1+len(runScenes))
 
 			// Step 3.B - Split scenes
 			fmt.Fprintf(bypass, "Splitting scenes...\n")
@@ -511,7 +511,6 @@ var batchsearchCommand = &cli.Command{
 		bestCandidateStr := strconv.FormatFloat(batch.candidates[bestIndex], 'f', -1, 64)
 		encodedSegmentsMerged := batch.encoded[bestIndex]
 		results := batch.results[bestIndex]
-
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\n\nBest candidate is %s, running final encode with %s...\n", bestCandidateStr, finalEncoder)
 			finalWorkdir := filepath.Join(workingDir, "final-encode")
@@ -562,6 +561,8 @@ var batchsearchCommand = &cli.Command{
 					fmt.Fprintf(bypass, "WARNING: failed to delete final encode segment %s: %s\n", shellescape.Quote(segmentPath), err)
 				}
 			}
+		} else {
+			fmt.Fprintf(bypass, "\n\nBest candidate is %s\n", bestCandidateStr)
 		}
 
 		// Step 5 - compute final VMAF
@@ -747,7 +748,7 @@ func (bs *batchStatus) Start() {
 			// piggyback state updates on the render ticker so the bar stays in
 			// sync on every redraw without needing a separate push loop.
 			bar.CurrentSet(uint64(bs.currentCandidateIndex))
-			return "     Batches | "
+			return "    Batches | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -793,5 +794,5 @@ func (bs *batchStatus) line() string {
 			candidates[i] = bs.futureCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
 		}
 	}
-	return fmt.Sprintf("  Candidates | %s", strings.Join(candidates, " "))
+	return fmt.Sprintf(" Candidates | %s", strings.Join(candidates, " "))
 }
