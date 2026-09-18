@@ -200,8 +200,6 @@ Consequences used everywhere below:
 
 **Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `--vmafmean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
 
-**Why the paranoid-master row is hmean + min and not mean + min:** `hmean ≥ 99` entails `mean ≥ 99`, so gating mean 99 was redundant. The `--vmafmin 93` floor survives alongside because harmonic mean punishes dips it *recognizes* but still tolerates genuinely isolated single frames; min closes that last gap.
-
 > **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers ([StreamingLearningCenter — analysis](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)). The 95 target, from a more recent paper, is the lowest score at which content is *"on average subjectively indistinguishable from the original"* — a higher bar that costs ~1400 kbps extra at the top rung. With `--vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
 
 ## Encoders
