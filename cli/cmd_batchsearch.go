@@ -121,11 +121,13 @@ var batchsearchCommand = &cli.Command{
 	Flags: func() (flags []cli.Flag) {
 		flags = []cli.Flag{
 			&cli.StringFlag{
-				Name:     encoderFlagName,
-				Aliases:  []string{"e"},
-				Usage:    fmt.Sprintf("Encoder to use during the threshold search loop. Valid values: %s", strings.Join(allEncoders, ", ")),
-				Value:    string(ffmpeg.HEVCEncoderNVEnc),
-				OnlyOnce: true,
+				Name:             encoderFlagName,
+				Aliases:          []string{"e"},
+				Usage:            fmt.Sprintf("Encoder to use during the threshold search loop. Valid values: %s", strings.Join(allEncoders, ", ")),
+				Value:            string(ffmpeg.HEVCEncoderNVEnc),
+				OnlyOnce:         true,
+				Validator:        encoderValidator,
+				ValidateDefaults: true,
 			},
 			&cli.BoolFlag{
 				Name:     finalEncodeFlagName,
@@ -349,6 +351,13 @@ var batchsearchCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get source stream info: %w", err)
 		}
+		videoStream := sourceStats.VideoTrack()
+		if videoStream == nil {
+			return errors.New("no video stream found in source")
+		}
+		if !videoStream.IsConstantFrameRate() {
+			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+		}
 		totalDuration := sourceStats.Format.Duration
 
 		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
@@ -452,7 +461,7 @@ var batchsearchCommand = &cli.Command{
 			)
 			batch.ComputeBest()
 			if batch.bestCandidateIndex != 0 && batch.bestCandidateIndex == batch.currentCandidateIndex {
-				fmt.Fprintf(bypass, "\tNew best found !\n")
+				fmt.Fprintf(bypass, "\tNew best found!\n")
 			}
 			// Once the video concatened, delete all segments to free up some disk space for next candidate
 			for _, segmentPath := range segmentsPaths {
@@ -586,7 +595,7 @@ var batchsearchCommand = &cli.Command{
 		if encodeToFlac {
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
-		videoStream := sourceStats.VideoTrack()
+		videoStream = sourceStats.VideoTrack()
 		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, usedEncoder,
 			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(results.EncodedSegmentsPaths))
 		start = time.Now()
