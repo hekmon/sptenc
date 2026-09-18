@@ -698,6 +698,7 @@ var batchsearchCommand = &cli.Command{
 		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
 
 		// Step 7 - done
+		fmt.Fprintln(bypass)
 		var buff strings.Builder
 		table := tablewriter.NewTable(&buff,
 			tablewriter.WithConfig(batchTableConfig),
@@ -728,11 +729,22 @@ var batchsearchCommand = &cli.Command{
 		}
 		if batch.currentCandidateIndex < len(batch.candidates) {
 			fmt.Fprintf(bypass, "Search stopped after %d strikes.\n", cmd.Int(strikesFlagName))
-			fmt.Fprintf(bypass, "\tBest among tested candidates was found after a plateau of %d non-improving candidate(s).\n", plateauToBest)
+			if plateauToBest == 0 {
+				fmt.Fprintf(bypass, "\tBest among tested candidates was found immediately (no plateau).\n")
+			} else {
+				fmt.Fprintf(bypass, "\tBest among tested candidates was found after a plateau of %d non-improving candidate(s).\n", plateauToBest)
+			}
 			fmt.Fprintf(bypass, "\tA better threshold may exist among the untested ones.\n")
 		} else {
-			fmt.Fprintf(bypass, "Best candidate found after a plateau of %d non-improving candidate(s).\n", plateauToBest)
+			if plateauToBest == 0 {
+				fmt.Fprintf(bypass, "Best candidate found immediately (no plateau).\n")
+			} else {
+				fmt.Fprintf(bypass, "Best candidate found after a plateau of %d non-improving candidate(s).\n", plateauToBest)
+			}
 			fmt.Fprintf(bypass, "\tA strikes value of %d would have been sufficient for this file.\n", sufficientStrikes)
+			if sufficientStrikes < strikesMinimum {
+				fmt.Fprintf(bypass, "\tWarning: while a lower strikes value works for this file, setting it below %d globally is dangerous — the search may stop at a suboptimal threshold.\n", strikesMinimum)
+			}
 		}
 		fmt.Fprintf(bypass, "\nBatch search ended in %s\n\n", time.Since(completeRunStart).Round(time.Second))
 		return nil
