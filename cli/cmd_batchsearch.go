@@ -12,11 +12,15 @@ import (
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
-	"github.com/muesli/termenv"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/fatih/color"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
+	"github.com/muesli/termenv"
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/urfave/cli/v3"
 )
 
@@ -27,6 +31,33 @@ const (
 	maxCandidatesDefault  = 40
 	strikesFlagName       = "strikes"
 	strikesMinimum        = 3
+)
+
+var (
+	batchTableConfig = tablewriter.Config{
+		Header: tw.CellConfig{
+			Formatting: tw.CellFormatting{AutoFormat: tw.Off},
+			Alignment: tw.CellAlignment{
+				PerColumn: []tw.Align{tw.AlignRight, tw.AlignRight, tw.AlignRight},
+			},
+		},
+		Row: tw.CellConfig{
+			Alignment: tw.CellAlignment{
+				PerColumn: []tw.Align{tw.AlignRight, tw.AlignRight, tw.AlignRight},
+			},
+		},
+	}
+	batchTableColorCfg = renderer.ColorizedConfig{
+		Header: renderer.Tint{
+			FG: renderer.Colors{color.Bold, color.Underline},
+		},
+		Border: renderer.Tint{
+			FG: renderer.Colors{color.FgWhite},
+		},
+		Separator: renderer.Tint{
+			FG: renderer.Colors{color.FgWhite},
+		},
+	}
 )
 
 var batchsearchCommand = &cli.Command{
@@ -400,7 +431,7 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Step 3.C - QP search on this candidate scenes
-			_, batch.encoded[batch.currentCandidateIndex], err = processSegments(ctx, segmentsPaths, candidateWorkdir, totalDuration,
+			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(ctx, segmentsPaths, candidateWorkdir, totalDuration,
 				vmafAuditor, statsCache, ffmpeg.Encoder(cmd.String(encoderFlagName)),
 				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
 				cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
@@ -434,18 +465,192 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Step 4 - final encode ? (CPU)
+		bestIndex := batch.bestCandidateIndex
+		bestCandidateStr := strconv.FormatFloat(batch.candidates[bestIndex], 'f', -1, 64)
+		encodedSegmentsMerged := batch.encoded[bestIndex]
+		results := batch.results[bestIndex]
+
 		if finalEncoder != "" {
-			// TODO
+			fmt.Fprintf(bypass, "\n\nBest candidate is %s, running final encode with %s...\n", bestCandidateStr, finalEncoder)
+			finalWorkdir := filepath.Join(workingDir, "final-encode")
+			if err = os.Mkdir(finalWorkdir, 0750); err != nil {
+				return fmt.Errorf("failed to create workdir for final encode: %w", err)
+			}
+
+			// Build the filtered scenes list for the best candidate
+			bestScenes := make([]ffmpeg.Scene, 0, len(scenes))
+			for _, scene := range scenes {
+				if scene.Score >= batch.candidates[bestIndex] {
+					bestScenes = append(bestScenes, scene)
+				}
+			}
+
+			// Split scenes
+			fmt.Fprintf(bypass, "Splitting scenes for final encode...\n")
+			start = time.Now()
+			if err = liveSplitScenes(ctx, masterFile, finalWorkdir, totalDuration, bestScenes, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to split scenes for final encode: %w", err)
+			}
+			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n", 1+len(bestScenes), time.Since(start).Round(time.Second))
+
+			// Build segment paths
+			finalSegments := make([]string, len(bestScenes)+1)
+			for i := range finalSegments {
+				finalSegments[i] = filepath.Join(finalWorkdir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
+			}
+
+			// Create stats cache for final encoder
+			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoder, vmafAuditor, cmd.String(cacheProfileFlagName))
+			if err != nil {
+				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
+			}
+
+			// Run QP search with final encoder
+			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
+				vmafAuditor, finalStatsCache, finalEncoder,
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
+				cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
+			if err != nil {
+				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
+			}
+
+			// Clean up final segments to free disk space
+			for _, segmentPath := range finalSegments {
+				if err = os.Remove(segmentPath); err != nil {
+					fmt.Fprintf(bypass, "WARNING: failed to delete final encode segment %s: %s\n", shellescape.Quote(segmentPath), err)
+				}
+			}
 		}
 
 		// Step 5 - compute final VMAF
-		// TODO
+		vmafSource := inputPath
+		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
+		var sourceFrames, encodedFrames int
+		sourceFileInfo, err := os.Stat(vmafSource)
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: could not stat source for frame count verification: %s\n", err)
+		} else {
+			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, sourceFileInfo.Size(), cmd.Bool(debugFlagName))
+			if err != nil {
+				fmt.Fprintf(bypass, "WARNING: could not count frames in source for verification: %s\n", err)
+				sourceFrames = 0
+			}
+		}
+		encodedFileInfo, err := os.Stat(encodedSegmentsMerged)
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: could not stat encoded output for frame count verification: %s\n", err)
+		} else {
+			encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
+			if err != nil {
+				fmt.Fprintf(bypass, "WARNING: could not count frames in encoded output for verification: %s\n", err)
+				encodedFrames = 0
+			}
+		}
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Frame counts — source: %d, encoded: %d\n", sourceFrames, encodedFrames)
+		}
+		if sourceFrames > 0 && encodedFrames > 0 && sourceFrames != encodedFrames {
+			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
+			return
+		}
+		fmt.Fprintln(bypass, "Computing final VMAF...")
+		start = time.Now()
+		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
+			results.TotalSegmentsFrames, cmd.Int(nvidiaGPUIndexFlagName), cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName),
+		)
+		if err != nil {
+			err = fmt.Errorf("failed to compute final vmaf: %w", err)
+			return
+		}
+		duration := time.Since(start)
+		finalVMAFStats := finalVMAFreport.GetStats()
+		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n%s", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 6 - remuxing
-		// TODO
+		fmt.Fprintln(bypass, "Remuxing to final file...")
+		outputDir := cmd.String(outputDirFlagName)
+		if outputDir == "" {
+			outputDir = filepath.Dir(inputPath)
+		}
+		usedEncoder := ffmpeg.Encoder(cmd.String(encoderFlagName))
+		if finalEncoder != "" {
+			usedEncoder = finalEncoder
+		}
+		outputPath := computeFinalPath(inputPath, outputDir, usedEncoder)
+		var encodeToFlac bool
+		if originalStats, err := getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err == nil {
+			encodeToFlac = core.AllAudioTracksPCM(originalStats)
+		} else {
+			fmt.Fprintf(bypass, "WARNING: failed to probe original file for audio, skipping FLAC check: %s\n", err)
+		}
+		if encodeToFlac {
+			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
+		}
+		videoStream := sourceStats.VideoTrack()
+		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, usedEncoder,
+			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(results.EncodedSegmentsPaths))
+		start = time.Now()
+		if err = liveRemuxSwapVideo(ctx, inputPath, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
+			totalDuration, cmd.Bool(debugFlagName)); err != nil {
+			return fmt.Errorf("failed to remux encoded video with original file: %w", err)
+		}
+		duration = time.Since(start)
+		fmt.Fprintf(bypass, "\tRemuxed to final file %s in %s\n", shellescape.Quote(outputPath), duration.Round(time.Second))
+		finalFileSize, err := getFileSize(outputPath)
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: failed to get final file size: %s\n", err)
+		} else {
+			originalSize, err := getFileSize(vmafSource)
+			if err != nil {
+				fmt.Fprintf(bypass, "WARNING: failed to get source video size: %s\n", err)
+			} else {
+				sizeReduction := originalSize - finalFileSize
+				compressionRatio := float64(sizeReduction) / float64(originalSize) * 100
+				fmt.Fprintf(bypass, "\tCompression: %s -> %s (%s reduction, %s saved)\n",
+					cunits.ImportInBytes(float64(originalSize)), cunits.ImportInBytes(float64(finalFileSize)),
+					formatPercent(compressionRatio), cunits.ImportInBytes(float64(sizeReduction)),
+				)
+			}
+		}
+
+		// Regenerate MKV statistics tags
+		fmt.Fprintln(bypass, "Regenerating MKV statistics tags...")
+		start = time.Now()
+		if err = liveGenerateMKVStats(ctx, outputPath, cmd.Bool(debugFlagName)); err != nil {
+			err = fmt.Errorf("failed to regenerate MKV statistics tags: %w", err)
+			return
+		}
+		duration = time.Since(start)
+		fmt.Fprintf(bypass, "\tMKV statistics tags regenerated in %s\n", duration.Round(time.Second))
+
+		// Verify container-level color metadata
+		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
 
 		// Step 7 - done
-		// TODO print some stats about candidates, their size and relative size against best candidate
+		var buff strings.Builder
+		table := tablewriter.NewTable(&buff,
+			tablewriter.WithConfig(batchTableConfig),
+			tablewriter.WithRenderer(renderer.NewColorized(batchTableColorCfg)),
+		)
+		table.Header("Threshold", "Size", "Relative to Best")
+		bestSize := batch.sizes[bestIndex]
+		bold := color.New(color.Bold)
+		for i, candidate := range batch.candidates {
+			if batch.sizes[i] == 0 {
+				continue // not tested (early stop)
+			}
+			thresholdStr := strconv.FormatFloat(candidate, 'f', -1, 64)
+			sizeStr := fmt.Sprint(cunits.ImportInBytes(float64(batch.sizes[i])))
+			relativeStr := formatPercent(float64(batch.sizes[i]) / float64(bestSize) * 100)
+			if i == bestIndex {
+				thresholdStr = bold.Sprint(thresholdStr)
+				sizeStr = bold.Sprint(sizeStr)
+				relativeStr = bold.Sprint(relativeStr)
+			}
+			table.Append([]string{thresholdStr, sizeStr, relativeStr})
+		}
+		table.Render()
+		fmt.Fprint(bypass, buff.String())
 		fmt.Fprintf(bypass, "\nBatch search ended in %s\n\n", time.Since(completeRunStart).Round(time.Second))
 		return nil
 	},
@@ -458,6 +663,7 @@ type batchStatus struct {
 	// results
 	encoded []string
 	sizes   []int64
+	results []core.QPSearchResults
 	// line formating
 	currentCandidateStyle termenv.Style
 	bestCandidateStyle    termenv.Style
@@ -481,6 +687,7 @@ func (bs *batchStatus) Start() {
 	// Prepare results
 	bs.encoded = make([]string, len(bs.candidates))
 	bs.sizes = make([]int64, len(bs.candidates))
+	bs.results = make([]core.QPSearchResults, len(bs.candidates))
 	// Init styles
 	termenvProfile := liveprogress.GetTermProfile()
 	bs.currentCandidateStyle = termenvProfile.String().Underline()

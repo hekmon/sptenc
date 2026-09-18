@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
@@ -175,4 +176,32 @@ func formatPercent(v float64) string {
 		return s[:len(s)-2] + "%"
 	}
 	return s + "%"
+}
+
+// verifyColorMetadata probes the output file and warns via liveprogress.Bypass
+// if any container-level color metadata does not match the source video stream.
+func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *ffmpeg.FFProbeBinaryStream, debug bool) {
+	bypass := liveprogress.Bypass()
+	outputStats, err := getStreamsInfos(ctx, outputPath, debug)
+	if err != nil {
+		fmt.Fprintf(bypass, "WARNING: could not verify output color metadata: %s\n", err)
+		return
+	}
+	outStream := outputStats.VideoTrack()
+	if outStream == nil {
+		fmt.Fprintf(bypass, "WARNING: output file has no video stream, can not verify color metadata\n")
+		return
+	}
+	if sourceStream.ColorRange != "" && outStream.ColorRange != sourceStream.ColorRange {
+		fmt.Fprintf(bypass, "WARNING: output color_range (%s) does not match source (%s)\n", outStream.ColorRange, sourceStream.ColorRange)
+	}
+	if sourceStream.ColorSpace != "" && outStream.ColorSpace != sourceStream.ColorSpace {
+		fmt.Fprintf(bypass, "WARNING: output colorspace (%s) does not match source (%s)\n", outStream.ColorSpace, sourceStream.ColorSpace)
+	}
+	if sourceStream.ColorTransfer != "" && outStream.ColorTransfer != sourceStream.ColorTransfer {
+		fmt.Fprintf(bypass, "WARNING: output color_trc (%s) does not match source (%s)\n", outStream.ColorTransfer, sourceStream.ColorTransfer)
+	}
+	if sourceStream.ColorPrimaries != "" && outStream.ColorPrimaries != sourceStream.ColorPrimaries {
+		fmt.Fprintf(bypass, "WARNING: output color_primaries (%s) does not match source (%s)\n", outStream.ColorPrimaries, sourceStream.ColorPrimaries)
+	}
 }

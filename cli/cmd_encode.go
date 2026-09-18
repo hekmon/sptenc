@@ -510,26 +510,7 @@ var encodeCommand = &cli.Command{
 		// Colour elements we explicitly injected.
 		// If this fails (e.g. due to an ffmpeg muxer regression), a future
 		// fallback could use mkvpropedit to fix the container tags.
-		if outputStats, err := getStreamsInfos(ctx, outputPath, cmd.Bool(debugFlagName)); err == nil {
-			if outStream := outputStats.VideoTrack(); outStream != nil {
-				if videoStream.ColorRange != "" && outStream.ColorRange != videoStream.ColorRange {
-					fmt.Fprintf(bypass, "WARNING: output color_range (%s) does not match source (%s)\n", outStream.ColorRange, videoStream.ColorRange)
-				}
-				if videoStream.ColorSpace != "" && outStream.ColorSpace != videoStream.ColorSpace {
-					fmt.Fprintf(bypass, "WARNING: output colorspace (%s) does not match source (%s)\n", outStream.ColorSpace, videoStream.ColorSpace)
-				}
-				if videoStream.ColorTransfer != "" && outStream.ColorTransfer != videoStream.ColorTransfer {
-					fmt.Fprintf(bypass, "WARNING: output color_trc (%s) does not match source (%s)\n", outStream.ColorTransfer, videoStream.ColorTransfer)
-				}
-				if videoStream.ColorPrimaries != "" && outStream.ColorPrimaries != videoStream.ColorPrimaries {
-					fmt.Fprintf(bypass, "WARNING: output color_primaries (%s) does not match source (%s)\n", outStream.ColorPrimaries, videoStream.ColorPrimaries)
-				}
-			} else {
-				fmt.Fprintf(bypass, "WARNING: output file has no video stream, can not verify color metadata\n")
-			}
-		} else {
-			fmt.Fprintf(bypass, "WARNING: could not verify output color metadata: %s\n", err)
-		}
+		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
 
 		// Done
 		duration = time.Since(globalStart)
