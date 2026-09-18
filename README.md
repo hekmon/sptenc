@@ -35,6 +35,17 @@ This approach produces the smallest possible file without compromising the targe
 5. **Best effort** - If the encoder's minimum QP is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
 6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
 
+## Why QP instead of CRF?
+
+sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant QP)** mode, not CRF.
+
+- **CQP** applies the same base quantization to every frame. The encoder does not second-guess the quality target — QP 22 means QP 22, period. This makes the relationship between the dial and VMAF **stable and predictable**, which is what allows the interpolation search to converge in 3–5 attempts instead of testing every value.
+- **CRF** (Constant Rate Factor) tells the encoder to vary QP frame-by-frame internally to hit a perceptual quality target. The same CRF value can produce different effective quantizations depending on scene complexity, which turns the search space into a moving target. Interpolating across CRF values is noisy and unreliable.
+
+The encoder still applies local optimizations (adaptive quantization, lookahead), but since these are held **constant across every tested QP**, the comparison between candidates remains stable.
+
+The trade-off is familiar: CRF produces smaller files for a given *average* quality, but it delegates quality control to the encoder. sptenc takes the opposite approach — it fixes quantization and lets the scene splitter decide where quality should vary. This is slower, but it makes the VMAF guarantee enforceable segment by segment.
+
 ## Commands
 
 sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed usage of each.

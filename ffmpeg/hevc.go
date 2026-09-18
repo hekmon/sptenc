@@ -59,6 +59,9 @@ const (
 	HEVCLibx265QPMax = 51
 
 	libx265AQMode = 3 // AQ enabled with auto-variance and bias to dark scenes - https://x265.readthedocs.io/en/latest/cli.html#cmdoption-aq-mode
+	// AQ is held constant across all tested QPs, so relative comparisons remain stable.
+	// What would break the search is the encoder changing its own target between runs (CRF),
+	// not local bit redistribution that is applied the same way at every tested point.
 )
 
 // HEVCLibx265EncodeQPConfig holds the configuration for HEVC encoding using libx265.
