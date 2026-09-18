@@ -359,15 +359,21 @@ var batchsearchCommand = &cli.Command{
 		defer batch.Stop()
 		for ; batch.currentCandidateIndex < len(batch.candidates); batch.currentCandidateIndex++ {
 			// Strike early stop
-			// if batch.currentCandidateIndex-batch.bestCandidateIndex == cmd.Int(strikesFlagName) {
-			// 	fmt.Fprintf(bypass, "\n\nEarly batch search stop: %d strikes reached\n\n", cmd.Int(strikesFlagName))
-			// 	break
-			// }
+			if batch.currentCandidateIndex-batch.bestCandidateIndex == cmd.Int(strikesFlagName) {
+				fmt.Fprintf(bypass, "\n\nEarly batch search stop: %d strikes reached\n\n", cmd.Int(strikesFlagName))
+				break
+			}
+
 			// Start testing candidate
+			candidateStr := strconv.FormatFloat(batch.candidates[batch.currentCandidateIndex], 'f', -1, 64)
 			fmt.Fprintf(bypass, "\n\nTesting threshold candidate %s (%d/%d)\n",
-				strconv.FormatFloat(batch.candidates[batch.currentCandidateIndex], 'f', -1, 64),
-				batch.currentCandidateIndex+1, len(batch.candidates),
+				candidateStr, batch.currentCandidateIndex+1, len(batch.candidates),
 			)
+			candidateWorkdir := filepath.Join(workingDir, fmt.Sprintf("candidate-%s", candidateStr))
+			if err = os.Mkdir(candidateWorkdir, 0750); err != nil {
+				return fmt.Errorf("failed to create workdir for candidate %s: %w", candidateStr, err)
+			}
+
 			// Step 3.A - Build the filtered scenes list
 			runScenes := make([]ffmpeg.Scene, 0, len(scenes))
 			for _, scene := range scenes {
@@ -377,7 +383,7 @@ var batchsearchCommand = &cli.Command{
 			}
 			fmt.Fprintf(bypass, "\tWill produce %d scenes\n", len(runScenes))
 
-			// TODO
+			// Step 3.B - Split scenes
 			time.Sleep(3 * time.Second)
 		}
 
