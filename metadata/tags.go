@@ -47,7 +47,7 @@ const (
 )
 
 func GenerateTags(format ffmpeg.FFProbeFormat, vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
-	flags = make(ffmpeg.FFMEGTags, 0, 57)
+	flags = make(ffmpeg.FFMEGTags, 0, 58)
 	// Global
 	module, version := signature()
 	flags = append(flags,
