@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/metadata"
 	"github.com/hekmon/sptenc/mkvtoolnix"
+
+	"github.com/hekmon/liveprogress/v2"
 )
 
 type ctxKey string
