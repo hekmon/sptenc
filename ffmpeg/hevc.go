@@ -750,7 +750,6 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	//// videotoolbox
 	args = append(args,
 		"-c:v", "hevc_videotoolbox",
-		"-allow_sw", "1", // allow software fallback if hardware is unavailable
 		"-profile:v", "main10",
 	)
 	//// quality
