@@ -24,13 +24,19 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// Flag names for batchsearch-specific flags.
+// Flag names and defaults for batchsearch-specific flags.
 const (
 	finalEncodeFlagName   = "finalencode"
 	maxThresholdFlagName  = "maxthreshold"
 	maxCandidatesFlagName = "maxcandidates"
 	strikesFlagName       = "strikes"
 	strikesMinimum        = 3
+	minDropFlagName       = "mindrop"
+	minDropMinimum        = 5
+
+	minThresholdDefault  = 10.0
+	maxThresholdDefault  = 40.0
+	maxCandidatesDefault = 30
 )
 
 var (
@@ -68,10 +74,11 @@ var batchsearchCommand = &cli.Command{
 	Description: "Orchestrate multiple encode passes with different scene detection thresholds\n" +
 		"to find the one that produces the smallest file while still passing your VMAF targets.\n\n" +
 		"HOW IT WORKS\n" +
-		"  1. Scans the source once to map all natural scene boundaries starting at --" + minThresholdFlagName + ".\n" +
-		"  2. Automatically selects thresholds so that each one eliminates at least N scenes compared\n" +
-		"     to the previous candidate. N is tuned internally so the total number of candidates never\n" +
-		"     exceeds your --" + maxCandidatesFlagName + " budget.\n" +
+		"  1. Scans the source once to map all natural scene boundaries. Only boundaries with scores\n" +
+		"     between --" + minThresholdFlagName + " and --" + maxThresholdFlagName + " are considered.\n" +
+		"  2. Builds candidate thresholds from those boundaries. Each candidate must eliminate at least\n" +
+		"     N scenes compared to the previous one. N is auto-tuned so the total never exceeds your\n" +
+		"     --" + maxCandidatesFlagName + " budget, but it will not go below --" + minDropFlagName + ".\n" +
 		"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
 		"  4. Stops after --" + strikesFlagName + " consecutive candidates fail to reduce file size.\n\n" +
 		"WHY THRESHOLD SELECTION MATTERS\n" +
@@ -87,23 +94,34 @@ var batchsearchCommand = &cli.Command{
 		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
 		"  * GPU search: may take several days in total.\n" +
 		"  * CPU search: can take several weeks in total.\n\n" +
-		"Use --" + maxCandidatesFlagName + " to set your budget. The default (40) is a reasonable balance between\n" +
-		"thoroughness and total search time. Lower values (20-30) reduce overall duration but may miss\n" +
-		"the optimal threshold. Higher values increase precision at a linear time cost. Internally, the\n" +
-		"algorithm tunes the 'scene drop' — how many scene boundaries disappear between two tested\n" +
-		"thresholds — to fit within your budget.\n\n" +
-		"Use --" + strikesFlagName + " to set how many consecutive candidates must fail to reduce file size\n" +
-		"before the search gives up. File size does not decrease monotonically: candidates can sit on a\n" +
-		"plateau or even regress slightly before a later threshold yields a significant drop. Strikes acts\n" +
-		"as both an early-exit mechanism and a safety buffer — it prevents the search from running forever\n" +
-		"once the minimum is passed, while tolerating short noisy plateaus so it does not bail out too soon.\n" +
-		"The default (3) is usually enough to ride out temporary regressions without paying for a long tail\n" +
-		"of diminishing returns. Lower values make the search more aggressive; higher values increase patience\n" +
-		"at the cost of additional full encode passes.\n\n" +
+		"You control the cost with three levers: which boundaries are eligible, how many candidates\n" +
+		"are generated from them, and when to give up.\n\n" +
+		"THRESHOLD RANGE (--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ")\n" +
+		"These define the window of scene scores that can become candidates (defaults: " +
+		strconv.FormatFloat(minThresholdDefault, 'f', -1, 64) + "–" + strconv.FormatFloat(maxThresholdDefault, 'f', -1, 64) + ").\n" +
+		"A narrow range produces fewer candidates naturally; a wide range gives more opportunity but may\n" +
+		"waste encodes on thresholds that merge too many scenes to be useful.\n\n" +
+		"CANDIDATE DENSITY (--" + maxCandidatesFlagName + ", --" + minDropFlagName + ")\n" +
+		"--" + maxCandidatesFlagName + " sets your absolute budget (default " + strconv.Itoa(maxCandidatesDefault) + "). The algorithm auto-tunes the\n" +
+		"'scene drop' — how many boundaries disappear between two tested thresholds — to fit within it.\n" +
+		"--" + minDropFlagName + " is a floor for that tuning (default " + strconv.Itoa(minDropMinimum) + "). A low mindrop creates candidates that\n" +
+		"are very close together; the file-size differences between them are often small, yet each still\n" +
+		"costs a full encode. Raising the floor skips these diminishing returns and focuses the budget on\n" +
+		"thresholds that are meaningfully different. Lower it only if you suspect the optimum sits between\n" +
+		"two tightly spaced boundaries.\n\n" +
+		"EARLY EXIT (--" + strikesFlagName + ")\n" +
+		"File size does not decrease monotonically: candidates can sit on a plateau or even regress slightly\n" +
+		"before a later threshold yields a significant drop. --" + strikesFlagName + " sets how many consecutive\n" +
+		"non-improving candidates the search tolerates before giving up (default " + strconv.Itoa(strikesMinimum) + "). It acts as both an\n" +
+		"early-exit mechanism and a safety buffer — preventing the search from running forever once the best\n" +
+		"file size has been found, while tolerating short noisy plateaus so it does not bail out too soon.\n" +
+		"Lower values make the search more aggressive; higher values increase patience at the cost of\n" +
+		"additional full encode passes.\n\n" +
 		"ENCODERS\n" +
-		"Use --" + encoderFlagName + " to choose the encoder for the search loop. GPU encoders (e.g. hevc_nvenc)\n" +
-		"are strongly recommended for speed. If available, also enable CUDA VMAF acceleration (--" + vmafCUDAFlagName + ")\n" +
-		"to avoid bottlenecking the search on CPU-side quality validation.\n\n" +
+		"Use --" + encoderFlagName + " to choose the encoder for the search loop. The default is " + string(ffmpeg.HEVCEncoderNVEnc) + "\n" +
+		"(GPU-based). GPU encoders are strongly recommended for speed. If available, also enable CUDA\n" +
+		"VMAF acceleration (--" + vmafCUDAFlagName + ") to avoid bottlenecking the search on CPU-side\n" +
+		"quality validation.\n\n" +
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
 		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
@@ -142,7 +160,7 @@ var batchsearchCommand = &cli.Command{
 				Usage: fmt.Sprintf("Start threshold search at this value (valid values: %d-%d).",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 				),
-				Value:     10,
+				Value:     minThresholdDefault,
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
 				Category:  "Threshold Search",
@@ -152,7 +170,7 @@ var batchsearchCommand = &cli.Command{
 				Usage: fmt.Sprintf("Cap threshold search at this value (valid values: %d-%d).",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 				),
-				Value:     40,
+				Value:     maxThresholdDefault,
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
 				Category:  "Threshold Search",
@@ -161,7 +179,7 @@ var batchsearchCommand = &cli.Command{
 				Name:     maxCandidatesFlagName,
 				Aliases:  []string{"m"},
 				Usage:    "Maximum number of candidate thresholds to test",
-				Value:    30,
+				Value:    maxCandidatesDefault,
 				OnlyOnce: true,
 				Validator: func(v int) error {
 					if v < 1 {
@@ -180,6 +198,20 @@ var batchsearchCommand = &cli.Command{
 				Validator: func(v int) error {
 					if v < strikesMinimum {
 						return fmt.Errorf("%s must be %d at minimum", strikesFlagName, strikesMinimum)
+					}
+					return nil
+				},
+				Category: "Threshold Search",
+			},
+			&cli.IntFlag{
+				Name:     minDropFlagName,
+				Aliases:  []string{"d"},
+				Usage:    "Minimum scene drop between two candidate thresholds (auto-tuning will not go below this)",
+				Value:    minDropMinimum,
+				OnlyOnce: true,
+				Validator: func(v int) error {
+					if v < minDropMinimum {
+						return fmt.Errorf("%s must be %d at minimum", minDropFlagName, minDropMinimum)
 					}
 					return nil
 				},
@@ -354,6 +386,7 @@ var batchsearchCommand = &cli.Command{
 		)
 		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
+		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\t• once the best threshold is found, a final encoding will be performed with %s\n", finalEncoder)
 		}
@@ -410,6 +443,14 @@ var batchsearchCommand = &cli.Command{
 				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 				strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
 			)
+		}
+		minDropFloor := cmd.Int(minDropFlagName)
+		if effectiveMinDrop < minDropFloor {
+			fmt.Fprintf(bypass, "\tWARNING: Auto-tuned scene drop of %d is below the minimum of %d; recomputing candidates...\n",
+				effectiveMinDrop, minDropFloor,
+			)
+			candidates = core.GetSearchThresholdCandidates(cappedScenes, minDropFloor)
+			effectiveMinDrop = minDropFloor
 		}
 		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within %s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
@@ -694,6 +735,14 @@ var batchsearchCommand = &cli.Command{
 		}
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
+		plateauToBest := computePlateauToBest(batch.sizes, bestIndex)
+		if batch.currentCandidateIndex < len(batch.candidates) {
+			fmt.Fprintf(bypass, "Search stopped after %d strikes. Best among tested candidates was found after a plateau of %d non-improving candidate(s). A better threshold may exist among the untested ones.\n",
+				cmd.Int(strikesFlagName), plateauToBest)
+		} else {
+			fmt.Fprintf(bypass, "Best candidate found after a plateau of %d non-improving candidate(s). A strikes value of %d would have been sufficient for this file.\n",
+				plateauToBest, plateauToBest)
+		}
 		fmt.Fprintf(bypass, "\nBatch search ended in %s\n\n", time.Since(completeRunStart).Round(time.Second))
 		return nil
 	},
@@ -795,4 +844,24 @@ func (bs *batchStatus) line() string {
 		}
 	}
 	return fmt.Sprintf(" Candidates | %s", strings.Join(candidates, " "))
+}
+
+// computePlateauToBest returns the longest run of consecutive non-improving
+// candidates that occurred before reaching bestIndex. This is the smallest
+// strikes value that would have been sufficient to reach bestIndex.
+func computePlateauToBest(sizes []int64, bestIndex int) int {
+	minStrikes := 0
+	bestSoFar := 0
+	for i := 0; i <= bestIndex; i++ {
+		if sizes[i] == 0 {
+			continue
+		}
+		if sizes[i] < sizes[bestSoFar] {
+			bestSoFar = i
+		}
+		if diff := i - bestSoFar; diff > minStrikes {
+			minStrikes = diff
+		}
+	}
+	return minStrikes
 }
