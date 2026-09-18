@@ -338,7 +338,7 @@ var batchsearchCommand = &cli.Command{
 		if len(candidates) == 0 {
 			return fmt.Errorf("no candidates found")
 		}
-		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within --%s=%d, producing %d candidates\n",
+		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within %s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
 		)
 		if cmd.Bool(debugFlagName) {
@@ -355,15 +355,31 @@ var batchsearchCommand = &cli.Command{
 		batch := batchStatus{
 			candidates: candidates,
 		}
-		batch.Init()
-		batchLine := liveprogress.AddCustomLine(batch.Line)
-		batchSeparator := liveprogress.AddCustomLine(func() string { return "" })
-		defer func() {
-			liveprogress.RemoveCustomLine(batchSeparator)
-			liveprogress.RemoveCustomLine(batchLine)
-		}()
+		batch.Start()
+		defer batch.Stop()
+		for ; batch.currentCandidateIndex < len(batch.candidates); batch.currentCandidateIndex++ {
+			// Strike early stop
+			// if batch.currentCandidateIndex-batch.bestCandidateIndex == cmd.Int(strikesFlagName) {
+			// 	fmt.Fprintf(bypass, "\n\nEarly batch search stop: %d strikes reached\n\n", cmd.Int(strikesFlagName))
+			// 	break
+			// }
+			// Start testing candidate
+			fmt.Fprintf(bypass, "\n\nTesting threshold candidate %s (%d/%d)\n",
+				strconv.FormatFloat(batch.candidates[batch.currentCandidateIndex], 'f', -1, 64),
+				batch.currentCandidateIndex+1, len(batch.candidates),
+			)
+			// Step 3.A - Build the filtered scenes list
+			runScenes := make([]ffmpeg.Scene, 0, len(scenes))
+			for _, scene := range scenes {
+				if scene.Score >= batch.candidates[batch.currentCandidateIndex] {
+					runScenes = append(runScenes, scene)
+				}
+			}
+			fmt.Fprintf(bypass, "\tWill produce %d scenes\n", len(runScenes))
 
-		// TODO
+			// TODO
+			time.Sleep(3 * time.Second)
+		}
 
 		return nil
 	},
@@ -373,22 +389,54 @@ type batchStatus struct {
 	candidates            []float64
 	currentCandidateIndex int
 	bestCandidateIndex    int
-	// formating
+	// line formating
 	currentCandidateStyle termenv.Style
 	bestCandidateStyle    termenv.Style
 	testedCandidateStyle  termenv.Style
 	futureCandidateStyle  termenv.Style
+	// liveprogress
+	candidatesLine *liveprogress.CustomLine
+	progressBar    *liveprogress.Bar
+	separatorLine  *liveprogress.CustomLine
 }
 
-func (bs *batchStatus) Init() {
+func (bs *batchStatus) Start() {
+	// Init styles
 	termenvProfile := liveprogress.GetTermProfile()
 	bs.currentCandidateStyle = termenvProfile.String().Underline()
 	bs.bestCandidateStyle = termenvProfile.String().Bold()
 	bs.testedCandidateStyle = termenvProfile.String().CrossOut()
 	bs.futureCandidateStyle = termenvProfile.String().Faint()
+	// Plug to liveprogress
+	bs.candidatesLine = liveprogress.AddCustomLine(bs.line)
+	bs.progressBar = liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(len(bs.candidates))),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			bar.CurrentSet(uint64(bs.currentCandidateIndex))
+			return "     Batches | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | %d/%d candidates done",
+				bar.Current(), bar.Total(),
+			)
+		}),
+	)
+	bs.separatorLine = liveprogress.AddCustomLine(func() string { return "" })
 }
 
-func (bs *batchStatus) Line() string {
+func (bs *batchStatus) Stop() {
+	liveprogress.RemoveCustomLine(bs.separatorLine)
+	liveprogress.RemoveBar(bs.progressBar)
+	liveprogress.RemoveCustomLine(bs.candidatesLine)
+}
+
+func (bs *batchStatus) line() string {
 	candidates := make([]string, len(bs.candidates))
 	for i, candidate := range bs.candidates {
 		switch {
@@ -402,5 +450,5 @@ func (bs *batchStatus) Line() string {
 			candidates[i] = bs.futureCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
 		}
 	}
-	return fmt.Sprintf(" BatchMode | %s", strings.Join(candidates, " "))
+	return fmt.Sprintf("  Candidates | %s", strings.Join(candidates, " "))
 }
