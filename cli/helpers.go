@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -123,13 +124,9 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 		}
 	}
 	// Sort by name to ensure consistent ordering
-	for i := 0; i < len(files); i++ {
-		for j := i + 1; j < len(files); j++ {
-			if files[i].Name() > files[j].Name() {
-				files[i], files[j] = files[j], files[i]
-			}
-		}
-	}
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name() < files[j].Name()
+	})
 	// Build full paths
 	filePaths = make([]string, len(files))
 	for i, file := range files {

@@ -78,7 +78,10 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error
 		StdDev: stddev,
 		Weight: len(qps),
 	}
-	// Avoid the encoding done multiple times to impact the stats
+	// Avoid the encoding done multiple times to impact the stats.
+	// Float equality is intentional here: identical inputs produce identical IEEE-754
+	// results from stat.MeanStdDev in pure Go, so exact match reliably catches re-runs
+	// of the same encode without risking false positives from near-duplicates.
 	if slices.Contains(sch.stats, rs) {
 		return
 	}
@@ -152,12 +155,19 @@ func (sch *StatsCacheHistory) saveStats() error {
 func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker, cacheProfile string) string {
 	var builder bytes.Buffer
 	builder.WriteString(strconv.FormatFloat(profile.min, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.p1, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.p5, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.p10, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.p25, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.median, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
+	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
 	filename := fmt.Sprintf("qphistory_%s_vmaf-%s", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 	if cacheProfile != "" {

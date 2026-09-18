@@ -42,6 +42,7 @@ const (
 	sptencVMAFResultHMeanTagKey  = "sptenc_vmaf_result_hmean"
 	sptencVMAFResultMeanTagKey   = "sptenc_vmaf_result_mean"
 	sptencVMAFResultMaxTagKey    = "sptenc_vmaf_result_max"
+	sptencBestEffortTagKey       = "sptenc_best_effort_segments"
 )
 
 func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.Encoder, statsQP QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
@@ -96,6 +97,10 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 	}
 	if vc.mean != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(vc.mean, 'f', -1, 64)))
+	}
+	//// Best effort
+	if statsQP.NbBestEfforts > 0 {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencBestEffortTagKey, statsQP.NbBestEfforts))
 	}
 	//// VMAF results
 	flags = append(flags,
