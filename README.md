@@ -14,7 +14,7 @@ This approach produces the smallest possible file without compromising the targe
 
 ## Who is this for?
 
-You probably don't need sptenc if you just want to quickly shrink a video for your phone. Standard tools like HandBrake or ffmpeg with CRF are faster and perfectly fine for that.
+You probably don't need sptenc if you just want to shrink a video for your phone. Standard tools like HandBrake or ffmpeg with CRF are faster and perfectly fine for that.
 
 sptenc is built for workflows where you want the **smallest file size that still meets a provable quality floor**:
 
@@ -30,7 +30,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
 - 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
 - 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
-- 🔍 **4 VMAF models, auto-selected** - Automatically uses 1080p or 4K model based on input resolution; add `--vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
+- 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmafneg` for upscaled/denoised/sharpened sources (recommended)
 - 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
 - ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
@@ -152,33 +152,34 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 | < 4K | `vmaf_v0.6.1` | `vmaf_v0.6.1neg` |
 | ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1neg` |
 
-The model is **automatically selected** based on input resolution. Use `--vmafneg` when the source has been upscaled, sharpened, or denoised — standard models will over-score such content.
+The model is **automatically selected** based on input resolution. Use `--vmafneg` when the source has been upscaled, sharpened, or denoised: NEG models are designed so that enhancement-based processing (sharpening, upscaling filters) does not inflate the score, whereas standard models can over-score such content.
 
-> **Note:** NEG stands for **No Enhancement Gain**. These variants are designed to avoid over-scoring processed content (upscaled, denoised, sharpened). See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models.md#disabling-enhancement-gain-neg-mode) for details.
+> **Note:** NEG stands for **No Enhancement Gain**. The standard `vmaf_v0.6.1` model predicts the viewing condition of a **1080p HDTV at 3 picture heights**, and `vmaf_4k_v0.6.1` that of a **4K TV at 1.5 picture heights** — keep this in mind when interpreting scores for other display formats. See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models.md#disabling-enhancement-gain-neg-mode) for details.
 
 ### Quality Score Reference
 
-| VMAF Score | Perceptual Quality | Typical Context |
-|---|---|---|
-| **95–100** | Indistinguishable from source | Archival, mastering, very high bitrate |
-| **90–95** | Noticeable but not annoying | Premium streaming - Netflix standard: **93** |
-| **80–90** | Good quality, minor artifacts | Acceptable HD streaming |
-| **70–80** | Medium quality, visible artifacts | SD streaming or constrained bitrate |
-| **60–70** | Noticeable degradation | Low resolution or heavy compression |
-| **40–60** | Poor quality | Aggressive encoding |
-| **< 40** | Very poor quality | Very low resolutions (180p–240p) |
+VMAF scores are relative to the viewing conditions the models were trained on (1080p HDTV at 3 picture heights; 4K TV at 1.5 picture heights), so treat them as comparable only within the same viewing context. The following anchors come from published, verifiable sources:
 
-**Sources:** [StreamingLearningCenter](https://streaminglearningcenter.com/learning/mapping-ssim-vmaf-scores-subjective-ratings.html) · [StreamingMedia](https://www.streamingmedia.com/Articles/Columns/The-Producers-View/Comparing-Quality-Metrics-Up-and-Down-the-Encoding-Ladder-121764.aspx)
+| VMAF Score | Verifiable interpretation | Source |
+|---|---|---|
+| **95–100** | Subjectively indistinguishable from the original, on average | Peer-reviewed subjective study cited by Ozer |
+| **~93** | "Indistinguishable from original or with noticeable but not annoying distortion" for the vast majority of viewers (4K test set) | RealNetworks white paper (*VMAF Reproducibility*), relayed by Ozer |
+| **40–70** | Typical range of an SD encode at 480p | Netflix data cited by Ozer |
+| **~20** | A 240p encode at CRF 28 | Netflix data cited by Ozer |
+
+See [StreamingLearningCenter — Optimal encoding ladder with VMAF](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html) and [Netflix via StreamingLearningCenter — Just Noticeable Difference](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html).
+
+Intermediate bands commonly cited elsewhere (e.g. "80–90 = good quality with minor artifacts", "70–80 = medium quality") are editorial interpolations between these anchors, not verbatim quotes from a verifiable source — we intentionally do not print them here.
 
 ### sptenc thresholds
 
 VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND**
-(Just Noticeable Difference — detectable by 75% of viewers; 2 JND / 12 points detectable by ~90%). See [Netflix via StreamingLearningCenter — Just Noticeable Difference](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html).
+(Just Noticeable Difference — the change detectable by ~75% of viewers. Note that JND thresholds are content-dependent: academic work reports ΔVMAF step sizes from 2 to 6 points depending on content and methodology.) See [Netflix via StreamingLearningCenter — Just Noticeable Difference](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html).
 
 | Metric | Flag | Default | Meaning (threshold T) |
 |---|---|---|---|
 | Harmonic mean | `--vmafhmean` | **93** | Penalizes local dips; **default gate** because it cannot under-deliver: hmean ≥ T mathematically implies mean ≥ T |
-| Arithmetic mean | `--vmafmean` | disabled | Average quality. Redundant as a gate whenever hmean or a low percentile is enabled — kept for reporting and for external comparability (Netflix 93 convention, all published ladders use arithmetic mean) |
+| Arithmetic mean | `--vmafmean` | disabled | Average quality. Redundant as a gate whenever hmean is enabled at the same value — kept for reporting and for external comparability (Netflix 93 convention, all published ladders use arithmetic mean) |
 | Median | `--vmafmedian` | disabled | ≥ 50% of frames at or above T |
 | Percentile 25 | `--vmafp25` | disabled | ≥ 75% of frames at or above T |
 | Percentile 10 | `--vmafp10` | disabled | ≥ 90% of frames at or above T |
@@ -186,17 +187,17 @@ VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND**
 | Percentile 1 | `--vmafp1` | disabled | ≥ 99% of frames at or above T |
 | Min | `--vmafmin` | disabled | 100% of frames at or above T — strictest floor. Can over-fire on transient frames (title cards, flash frames) and inflate bitrate |
 
-**Fixed relationship:** `min ≤ p1 ≤ p5 ≤ … ≤ hmean ≤ mean`
+**Mathematically guaranteed relationships:** `min ≤ p1 ≤ p5 ≤ p10 ≤ p25`; `min ≤ hmean ≤ mean`. Beyond these, the position of hmean relative to the percentiles depends on the frame distribution: in practice, for realistic per-segment VMAF scores, hmean usually sits between the low percentiles and the mean.
 
 Consequences used everywhere below:
-- **Gate composition:** one strict measure > several modest ones. Enabling `--vmafhmean T` makes `--vmafmean T` a tautology — don't gate both.
+- **Gate composition:** one strict measure > several modest ones. Enabling `--vmafhmean T` makes `--vmafmean T` a tautology — don't gate both at the same value.
 - **Diagnostic inversion:** the **mean − hmean gap** is the signal for "uniformly good" (small gap → QP is well tuned) vs "good on average with bad patches" (large gap → per-scene splitter cut, or QP granularity issue, or move the gate to hmean/min). The mean is always logged for this reason even when it's not gated.
 
 **Rules:**
 - All enabled thresholds must pass simultaneously (AND logic)
-- Set any threshold to `-1` to disable it
+- Set any threshold to `-1` to disable it — remember that the harmonic mean gate is enabled by default, so pass `--vmafhmean -1` to silence it when you test other gates in isolation
 
-> 💡 **Tip:** Start with `--vmafmean 93` alone with the `--debug` flag to inspect each encode attempt's VMAF score and identify problematic scenes, then move the actual gate to `--vmafhmean 93`, and add `--vmafp5` or `--vmafp1` only if a profile demands explicit percentile guarantees. Running mean + hmean gates at the same value is redundant — only one of them is real work.
+> 💡 **Tip:** Start with `--vmafmean 93` alone (with `--vmafhmean -1` to disable the default gate) plus the `--debug` flag to inspect each encode attempt's VMAF score and identify problematic scenes, then move the actual gate to `--vmafhmean 93`, and add `--vmafp5` or `--vmafp1` only if a profile demands explicit percentile guarantees. Running mean + hmean gates at the same value is redundant — only one of them is real work.
 
 ### Recommended Values
 
@@ -204,8 +205,7 @@ Consequences used everywhere below:
 |---|---|---|
 | "I am afraid of deleting my lossless master file" | `--vmafmean` + `--vmafmin` | `99` + `93` ¹ |
 | Archival / mastering | `--vmafhmean` | `95` |
-| General streaming / VOD | `--vmafhmean` | `93` (default) |
-| Live sports / fast motion | `--vmafhmean` | `93` |
+| General streaming, VOD and live sports | `--vmafhmean` | `93` (default) — fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically |
 | Mobile / bandwidth-constrained | `--vmafmean` | `85–90` ¹ |
 | Quality consistency critical | `--vmafhmean` or `--vmafp5` | `90` |
 
@@ -213,7 +213,7 @@ Consequences used everywhere below:
 
 **Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `--vmafmean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
 
-> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers ([StreamingLearningCenter — analysis](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)). The 95 target, from a more recent paper, is the lowest score at which content is *"on average subjectively indistinguishable from the original"* — a higher bar that costs ~1400 kbps extra at the top rung. With `--vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
+> **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers ([StreamingLearningCenter — analysis](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)). The 95 target, from a more recent paper, is the lowest score at which content is *"on average subjectively indistinguishable from the original"* — a higher bar that, in Ozer's test on the 1080p *Meridian* clip, cost ~1400 kbps extra on the top rung as compared to a 93 target (treat the figure as clip-specific, not universal). With `--vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
 
 ## Encoders
 
@@ -305,7 +305,7 @@ ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset '
 
 **hevc_nvenc**
 ```bash
-ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial_aq 1 -temporal_aq 1 [...]
+ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 [...]
 ```
 
 **hevc_vaapi**
@@ -332,7 +332,7 @@ ffmpeg [...] -c:v 'libsvtav1' -pix_fmt 'yuv420p10le' -preset '6' -qp 'X' [...]
 
 **av1_nvenc**
 ```bash
-ffmpeg [...] -c:v 'av1_nvenc' -preset 'p4' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial_aq 1 -temporal_aq 1 [...]
+ffmpeg [...] -c:v 'av1_nvenc' -preset 'p4' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 [...]
 ```
 
 **av1_vaapi**
@@ -375,7 +375,7 @@ go build -o sptenc ./cli/
 ```
 
 **External Dependencies:**
-- `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128)) - can be used in WSL to get `libvmaf_cuda` support on Windows
+- `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128)) - can be used in WSL to get `libvmaf_cuda` support on Windows. A recent ffmpeg version is highly recommended.
 - `ffprobe` - bundled with ffmpeg build
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
 
