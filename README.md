@@ -362,7 +362,7 @@ go build -o sptenc ./cli/
 ```
 
 **External Dependencies:**
-- `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128))
+- `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128)) - can be used in WSL to get `libvmaf_cuda` support on Windows
 - `ffprobe` - bundled with ffmpeg build
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
 
