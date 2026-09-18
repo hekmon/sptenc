@@ -296,12 +296,8 @@ var encodeCommand = &cli.Command{
 			)
 			// split
 			fmt.Fprintf(bypass, "Splitting scenes...\n")
-			segmentsDir := filepath.Join(workingDir, "segments")
-			if err = os.MkdirAll(segmentsDir, 0755); err != nil {
-				return fmt.Errorf("failed to create segments directory: %w", err)
-			}
 			start = time.Now()
-			if err = liveSplitScenes(ctx, masterFile, segmentsDir, totalDuration, scenes, cmd.Bool(debugFlagName)); err != nil {
+			if err = liveSplitScenes(ctx, masterFile, workingDir, totalDuration, scenes, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to split scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
@@ -311,7 +307,7 @@ var encodeCommand = &cli.Command{
 			// scanning the directory, which avoids filesystem ordering issues.
 			segmentsPaths = make([]string, len(scenes)+1)
 			for i := range segmentsPaths {
-				segmentsPaths[i] = filepath.Join(segmentsDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
+				segmentsPaths[i] = filepath.Join(workingDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
 			}
 		} else {
 			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
