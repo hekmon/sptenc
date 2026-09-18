@@ -70,6 +70,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | `master` | `m` | Tooling | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
 | `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
+| `vmaf` | | Tooling | Compute VMAF between a reference and a distorted video |
 | `batchsearch` | `bs` | Advanced | Automatically search for the optimal scene detection threshold by encoding multiple candidates |
 
 ## Input Requirements
@@ -125,6 +126,15 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 ./sptenc concat ./segments/ --outputdir ./merged/
 ```
 
+### Compute VMAF between two videos
+```bash
+# Software libvmaf with GPU-accelerated decoding
+./sptenc vmaf --nvdec original.mkv encoded.mkv
+
+# Full GPU acceleration (requires libvmaf_cuda)
+./sptenc vmaf --vmafcuda --vmafneg original.mkv encoded.mkv
+```
+
 ### Find the optimal scene threshold automatically
 ```bash
 ./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmafcuda --vmafhmean 93
@@ -141,7 +151,7 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 
 > Use `--analyze` with the `split` command to preview detected scenes without splitting. Experiment with `--threshold` (1–100, default 10): higher values detect fewer scenes, lower values detect more.
 >
-> Both `master` and `split` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12vadec`, or `--videotoolboxdec` to speed up lossless master creation.
+> Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` to speed up processing.
 
 ## VMAF
 
@@ -252,7 +262,7 @@ When using a GPU encoder, you can target a specific device:
 | `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
 | `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
 
-> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12vadec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
+> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master`, `split`, or `vmaf`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
 
 ## Adaptive QP Search
 
