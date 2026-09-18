@@ -24,14 +24,12 @@ var masterCommand = &cli.Command{
 	Description: "Most video files use Group of Pictures (GoP) encoding, which mixes I, P, and B frames.\n\n" +
 		"THE PROBLEM\n" +
 		"  * Cuts can only happen on I-frames (keyframes).\n" +
-		"  * Open GoPs make things worse: some B and P frames depend on data\n" +
-		"    outside their own group, so cutting at an I-frame can still silently\n" +
-		"    drop surrounding frames.\n\n" +
+		"  * Open GoPs make things worse: some B and P frames depend on data outside their own group,\n" +
+		"    so cutting at an I-frame can still silently drop surrounding frames.\n\n" +
 		"THE SOLUTION\n" +
-		"This command re-encodes the source into a lossless all-intra master using\n" +
-		"the FFV1 codec. Every frame becomes self-contained, so you can cut precisely\n" +
-		"at any frame with no quality loss. FFV1 is mathematically lossless, so this\n" +
-		"introduces no degradation compared to the original.",
+		"This command re-encodes the source into a lossless all-intra master using the FFV1 codec.\n" +
+		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss.\n" +
+		"FFV1 is mathematically lossless, so this introduces no degradation compared to the original.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     outputDirFlagName,
@@ -178,7 +176,6 @@ var masterCommand = &cli.Command{
 		return
 	},
 }
-
 
 func createMaster(ctx context.Context, inputFilePath, outputDir string, inputFileSize int64, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (
 	outputFile string, totalFrames int, duration time.Duration, err error) {

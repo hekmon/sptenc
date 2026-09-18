@@ -19,11 +19,9 @@ var concatCommand = &cli.Command{
 	Aliases:  []string{"c"},
 	Category: "Tooling",
 	Usage:    "Concatenate video files from a directory into a single file",
-	Description: "Reads all video files (.mkv, .mp4) from the input directory,\n" +
-		"sorts them alphabetically, and concatenates them into a single output file\n" +
-		"using ffmpeg's concat demuxer.\n\n" +
-		"This is useful for merging segments produced by the split command\n" +
-		"without re-encoding.",
+	Description: "Reads all video files (.mkv, .mp4) from the input directory, sorts them alphabetically, and\n" +
+		"concatenates them into a single output file using ffmpeg's concat demuxer.\n\n" +
+		"This is useful for merging segments produced by the split command without re-encoding.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     outputDirFlagName,
@@ -36,7 +34,7 @@ var concatCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used to create the working dir for intermediate files",
+			Usage:            "Directory for temporary working files",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,

@@ -23,8 +23,8 @@ var verifyCommand = &cli.Command{
 		"  * ffprobe\n" +
 		"  * mkvpropedit\n\n" +
 		"ENCODERS\n" +
-		"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders\n" +
-		"for the final encode to get the smallest file size.",
+		"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final encode\n" +
+		"to get the smallest file size.",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")

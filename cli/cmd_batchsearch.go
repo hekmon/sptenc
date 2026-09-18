@@ -24,7 +24,6 @@ const (
 	finalEncodeFlagName   = "finalencode"
 	maxCandidatesFlagName = "maxcandidates"
 	maxCandidatesDefault  = 40
-	maxCandidatesWarning  = 100
 	nbStrikesFlagName     = "nbstrikes"
 	nbStrikesMinimum      = 3
 )
@@ -37,52 +36,46 @@ var batchsearchCommand = &cli.Command{
 	Description: "Orchestrate multiple encode passes with different scene detection thresholds\n" +
 		"to find the one that produces the smallest file while still passing your VMAF targets.\n\n" +
 		"HOW IT WORKS\n" +
-		"  1. Scans the source once to map all natural scene boundaries.\n" +
-		"  2. Automatically selects thresholds so that each one eliminates at least N\n" +
-		"     scenes compared to the previous candidate. N is tuned internally so the\n" +
-		"     total number of candidates never exceeds your --maxcandidates budget.\n" +
+		"  1. Scans the source once to map all natural scene boundaries starting at --" + thresholdFlagName + ".\n" +
+		"  2. Automatically selects thresholds so that each one eliminates at least N scenes compared\n" +
+		"     to the previous candidate. N is tuned internally so the total number of candidates never\n" +
+		"     exceeds your --maxcandidates budget.\n" +
 		"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
 		"  4. Stops after consecutive candidates fail to reduce file size (strikes).\n\n" +
 		"WHY THRESHOLD SELECTION MATTERS\n" +
-		"Scene detection splits a video into independent segments. Each segment gets\n" +
-		"its own QP, so splitting finely lets hard passages use low QP and easy ones high.\n" +
-		"But every split forces an I-frame, and short runs starve B/P compression. Split\n" +
-		"coarsely and B/P frames thrive across long runs, yet the whole scene must bow\n" +
-		"to its hardest passage — easy sections pay for quality they do not need.\n\n" +
-		"The sweet spot is a threshold that gives each scene enough freedom to use its\n" +
-		"own QP while leaving enough continuous frames for the encoder to compress\n" +
-		"efficiently. batchsearch finds this automatically by testing candidates across\n" +
-		"the spectrum.\n\n" +
+		"Scene detection splits a video into independent segments. Each segment gets its own QP, so\n" +
+		"splitting finely lets hard passages use low QP and easy ones high. But every split forces an\n" +
+		"I-frame, and short runs starve B/P compression. Split coarsely and B/P frames thrive across\n" +
+		"long runs, yet the whole scene must bow to its hardest passage — easy sections pay for quality\n" +
+		"they do not need.\n\n" +
+		"The sweet spot is a threshold that gives each scene enough freedom to use its own QP while\n" +
+		"leaving enough continuous frames for the encoder to compress efficiently. batchsearch finds this\n" +
+		"automatically by testing candidates across the spectrum.\n\n" +
 		"CONTROLLING SEARCH COST\n" +
-		"Each candidate is a full encode pass with VMAF validation. The complete\n" +
-		"batchsearch process is slow:\n" +
+		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
 		"  * GPU search: may take several days in total.\n" +
 		"  * CPU search: can take several weeks in total.\n\n" +
-		"Use --maxcandidates to set your budget. The default (40) is a reasonable\n" +
-		"balance between thoroughness and total search time. Lower values (20-30)\n" +
-		"reduce overall duration but may miss the optimal threshold. Higher values\n" +
-		"increase precision at a linear time cost. Internally, the algorithm tunes\n" +
-		"the 'scene drop' — how many scene boundaries disappear between two tested\n" +
+		"Use --maxcandidates to set your budget. The default (40) is a reasonable balance between\n" +
+		"thoroughness and total search time. Lower values (20-30) reduce overall duration but may miss\n" +
+		"the optimal threshold. Higher values increase precision at a linear time cost. Internally, the\n" +
+		"algorithm tunes the 'scene drop' — how many scene boundaries disappear between two tested\n" +
 		"thresholds — to fit within your budget.\n\n" +
 		"ENCODERS\n" +
-		"Use --" + encoderFlagName + " to choose the encoder for the search loop. GPU encoders\n" +
-		"(e.g. hevc_nvenc) are strongly recommended for speed. If available, also\n" +
-		"enable CUDA VMAF acceleration (--vmafcuda) to avoid bottlenecking the search\n" +
-		"on CPU-side quality validation.\n\n" +
+		"Use --" + encoderFlagName + " to choose the encoder for the search loop. GPU encoders (e.g. hevc_nvenc)\n" +
+		"are strongly recommended for speed. If available, also enable CUDA VMAF acceleration (--vmafcuda)\n" +
+		"to avoid bottlenecking the search on CPU-side quality validation.\n\n" +
 		"FINAL ENCODE\n" +
-		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command\n" +
-		"automatically derives the equivalent CPU encoder of the same codec\n" +
-		"(e.g. hevc_nvenc -> libx265) and performs the final encode with the discovered\n" +
-		"threshold. The GPU-found threshold is usually close enough for the\n" +
-		"CPU pass to be worth the speedup, though it may not be exactly optimal.\n\n" +
-		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op because\n" +
-		"the search result is already the most precise result possible.\n\n" +
+		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
+		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
+		"the final encode with the discovered threshold. The GPU-found threshold is usually close enough\n" +
+		"for the CPU pass to be worth the speedup, though it may not be exactly optimal.\n\n" +
+		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op because the search\n" +
+		"result is already the most precise result possible.\n\n" +
 		"CACHE ISOLATION\n" +
-		"By default all encodes for the same encoder + VMAF profile combo share a single\n" +
-		"QP history cache. If you encode content with wildly different visual characteristics\n" +
-		"(e.g. grainy film vs. clean CGI), sharing history can pollute the model and slow\n" +
-		"convergence. Use --" + cacheProfileFlagName + " to create a separate cache namespace\n" +
-		"for a specific type of content (e.g. pixar_animation, sopranos_s01, grainy_90s).",
+		"By default all encodes for the same encoder + VMAF profile combo share a single QP history cache.\n" +
+		"If you encode content with wildly different visual characteristics (e.g. grainy film vs. clean CGI),\n" +
+		"sharing history can pollute the model and slow convergence. Use --" + cacheProfileFlagName + " to create\n" +
+		"a separate cache namespace for a specific type of content (e.g. pixar_animation, sopranos_s01, grainy_90s).",
 	Flags: func() (flags []cli.Flag) {
 		flags = []cli.Flag{
 			&cli.StringFlag{
@@ -113,15 +106,12 @@ var batchsearchCommand = &cli.Command{
 			&cli.IntFlag{
 				Name:     maxCandidatesFlagName,
 				Aliases:  []string{"m"},
-				Usage:    "Maximum number of thresholds to test. The algorithm automatically adjusts internal granularity to stay within this budget.",
+				Usage:    "Maximum number of candidate thresholds to test",
 				Value:    maxCandidatesDefault,
 				OnlyOnce: true,
 				Validator: func(v int) error {
 					if v < 1 {
 						return fmt.Errorf("%s must be at least 1", maxCandidatesFlagName)
-					}
-					if v > maxCandidatesWarning {
-						return fmt.Errorf("testing more than %d candidates may take an extremely long time; reduce %s or split the search", maxCandidatesWarning, maxCandidatesFlagName)
 					}
 					return nil
 				},

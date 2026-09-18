@@ -34,20 +34,19 @@ var splitCommand = &cli.Command{
 	Usage:    "Split a video file by scenes",
 	Description: "Detect scene changes in a video and split it into separate files at each transition.\n\n" +
 		"HOW IT WORKS\n" +
-		"By default, the command first creates a lossless FFV1 master to ensure\n" +
-		"frame-accurate cuts, then analyzes the video with ffmpeg's scdet filter\n" +
-		"to find scene boundaries.\n\n" +
+		"By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts,\n" +
+		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
 		"WORKFLOW\n" +
 		"  1. Use --analyze to preview detected scenes without splitting.\n" +
 		"  2. Tune --threshold to control sensitivity (experiment first).\n" +
 		"  3. Validate with the original file before performing the actual split.\n\n" +
-		"If the input has already been converted with the master command,\n" +
-		"use --master to skip the master creation phase.",
+		"If the input has already been converted with the master command, use --master to skip the\n" +
+		"master creation phase.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
 			Name:      thresholdFlagName,
 			Aliases:   []string{"T"},
-			Usage:     fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). See https://ffmpeg.org/ffmpeg-filters.html#scdet-1", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
+			Usage:     fmt.Sprintf("Scene detection threshold (%d-%d)", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
 			Value:     10,
 			OnlyOnce:  true,
 			Validator: validateSceneThreshold,
@@ -62,7 +61,7 @@ var splitCommand = &cli.Command{
 		&cli.BoolFlag{
 			Name:     masterFlagName,
 			Aliases:  []string{"m"},
-			Usage:    "Use if the input file is an already-processed master file (see the master command). Without this flag, the split command will create one before splitting it.",
+			Usage:    "Input is an already-processed master file",
 			Value:    false,
 			OnlyOnce: true,
 		},
@@ -78,7 +77,7 @@ var splitCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used to create the working dir for intermediate files if needed",
+			Usage:            "Directory for temporary working files",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,
@@ -88,49 +87,49 @@ var splitCommand = &cli.Command{
 		// HW dec
 		&cli.BoolFlag{
 			Name:     nvdecFlagName,
-			Usage:    "Use NVDEC hardware-accelerated decoding when creating the master or detecting scenes (NVIDIA GPU required)",
+			Usage:    "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
 			Name:     vaapiDecFlagName,
-			Usage:    "Use VA-API hardware-accelerated decoding when creating the master or detecting scenes (Intel/AMD GPU required)",
+			Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
 			Name:     d3d12DecFlagName,
-			Usage:    "Use D3D12VA hardware-accelerated decoding when creating the master or detecting scenes (Windows, GPU required)",
+			Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.BoolFlag{
 			Name:     videoToolboxDecFlagName,
-			Usage:    "Use VideoToolbox hardware-accelerated decoding when creating the master or detecting scenes (macOS, Apple Silicon)",
+			Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
 			Name:     nvidiaGPUIndexFlagName,
-			Usage:    "GPU to use with --nvdec for master creation or scene detection",
+			Usage:    "GPU to use with --nvdec",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.StringFlag{
 			Name:     vaapiRendererPathFlagName,
-			Usage:    "Direct Rendering Manager render node to use with --vaapidec for master creation or scene detection",
+			Usage:    "Direct Rendering Manager render node to use with --vaapidec",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
 		},
 		&cli.IntFlag{
 			Name:     d3d12vaGPUIndexFlagName,
-			Usage:    "GPU to use with --d3d12dec for master creation or scene detection",
+			Usage:    "GPU to use with --d3d12dec",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",

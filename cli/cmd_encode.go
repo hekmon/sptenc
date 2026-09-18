@@ -34,31 +34,30 @@ var encodeCommand = &cli.Command{
 	Description: fmt.Sprintf(
 		"INPUT\n"+
 			"The input path can be provided in two forms:\n"+
-			"  * Single video file:\n"+
-			"    sptenc creates a lossless FFV1 master, splits it into scene-aligned segments,\n"+
-			"    and encodes each one (one-shot process).\n"+
-			"  * Directory of pre-split video files:\n"+
-			"    Every video file in the directory is treated as an already-segmented scene.\n"+
-			"    Files are processed in alphabetical order. Name them accordingly\n"+
-			"    (e.g. seg_01.mkv, seg_02.mkv) to preserve scene order.\n"+
-			"    All files must have the same codec and frame rate.\n\n"+
+			"  * Single video file: sptenc creates a lossless FFV1 master, splits it into scene-aligned\n"+
+			"    segments, and encodes each one (one-shot process).\n"+
+			"  * Directory of pre-split video files: every file is treated as an already-segmented scene.\n"+
+			"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n"+
+			"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate.\n\n"+
+			"SCENE DETECTION\n"+
+			"Use the split command to preview scene boundaries for a given threshold, or run batchsearch\n"+
+			"to find the optimal threshold automatically.\n\n"+
 			"VMAF METRICS\n"+
-			"Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d).\n"+
-			"If a segment falls below any enabled threshold, it is re-encoded at a lower QP.\n"+
-			"Set a value to %d to disable that metric.\n\n"+
+			"Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n"+
+			"below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n"+
+			"that metric.\n\n"+
 			"STATS CACHE\n"+
-			"The cache records QP search statistics to speed up future encodes with the same\n"+
-			"encoder and VMAF profile. Different content types (clean animation vs grainy film)\n"+
-			"need very different QP distributions, so mixing them slows convergence.\n"+
-			"Use --cacheprofile to keep these histories separate.\n\n"+
+			"The cache records QP search statistics to speed up future encodes with the same encoder\n"+
+			"and VMAF profile. Different content types (clean animation vs grainy film) need very\n"+
+			"different QP distributions, so mixing them slows convergence. Use --cacheprofile to keep\n"+
+			"these histories separate.\n\n"+
 			"ENCODERS\n"+
-			"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders\n"+
-			"for the final encode to get the smallest file size.\n"+
-			"Run 'sptenc verify' to see which encoders are available on your system.\n\n"+
+			"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final\n"+
+			"encode to get the smallest file size. Run 'sptenc verify' to see which encoders are\n"+
+			"available on your system.\n\n"+
 			"AUDIO\n"+
-			"If all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically\n"+
-			"compressed to FLAC during the final remux step. This reduces file size with\n"+
-			"no quality loss.",
+			"If all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically compressed\n"+
+			"to FLAC during the final remux step. This reduces file size with no quality loss.",
 		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
 	Flags: func() (flags []cli.Flag) {
 		flags = []cli.Flag{
@@ -74,7 +73,7 @@ var encodeCommand = &cli.Command{
 			&cli.Float64Flag{
 				Name:    thresholdFlagName,
 				Aliases: []string{"T"},
-				Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d). Find the right value with the split command (also check batchsearch).",
+				Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d)",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 				),
 				Value:     10,
@@ -85,7 +84,7 @@ var encodeCommand = &cli.Command{
 			&cli.StringFlag{
 				Name:     originalFileFlagName,
 				Aliases:  []string{"f"},
-				Usage:    "Original file to use when performing the final remuxing (used to recover all other streams: audio, subtitles, etc.)",
+				Usage:    "Original media file for remuxing to recover audio, subtitles, etc.",
 				Value:    "",
 				OnlyOnce: true,
 				Category: "Pre-Split Video Files",
@@ -642,7 +641,7 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 		&cli.StringFlag{
 			Name:     statsCacheDirFlagName,
 			Aliases:  []string{"s"},
-			Usage:    "Stats cache directory. Used to save encoding QP history to speed up future encoding.",
+			Usage:    "Directory for QP history cache",
 			Value:    getCacheDir(),
 			OnlyOnce: true,
 			Category: "Directories",
@@ -650,7 +649,7 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
-			Usage:            "Temporary directory location that will be used to create the working dir for intermediate files",
+			Usage:            "Directory for temporary working files",
 			Value:            os.TempDir(),
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,
@@ -678,7 +677,7 @@ func newVMAFFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.BoolFlag{
 			Name:     vmafCUDAFlagName,
-			Usage:    "Activate CUDA acceleration for VMAF computing. libvmaf must have been compiled with CUDA support in the ffmpeg build.",
+			Usage:    "Use CUDA acceleration for VMAF computation",
 			Value:    false,
 			OnlyOnce: true,
 			Category: "VMAF",
