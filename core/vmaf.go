@@ -107,10 +107,10 @@ func (vc VMAFChecker) Validate(stats ffmpeg.VMAFStats) bool {
 	if vc.median != VMAFOffValue && stats.Median < vc.median {
 		return false
 	}
-	if vc.mean != VMAFOffValue && stats.Mean < vc.mean {
+	if vc.hmean != VMAFOffValue && stats.HarmonicMean < vc.hmean {
 		return false
 	}
-	if vc.hmean != VMAFOffValue && stats.HarmonicMean < vc.hmean {
+	if vc.mean != VMAFOffValue && stats.Mean < vc.mean {
 		return false
 	}
 	return true
@@ -139,10 +139,10 @@ func (vc VMAFChecker) String() string {
 	if vc.median != VMAFOffValue {
 		alignments = append(alignments, tw.AlignCenter)
 	}
-	if vc.mean != VMAFOffValue {
+	if vc.hmean != VMAFOffValue {
 		alignments = append(alignments, tw.AlignCenter)
 	}
-	if vc.hmean != VMAFOffValue {
+	if vc.mean != VMAFOffValue {
 		alignments = append(alignments, tw.AlignCenter)
 	}
 	// Create table with custom symbols and alignment
@@ -185,11 +185,11 @@ func (vc VMAFChecker) String() string {
 	if vc.median != VMAFOffValue {
 		headers = append(headers, "Median")
 	}
-	if vc.mean != VMAFOffValue {
-		headers = append(headers, "Mean")
-	}
 	if vc.hmean != VMAFOffValue {
 		headers = append(headers, "Harmonic Mean")
+	}
+	if vc.mean != VMAFOffValue {
+		headers = append(headers, "Mean")
 	}
 	table.Header(headers)
 	// body
@@ -212,11 +212,11 @@ func (vc VMAFChecker) String() string {
 	if vc.median != VMAFOffValue {
 		body = append(body, strconv.FormatFloat(vc.median, 'f', -1, 64))
 	}
-	if vc.mean != VMAFOffValue {
-		body = append(body, strconv.FormatFloat(vc.mean, 'f', -1, 64))
-	}
 	if vc.hmean != VMAFOffValue {
 		body = append(body, strconv.FormatFloat(vc.hmean, 'f', -1, 64))
+	}
+	if vc.mean != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.mean, 'f', -1, 64))
 	}
 	table.Append(body)
 	// Build table

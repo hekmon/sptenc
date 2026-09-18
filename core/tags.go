@@ -30,8 +30,8 @@ const (
 	sptencVMAFConfP10TagKey    = "sptenc_vmaf_conf_p10"
 	sptencVMAFConfP25TagKey    = "sptenc_vmaf_conf_p25"
 	sptencVMAFConfMedianTagKey = "sptenc_vmaf_conf_median"
-	sptencVMAFConfMeanTagKey   = "sptenc_vmaf_conf_mean"
 	sptencVMAFConfHMeanTagKey  = "sptenc_vmaf_conf_hmean"
+	sptencVMAFConfMeanTagKey   = "sptenc_vmaf_conf_mean"
 	// VMAF Results
 	sptencVMAFResultMinTagKey    = "sptenc_vmaf_result_min"
 	sptencVMAFResultP1TagKey     = "sptenc_vmaf_result_p1"
@@ -91,11 +91,11 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 	if vc.median != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMedianTagKey, strconv.FormatFloat(vc.median, 'f', -1, 64)))
 	}
-	if vc.mean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(vc.mean, 'f', -1, 64)))
-	}
 	if vc.hmean != VMAFOffValue {
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfHMeanTagKey, strconv.FormatFloat(vc.hmean, 'f', -1, 64)))
+	}
+	if vc.mean != VMAFOffValue {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(vc.mean, 'f', -1, 64)))
 	}
 	//// VMAF results
 	flags = append(flags,
@@ -105,8 +105,8 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP10TagKey, strconv.FormatFloat(vmaf.Percentile10, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP25TagKey, strconv.FormatFloat(vmaf.Percentile25, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMedianTagKey, strconv.FormatFloat(vmaf.Median, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Mean, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultHMeanTagKey, strconv.FormatFloat(vmaf.HarmonicMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Mean, 'f', -1, 64)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Maximum, 'f', -1, 64)),
 	)
 	return
