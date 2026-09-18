@@ -53,7 +53,9 @@ type VMAFComputeConfig struct {
 	UltraHD           bool   // Use the Ultra-HD (4K) VMAF model.
 	NoEnhancementGain bool   // Use the NEG (No Enhancement Gain) model variant.
 	VMAFCuda          bool   // Enable CUDA-accelerated VMAF computation. NVDEC hardware decoding is automatically used for input codecs that support it.
-	GPUID             *int   // Optional GPU device ID to use for hardware acceleration.
+	GPUID             *int   // Optional CUDA GPU device ID for libvmaf_cuda (used only when VMAFCuda is true).
+	// Hardware decode for the software libvmaf path (ignored when VMAFCuda is true).
+	HWDecoderConfig
 	// Reporting
 	Debug             func(msg string)          // Optional debug logger.
 	RuntimeError      func(err error)           // Optional callback for non-fatal runtime errors.
@@ -82,10 +84,25 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	version := VMAFModel(config.UltraHD, config.NoEnhancementGain)
-	// Auto-detect NVDEC compatibility when CUDA is in use
-	nvdecDistorted := false
-	nvdecReference := false
+	// Apply defaults
+	if config.NVDevice == 0 {
+		config.NVDevice = CUDADefaultDevice
+	}
+	if config.VAAPIDevice == "" {
+		config.VAAPIDevice = VAAPIDefaultDevice
+	}
+	if config.D3D12Device == 0 {
+		config.D3D12Device = D3D12VADefaultDevice
+	}
+	// Build up ffmpeg args
+	args := []string{
+		"-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
+		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
+	}
 	if config.VMAFCuda {
+		// CUDA VMAF path: auto-detect NVDEC compatibility
+		nvdecDistorted := false
+		nvdecReference := false
 		if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.DistortedPath}); err == nil {
 			if video := stats.VideoTrack(); video != nil {
 				nvdecDistorted = IsNVDecCompatible(video.CodecName)
@@ -100,45 +117,34 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		} else if config.RuntimeError != nil {
 			config.RuntimeError(fmt.Errorf("failed to probe reference file for NVDEC auto-detection: %w, falling back to software decode", err))
 		}
-	}
-	// Build up ffmpeg args
-	args := []string{
-		"-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
-		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
-	}
-	if (nvdecDistorted || nvdecReference || config.VMAFCuda) && config.GPUID != nil {
-		args = append(args, "-init_hw_device", fmt.Sprintf("cuda=nvc:%d", *config.GPUID))
-	}
-	//// distorted file first
-	if nvdecDistorted {
-		args = append(args, "-hwaccel", "cuda")
-		if config.GPUID != nil {
-			args = append(args, "-hwaccel_device", "nvc")
+		if (nvdecDistorted || nvdecReference) && config.GPUID != nil {
+			args = append(args, "-init_hw_device", fmt.Sprintf("cuda=nvc:%d", *config.GPUID))
 		}
-		if config.VMAFCuda {
+		//// distorted file first
+		if nvdecDistorted {
+			args = append(args, "-hwaccel", "cuda")
+			if config.GPUID != nil {
+				args = append(args, "-hwaccel_device", "nvc")
+			}
 			args = append(args, "-hwaccel_output_format", "cuda")
 		}
-	}
-	args = append(args,
-		"-r", config.InputFrameRate,
-		"-i", config.DistortedPath,
-	)
-	//// ref file
-	if nvdecReference {
-		args = append(args, "-hwaccel", "cuda")
-		if config.GPUID != nil {
-			args = append(args, "-hwaccel_device", "nvc")
-		}
-		if config.VMAFCuda {
+		args = append(args,
+			"-r", config.InputFrameRate,
+			"-i", config.DistortedPath,
+		)
+		//// ref file
+		if nvdecReference {
+			args = append(args, "-hwaccel", "cuda")
+			if config.GPUID != nil {
+				args = append(args, "-hwaccel_device", "nvc")
+			}
 			args = append(args, "-hwaccel_output_format", "cuda")
 		}
-	}
-	args = append(args,
-		"-r", config.InputFrameRate,
-		"-i", config.ReferencePath,
-	)
-	//// vmaf filter
-	if config.VMAFCuda {
+		args = append(args,
+			"-r", config.InputFrameRate,
+			"-i", config.ReferencePath,
+		)
+		//// vmaf filter
 		if config.GPUID != nil {
 			args = append(args, "-filter_hw_device", "nvc")
 		}
@@ -161,6 +167,32 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 			),
 		)
 	} else {
+		// Software libvmaf path, optionally with hardware-accelerated decoding
+		distortedHW := HWDecoderConfig{}
+		referenceHW := HWDecoderConfig{}
+		if config.NVDec || config.VAAPIDec || config.D3D12Dec || config.VideoToolboxDec {
+			distortedHW = SelectCompatibleDecoders(ctx, config.DistortedPath,
+				config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
+				config.NVDevice, config.VAAPIDevice, config.D3D12Device,
+			)
+			referenceHW = SelectCompatibleDecoders(ctx, config.ReferencePath,
+				config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
+				config.NVDevice, config.VAAPIDevice, config.D3D12Device,
+			)
+		}
+		//// distorted file first
+		args = appendHWAccelArgs(args, distortedHW)
+		args = append(args,
+			"-r", config.InputFrameRate,
+			"-i", config.DistortedPath,
+		)
+		//// ref file
+		args = appendHWAccelArgs(args, referenceHW)
+		args = append(args,
+			"-r", config.InputFrameRate,
+			"-i", config.ReferencePath,
+		)
+		//// vmaf filter
 		args = append(args,
 			"-filter_complex",
 			fmt.Sprintf(
@@ -224,6 +256,29 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	return
+}
+
+// appendHWAccelArgs appends the appropriate -hwaccel flags for the given decoder config.
+func appendHWAccelArgs(args []string, dec HWDecoderConfig) []string {
+	if dec.NVDec {
+		args = append(args, "-hwaccel", "cuda")
+		if dec.NVDevice >= 0 {
+			args = append(args, "-hwaccel_device", strconv.Itoa(dec.NVDevice))
+		}
+	} else if dec.VAAPIDec {
+		args = append(args, "-hwaccel", "vaapi")
+		if dec.VAAPIDevice != "" {
+			args = append(args, "-vaapi_device", dec.VAAPIDevice)
+		}
+	} else if dec.D3D12Dec {
+		args = append(args, "-hwaccel", "d3d12va")
+		if dec.D3D12Device >= 0 {
+			args = append(args, "-hwaccel_device", strconv.Itoa(dec.D3D12Device))
+		}
+	} else if dec.VideoToolboxDec {
+		args = append(args, "-hwaccel", "videotoolbox")
+	}
+	return args
 }
 
 // VMAFReport is the top-level structure of the JSON report produced by libvmaf.
