@@ -205,11 +205,12 @@ Consequences used everywhere below:
 |---|---|---|
 | "I am afraid of deleting my lossless master file" | `--vmafmean` + `--vmafmin` | `99` + `93` ¹ |
 | Archival / mastering | `--vmafhmean` | `95` |
-| General streaming, VOD and live sports | `--vmafhmean` | `93` (default) — fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically |
+| General streaming, VOD and live sports | `--vmafhmean` | `93` (default) ² |
 | Mobile / bandwidth-constrained | `--vmafmean` | `85–90` ¹ |
 | Quality consistency critical | `--vmafhmean` or `--vmafp5` | `90` |
 
 ¹ Pass `--vmafhmean -1` to disable the default gate when the profile does not rely on it.
+² fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically.
 
 **Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `--vmafmean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
 
