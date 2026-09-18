@@ -22,6 +22,20 @@ const (
 	VMAFMaxValue = 100
 )
 
+// setThreshold validates a single threshold value and assigns it to target.
+// VMAFOffValue is accepted as a sentinel meaning "disabled".
+func setThreshold(name string, value float64, target *float64) error {
+	if value == VMAFOffValue {
+		*target = value
+		return nil
+	}
+	if value < VMAFMinValue || value > VMAFMaxValue {
+		return fmt.Errorf("%s value %f is out of range [%d, %d]", name, value, VMAFMinValue, VMAFMaxValue)
+	}
+	*target = value
+	return nil
+}
+
 // NewVMAFChecker creates a new VMAFChecker with the given thresholds.
 // Each threshold can be set to VMAFOffValue to disable that specific check.
 // Returns an error if all values are off or if any value is out of the valid VMAF range.
@@ -31,46 +45,30 @@ func NewVMAFChecker(min, p1, p5, p10, p25, median, mean, hmean float64) (vc VMAF
 		err = errors.New("all values are off")
 		return
 	}
-	if (min < VMAFMinValue || min > VMAFMaxValue) && min != VMAFOffValue {
-		err = fmt.Errorf("min value %f is out of range [%d, %d]", min, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("min", min, &vc.min); err != nil {
 		return
 	}
-	vc.min = min
-	if (p1 < VMAFMinValue || p1 > VMAFMaxValue) && p1 != VMAFOffValue {
-		err = fmt.Errorf("p1 value %f is out of range [%d, %d]", p1, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("p1", p1, &vc.p1); err != nil {
 		return
 	}
-	vc.p1 = p1
-	if (p5 < VMAFMinValue || p5 > VMAFMaxValue) && p5 != VMAFOffValue {
-		err = fmt.Errorf("p5 value %f is out of range [%d, %d]", p5, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("p5", p5, &vc.p5); err != nil {
 		return
 	}
-	vc.p5 = p5
-	if (p10 < VMAFMinValue || p10 > VMAFMaxValue) && p10 != VMAFOffValue {
-		err = fmt.Errorf("p10 value %f is out of range [%d, %d]", p10, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("p10", p10, &vc.p10); err != nil {
 		return
 	}
-	vc.p10 = p10
-	if (p25 < VMAFMinValue || p25 > VMAFMaxValue) && p25 != VMAFOffValue {
-		err = fmt.Errorf("p25 value %f is out of range [%d, %d]", p25, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("p25", p25, &vc.p25); err != nil {
 		return
 	}
-	vc.p25 = p25
-	if (median < VMAFMinValue || median > VMAFMaxValue) && median != VMAFOffValue {
-		err = fmt.Errorf("median value %f is out of range [%d, %d]", median, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("median", median, &vc.median); err != nil {
 		return
 	}
-	vc.median = median
-	if (mean < VMAFMinValue || mean > VMAFMaxValue) && mean != VMAFOffValue {
-		err = fmt.Errorf("mean value %f is out of range [%d, %d]", mean, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("mean", mean, &vc.mean); err != nil {
 		return
 	}
-	vc.mean = mean
-	if (hmean < VMAFMinValue || hmean > VMAFMaxValue) && hmean != VMAFOffValue {
-		err = fmt.Errorf("hmean value %f is out of range [%d, %d]", hmean, VMAFMinValue, VMAFMaxValue)
+	if err = setThreshold("hmean", hmean, &vc.hmean); err != nil {
 		return
 	}
-	vc.hmean = hmean
 	return
 }
 
