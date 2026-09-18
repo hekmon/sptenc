@@ -21,7 +21,7 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 | Package | What lives here | What to change carefully |
 |---|---|---|
-| `core/` | QP search algorithm, interpolation, cache, VMAF threshold checking, scene logic | Algorithmic changes. **Fully decoupled** from `ffmpeg` — do not re-introduce concrete `ffmpeg` imports here. |
+| `core/` | QP search algorithm, interpolation, cache, VMAF threshold checking, scene threshold candidate generation | Algorithmic changes. **Fully decoupled** from `ffmpeg` — do not re-introduce concrete `ffmpeg` imports here. |
 | `ffmpeg/` | ffmpeg command builders, ffprobe parsers, encoder wrappers, VMAF computation, hardware detection | Platform-specific ffmpeg logic, new encoder support, hardware acceleration paths. |
 | `pipeline/` | `EncoderAdapter` — bridges `core.SegmentEncoder` to concrete `ffmpeg` encoder functions | The adapter *is* the ffmpeg invocation mapping; changes here must be audited against the exact encoder switch in `ffmpeg/`. |
 | `metadata/` | `GenerateTags` — assembles ffmpeg metadata flags from `core` and `ffmpeg` results | Shared between CLI and any future front-ends (e.g. GUI). |
@@ -100,6 +100,25 @@ Changing any VMAF threshold value by even 0.1 starts a fresh cache. This is corr
 This means `core/` can be unit-tested with mocked encoders that return predetermined VMAF results — no real ffmpeg processes required.
 
 **Guardrail:** Do not add new concrete `ffmpeg` imports into `core/`. That would re-tangle the packages and break the testing strategy.
+
+### Testing strategy
+
+`core/` is tested with table-driven unit tests that use a `mockEncoder` implementing `core.SegmentEncoder`. No real ffmpeg processes are invoked.
+
+**Key test helpers (defined in `core/qpsearch_test.go`):**
+- `mockEncoder` — returns pre-computed VMAF results from a `map[int]VMAFStats`. Creates dummy files on disk so `getFileSize` succeeds. Tracks all `Encode` and `ComputeVMAF` calls for call-count assertions.
+- `linearVMAF(qp)` — generates a monotonic VMAF curve (`mean = 100 - 1.5*qp`) for predictable convergence tests.
+- `extractQPFromPath` — parses QP from segment filenames (`seg_%06d_qp%03d.mkv`) so the mock can look up the right VMAF result.
+- `mockStatsCache` / `mockCallbacks` — no-op implementations for cache and progress injection.
+
+**Critical test files:**
+- `core/qpsearch_test.go` — Convergence, best-effort fallback, cache guidance, multi-segment runs, error propagation from `Encode`/`ComputeVMAF`/`ProbeStream`, `KeepInvalidQP` behavior.
+- `core/predicator_test.go` — Interpolation accuracy, extrapolation clamping, VMAF 100 ceiling adaptation, monotonicity, insufficient-point errors.
+- `core/cache_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability.
+- `core/vmaf_test.go` — Checker construction errors, boundary values, active/inactive threshold combinations.
+- `core/scenes_test.go` — Candidate generation, deduplication, `minDrop` spacing, `GetOptimalMinDrop` edge cases.
+
+**Rule:** Any change to `core/` that lacks test coverage must be paired with a test. `core/` is where correctness guarantees live; the tests are the proof.
 
 ## Correct frame of reference
 
