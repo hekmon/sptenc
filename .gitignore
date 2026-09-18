@@ -22,7 +22,7 @@ go.work
 go.work.sum
 
 # Dev
-sptenc
+/sptenc*
 
 # Tidet resources are synced by Tidet Cloud, never by Git.
 .tidet/
