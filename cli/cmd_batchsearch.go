@@ -29,7 +29,6 @@ const (
 	finalEncodeFlagName   = "finalencode"
 	maxThresholdFlagName  = "maxthreshold"
 	maxCandidatesFlagName = "maxcandidates"
-	maxCandidatesDefault  = 40
 	strikesFlagName       = "strikes"
 	strikesMinimum        = 3
 )
@@ -153,7 +152,7 @@ var batchsearchCommand = &cli.Command{
 				Usage: fmt.Sprintf("Cap threshold search at this value (valid values: %d-%d).",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 				),
-				Value:     float64(ffmpeg.SceneThresholdMax),
+				Value:     40,
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
 				Category:  "Threshold Search",
@@ -162,7 +161,7 @@ var batchsearchCommand = &cli.Command{
 				Name:     maxCandidatesFlagName,
 				Aliases:  []string{"m"},
 				Usage:    "Maximum number of candidate thresholds to test",
-				Value:    maxCandidatesDefault,
+				Value:    30,
 				OnlyOnce: true,
 				Validator: func(v int) error {
 					if v < 1 {
