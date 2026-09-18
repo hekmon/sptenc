@@ -171,7 +171,7 @@ func scdetProgress(ffmpegOutput io.ReadCloser, debug func(string), runtimeError 
 	scanner := bufio.NewScanner(ffmpegOutput)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "[Parsed_scdet") {
+		if !strings.Contains(line, "lavfi.scd.score:") {
 			continue
 		}
 		var scene Scene
@@ -195,7 +195,7 @@ func scdetProgress(ffmpegOutput io.ReadCloser, debug func(string), runtimeError 
 }
 
 func parseScdet(line string) (scene Scene, err error) {
-	if !strings.Contains(line, "[Parsed_scdet") {
+	if !strings.Contains(line, "lavfi.scd.score:") {
 		err = errors.New("line does not contain scdet marker")
 		return
 	}
