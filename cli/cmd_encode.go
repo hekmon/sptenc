@@ -309,6 +309,10 @@ var encodeCommand = &cli.Command{
 			for i := range segmentsPaths {
 				segmentsPaths[i] = filepath.Join(workingDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
 			}
+			// get stream infos
+			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to probe input file: %w", err)
+			}
 		} else {
 			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
@@ -383,26 +387,37 @@ var encodeCommand = &cli.Command{
 		}
 
 		// Step 4 - final vmaf check
-		// // Verify frame counts match before computing VMAF to catch misalignment early.
-		// // Use -count_frames (NbReadFrames) via liveCountNbFrames for accurate counts.
-		// fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
-		// sourceFrames, _, _, err := liveCountNbFrames(ctx, vmafSource, cmd.Bool(debugFlagName))
-		// if err != nil {
-		// 	fmt.Fprintf(bypass, "WARNING: could not count frames in source for verification: %s\n", err)
-		// 	sourceFrames = 0
-		// }
-		// encodedFrames, _, _, err := liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName))
-		// if err != nil {
-		// 	fmt.Fprintf(bypass, "WARNING: could not count frames in encoded output for verification: %s\n", err)
-		// 	encodedFrames = 0
-		// }
-		// if cmd.Bool(debugFlagName) {
-		// 	fmt.Fprintf(bypass, "DEBUG: Frame counts — source: %d, encoded: %d\n", sourceFrames, encodedFrames)
-		// }
-		// if sourceFrames > 0 && encodedFrames > 0 && sourceFrames != encodedFrames {
-		// 	err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
-		// 	return
-		// }
+		// Verify frame counts match before computing VMAF to catch misalignment early.
+		// Use -count_frames (NbReadFrames) via liveCountNbFrames for accurate counts.
+		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
+		var sourceFrames, encodedFrames int
+		sourceFileInfo, err := os.Stat(vmafSource)
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: could not stat source for frame count verification: %s\n", err)
+		} else {
+			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, sourceFileInfo.Size(), cmd.Bool(debugFlagName))
+			if err != nil {
+				fmt.Fprintf(bypass, "WARNING: could not count frames in source for verification: %s\n", err)
+				sourceFrames = 0
+			}
+		}
+		encodedFileInfo, err := os.Stat(encodedSegmentsMerged)
+		if err != nil {
+			fmt.Fprintf(bypass, "WARNING: could not stat encoded output for frame count verification: %s\n", err)
+		} else {
+			encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
+			if err != nil {
+				fmt.Fprintf(bypass, "WARNING: could not count frames in encoded output for verification: %s\n", err)
+				encodedFrames = 0
+			}
+		}
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Frame counts — source: %d, encoded: %d\n", sourceFrames, encodedFrames)
+		}
+		if sourceFrames > 0 && encodedFrames > 0 && sourceFrames != encodedFrames {
+			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
+			return
+		}
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
