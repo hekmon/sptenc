@@ -19,7 +19,6 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/muesli/termenv"
 	"github.com/olekukonko/tablewriter"
-	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
 	"github.com/urfave/cli/v3"
 )
@@ -32,7 +31,7 @@ const (
 	strikesFlagName       = "strikes"
 	strikesMinimum        = 3
 	minDropFlagName       = "mindrop"
-	minDropMinimum        = 5
+	minDropDefault        = 3
 
 	minThresholdDefault  = 10.0
 	maxThresholdDefault  = 40.0
@@ -41,27 +40,10 @@ const (
 
 var (
 	batchTableConfig = tablewriter.Config{
-		Header: tw.CellConfig{
-			Formatting: tw.CellFormatting{AutoFormat: tw.Off},
-			Alignment: tw.CellAlignment{
-				PerColumn: []tw.Align{tw.AlignRight, tw.AlignRight, tw.AlignRight},
-			},
-		},
 		Row: tw.CellConfig{
 			Alignment: tw.CellAlignment{
-				PerColumn: []tw.Align{tw.AlignRight, tw.AlignRight, tw.AlignRight},
+				PerColumn: []tw.Align{tw.AlignCenter, tw.AlignCenter, tw.AlignCenter},
 			},
-		},
-	}
-	batchTableColorCfg = renderer.ColorizedConfig{
-		Header: renderer.Tint{
-			FG: renderer.Colors{color.Bold, color.Underline},
-		},
-		Border: renderer.Tint{
-			FG: renderer.Colors{color.FgWhite},
-		},
-		Separator: renderer.Tint{
-			FG: renderer.Colors{color.FgWhite},
 		},
 	}
 )
@@ -104,7 +86,7 @@ var batchsearchCommand = &cli.Command{
 		"CANDIDATE DENSITY (--" + maxCandidatesFlagName + ", --" + minDropFlagName + ")\n" +
 		"--" + maxCandidatesFlagName + " sets your absolute budget (default " + strconv.Itoa(maxCandidatesDefault) + "). The algorithm auto-tunes the\n" +
 		"'scene drop' — how many boundaries disappear between two tested thresholds — to fit within it.\n" +
-		"--" + minDropFlagName + " is a floor for that tuning (default " + strconv.Itoa(minDropMinimum) + "). On long content with many\n" +
+		"--" + minDropFlagName + " is a floor for that tuning (default " + strconv.Itoa(minDropDefault) + "). On long content with many\n" +
 		"scenes the auto-tuner naturally exceeds this floor, so it has no effect. It mainly protects\n" +
 		"shorter content (e.g. OVAs, episodes) from over-sampling: a low mindrop creates candidates that\n" +
 		"are very close together, where the file-size differences are often small yet each still costs a\n" +
@@ -209,11 +191,11 @@ var batchsearchCommand = &cli.Command{
 				Name:     minDropFlagName,
 				Aliases:  []string{"d"},
 				Usage:    "Minimum scene drop between two candidate thresholds (auto-tuning will not go below this)",
-				Value:    minDropMinimum,
+				Value:    minDropDefault,
 				OnlyOnce: true,
 				Validator: func(v int) error {
-					if v < minDropMinimum {
-						return fmt.Errorf("%s must be %d at minimum", minDropFlagName, minDropMinimum)
+					if v < 1 {
+						return fmt.Errorf("%s must be 1 at minimum", minDropFlagName)
 					}
 					return nil
 				},
@@ -296,6 +278,10 @@ var batchsearchCommand = &cli.Command{
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {
 			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
+		}
+		// Check threshold range consistency
+		if cmd.Float64(minThresholdFlagName) >= cmd.Float64(maxThresholdFlagName) {
+			return ctx, fmt.Errorf("--%s must be strictly less than --%s", minThresholdFlagName, maxThresholdFlagName)
 		}
 		return ctx, nil
 	},
@@ -446,13 +432,12 @@ var batchsearchCommand = &cli.Command{
 				strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
 			)
 		}
-		minDropFloor := cmd.Int(minDropFlagName)
-		if effectiveMinDrop < minDropFloor {
+		if effectiveMinDrop < cmd.Int(minDropFlagName) {
 			fmt.Fprintf(bypass, "\tWARNING: Auto-tuned scene drop of %d is below the minimum of %d; recomputing candidates...\n",
-				effectiveMinDrop, minDropFloor,
+				effectiveMinDrop, cmd.Int(minDropFlagName),
 			)
-			candidates = core.GetSearchThresholdCandidates(cappedScenes, minDropFloor)
-			effectiveMinDrop = minDropFloor
+			candidates = core.GetSearchThresholdCandidates(cappedScenes, cmd.Int(minDropFlagName))
+			effectiveMinDrop = cmd.Int(minDropFlagName)
 		}
 		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within %s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
@@ -650,7 +635,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		duration := time.Since(start)
 		finalVMAFStats := finalVMAFreport.GetStats()
-		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n%s", duration.Round(time.Second), finalVMAFStats)
+		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n\n%s\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 6 - remuxing
 		fmt.Fprintln(bypass, "Remuxing to final file...")
@@ -716,7 +701,6 @@ var batchsearchCommand = &cli.Command{
 		var buff strings.Builder
 		table := tablewriter.NewTable(&buff,
 			tablewriter.WithConfig(batchTableConfig),
-			tablewriter.WithRenderer(renderer.NewColorized(batchTableColorCfg)),
 		)
 		table.Header("Threshold", "Size", "Relative to Best")
 		bestSize := batch.sizes[bestIndex]
