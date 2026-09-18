@@ -12,6 +12,7 @@ import (
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/muesli/termenv"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -246,7 +247,7 @@ var batchsearchCommand = &cli.Command{
 			)
 		}
 		defer func() {
-			if err != nil || cmd.Bool(debugFlagName) {
+			if (err != nil && ctx.Err() != context.Canceled) || cmd.Bool(debugFlagName) {
 				fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
 					shellescape.Quote(workingDir),
 				)
@@ -334,9 +335,15 @@ var batchsearchCommand = &cli.Command{
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 		candidates, effectiveMinDrop := core.GetOptimalMinDrop(scenes, cmd.Int(maxCandidatesFlagName))
+		if len(candidates) == 0 {
+			return fmt.Errorf("no candidates found")
+		}
 		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within --%s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
 		)
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
+		}
 
 		// Step 2 - Create the master for encoding
 		_, _, _, err = createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
@@ -345,7 +352,55 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Step 3 - start the search
+		batch := batchStatus{
+			candidates: candidates,
+		}
+		batch.Init()
+		batchLine := liveprogress.AddCustomLine(batch.Line)
+		batchSeparator := liveprogress.AddCustomLine(func() string { return "" })
+		defer func() {
+			liveprogress.RemoveCustomLine(batchSeparator)
+			liveprogress.RemoveCustomLine(batchLine)
+		}()
+
+		// TODO
 
 		return nil
 	},
+}
+
+type batchStatus struct {
+	candidates            []float64
+	currentCandidateIndex int
+	bestCandidateIndex    int
+	// formating
+	currentCandidateStyle termenv.Style
+	bestCandidateStyle    termenv.Style
+	testedCandidateStyle  termenv.Style
+	futureCandidateStyle  termenv.Style
+}
+
+func (bs *batchStatus) Init() {
+	termenvProfile := liveprogress.GetTermProfile()
+	bs.currentCandidateStyle = termenvProfile.String().Underline()
+	bs.bestCandidateStyle = termenvProfile.String().Bold()
+	bs.testedCandidateStyle = termenvProfile.String().CrossOut()
+	bs.futureCandidateStyle = termenvProfile.String().Faint()
+}
+
+func (bs *batchStatus) Line() string {
+	candidates := make([]string, len(bs.candidates))
+	for i, candidate := range bs.candidates {
+		switch {
+		case i == bs.currentCandidateIndex:
+			candidates[i] = bs.currentCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
+		case i == bs.bestCandidateIndex:
+			candidates[i] = bs.bestCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
+		case i < bs.currentCandidateIndex:
+			candidates[i] = bs.testedCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
+		default:
+			candidates[i] = bs.futureCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
+		}
+	}
+	return fmt.Sprintf(" BatchMode | %s", strings.Join(candidates, " "))
 }

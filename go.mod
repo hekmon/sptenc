@@ -9,6 +9,7 @@ require (
 	github.com/hekmon/liveprogress/v2 v2.2.1
 	github.com/hekmon/liveterm/v2 v2.6.1
 	github.com/hekmon/processpriority v1.0.0
+	github.com/muesli/termenv v0.16.0
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/shirou/gopsutil/v4 v4.26.7
 	github.com/urfave/cli/v3 v3.11.0
@@ -28,7 +29,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
-	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
 	github.com/olekukonko/errors v1.2.0 // indirect
 	github.com/olekukonko/ll v0.1.6 // indirect
