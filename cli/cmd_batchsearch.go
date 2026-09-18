@@ -75,8 +75,10 @@ var batchsearchCommand = &cli.Command{
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
 		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
-		"the final encode with the discovered threshold. The GPU-found threshold is usually close enough\n" +
-		"for the CPU pass to be worth the speedup, though it may not be exactly optimal.\n\n" +
+		"the final encode with the discovered threshold. CPU encoders produce smaller files for an equivalent\n" +
+		"quality compared to GPU encoders, which are optimized for speed rather than compression efficiency.\n" +
+		"The GPU-found threshold is usually close enough for the CPU pass to be worth the speedup,\n" +
+		"though it may not be exactly optimal.\n\n" +
 		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op because the search\n" +
 		"result is already the most precise result possible.\n\n" +
 		"CACHE ISOLATION\n" +
