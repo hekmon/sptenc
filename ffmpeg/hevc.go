@@ -287,8 +287,8 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 			// room for per-block QP modulation (unlike x265, where AQ is an offset layer
 			// on the base QP and stays active in CQP). FFmpeg forwards the flags without
 			// warning. Kept as best-effort: no cost if ignored, gain if the driver honors them.
-			"-spatial_aq", strconv.Itoa(nvEncSpatialAQ),
-			"-temporal_aq", strconv.Itoa(nvEncTemporalAQ),
+			"-spatial-aq", strconv.Itoa(nvEncSpatialAQ),
+			"-temporal-aq", strconv.Itoa(nvEncTemporalAQ),
 		)
 	}
 	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncMaxLookahead))

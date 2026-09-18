@@ -420,8 +420,8 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 		"-rc", "constqp",
 		"-qp", strconv.Itoa(config.Quantization),
 		// Same best-effort rationale as HEVC NVENC: believed inert under constqp, no cost if ignored.
-		"-spatial_aq", strconv.Itoa(nvEncSpatialAQ),
-		"-temporal_aq", strconv.Itoa(nvEncTemporalAQ),
+		"-spatial-aq", strconv.Itoa(nvEncSpatialAQ),
+		"-temporal-aq", strconv.Itoa(nvEncTemporalAQ),
 	)
 	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncMaxLookahead))
 	// // end with output
