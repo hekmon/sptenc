@@ -27,6 +27,7 @@ import (
 // Flag names for batchsearch-specific flags.
 const (
 	finalEncodeFlagName   = "finalencode"
+	maxThresholdFlagName  = "maxthreshold"
 	maxCandidatesFlagName = "maxcandidates"
 	maxCandidatesDefault  = 40
 	strikesFlagName       = "strikes"
@@ -68,7 +69,7 @@ var batchsearchCommand = &cli.Command{
 	Description: "Orchestrate multiple encode passes with different scene detection thresholds\n" +
 		"to find the one that produces the smallest file while still passing your VMAF targets.\n\n" +
 		"HOW IT WORKS\n" +
-		"  1. Scans the source once to map all natural scene boundaries starting at --" + thresholdFlagName + ".\n" +
+		"  1. Scans the source once to map all natural scene boundaries starting at --" + minThresholdFlagName + ".\n" +
 		"  2. Automatically selects thresholds so that each one eliminates at least N scenes compared\n" +
 		"     to the previous candidate. N is tuned internally so the total number of candidates never\n" +
 		"     exceeds your --" + maxCandidatesFlagName + " budget.\n" +
@@ -137,12 +138,22 @@ var batchsearchCommand = &cli.Command{
 				OnlyOnce: true,
 			},
 			&cli.Float64Flag{
-				Name:    thresholdFlagName,
+				Name:    minThresholdFlagName,
 				Aliases: []string{"T"},
 				Usage: fmt.Sprintf("Start threshold search at this value (valid values: %d-%d).",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 				),
 				Value:     10,
+				OnlyOnce:  true,
+				Validator: validateSceneThreshold,
+				Category:  "Threshold Search",
+			},
+			&cli.Float64Flag{
+				Name: maxThresholdFlagName,
+				Usage: fmt.Sprintf("Cap threshold search at this value (valid values: %d-%d).",
+					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
+				),
+				Value:     float64(ffmpeg.SceneThresholdMax),
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
 				Category:  "Threshold Search",
@@ -323,6 +334,11 @@ var batchsearchCommand = &cli.Command{
 			}
 		}
 
+		// Validate threshold range
+		if cmd.Float64(maxThresholdFlagName) <= cmd.Float64(minThresholdFlagName) {
+			return fmt.Errorf("%s must be greater than %s", maxThresholdFlagName, minThresholdFlagName)
+		}
+
 		/*
 		 * Execute process
 		 */
@@ -333,7 +349,10 @@ var batchsearchCommand = &cli.Command{
 			cunits.ImportInBytes(float64(inputInfos.Size())),
 			cmd.String(encoderFlagName),
 		)
-		fmt.Fprintf(bypass, "\t• search starts at threshold %s\n", strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64))
+		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+		)
 		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
 		if finalEncoder != "" {
@@ -362,21 +381,36 @@ var batchsearchCommand = &cli.Command{
 
 		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
 		fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
-			strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
-		scenes, err := liveDetectScenes(ctx, inputPath, cmd.Float64(thresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
+		scenes, err := liveDetectScenes(ctx, inputPath, cmd.Float64(minThresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
 			decoderCfg.ToScenesDetectionConfig(),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
+		// Cap scenes to the max threshold
+		cappedScenes := make([]ffmpeg.Scene, 0, len(scenes))
+		for _, scene := range scenes {
+			if scene.Score <= cmd.Float64(maxThresholdFlagName) {
+				cappedScenes = append(cappedScenes, scene)
+			}
+		}
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-		candidates, effectiveMinDrop := core.GetOptimalMinDrop(scenes, cmd.Int(maxCandidatesFlagName))
+		if len(cappedScenes) < len(scenes) {
+			fmt.Fprintf(bypass, "\tCapped to %d scenes with score ≤ %s\n",
+				1+len(cappedScenes), strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+			)
+		}
+		candidates, effectiveMinDrop := core.GetOptimalMinDrop(cappedScenes, cmd.Int(maxCandidatesFlagName))
 		if len(candidates) == 0 {
-			return fmt.Errorf("no candidates found")
+			return fmt.Errorf("no candidates found in the %s–%s range",
+				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+			)
 		}
 		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within %s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),

@@ -24,7 +24,7 @@ const (
 	encoderFlagName      = "encoder"
 	cacheProfileFlagName = "cacheprofile"
 	originalFileFlagName = "originalfile"
-	thresholdFlagName    = "threshold"
+	minThresholdFlagName = "minthreshold"
 )
 
 var encodeCommand = &cli.Command{
@@ -71,7 +71,7 @@ var encodeCommand = &cli.Command{
 				ValidateDefaults: true,
 			},
 			&cli.Float64Flag{
-				Name:    thresholdFlagName,
+				Name:    minThresholdFlagName,
 				Aliases: []string{"T"},
 				Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d)",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
@@ -274,7 +274,7 @@ var encodeCommand = &cli.Command{
 			}
 			// analyze
 			fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
-				strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			)
 			var scenes []ffmpeg.Scene
 			start := time.Now()
@@ -287,7 +287,7 @@ var encodeCommand = &cli.Command{
 				D3D12Device:     masterConfig.D3D12Device,
 				VideoToolboxDec: masterConfig.VideoToolboxDec,
 			}
-			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64(thresholdFlagName), totalDuration,
+			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64(minThresholdFlagName), totalDuration,
 				cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}

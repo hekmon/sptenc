@@ -38,13 +38,13 @@ var splitCommand = &cli.Command{
 		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
 		"WORKFLOW\n" +
 		"  1. Use --" + analyzeFlagName + " to preview detected scenes without splitting.\n" +
-		"  2. Tune --" + thresholdFlagName + " to control sensitivity (experiment first).\n" +
+		"  2. Tune --" + minThresholdFlagName + " to control sensitivity (experiment first).\n" +
 		"  3. Validate with the original file before performing the actual split.\n\n" +
 		"If the input has already been converted with the master command, use --" + masterFlagName + " to skip the\n" +
 		"master creation phase.",
 	Flags: []cli.Flag{
 		&cli.Float64Flag{
-			Name:      thresholdFlagName,
+			Name:      minThresholdFlagName,
 			Aliases:   []string{"T"},
 			Usage:     fmt.Sprintf("Scene detection threshold (%d-%d)", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
 			Value:     10,
@@ -220,13 +220,13 @@ var splitCommand = &cli.Command{
 			fmt.Fprintf(bypass, "Analyzing scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			)
 		} else {
 			fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
 				shellescape.Quote(filepath.Base(inputFilePath)),
 				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
+				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			)
 			if !cmd.Bool(masterFlagName) {
 				// create a temporary directory
@@ -274,7 +274,7 @@ var splitCommand = &cli.Command{
 
 		// analyze
 		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
-			strconv.FormatFloat(cmd.Float64(thresholdFlagName), 'f', -1, 64),
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
 		scenesConfig := ffmpeg.ScenesDetectionConfig{
@@ -286,7 +286,7 @@ var splitCommand = &cli.Command{
 			D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
 			VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
 		}
-		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64(thresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig)
+		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
