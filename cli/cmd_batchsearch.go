@@ -119,7 +119,7 @@ var batchsearchCommand = &cli.Command{
 			},
 			&cli.IntFlag{
 				Name:     nbStrikesFlagName,
-				Aliases:  []string{"s"},
+				Aliases:  []string{"S"},
 				Usage:    "Stop the search after this many consecutive thresholds fail to reduce file size",
 				Value:    nbStrikesMinimum,
 				OnlyOnce: true,
