@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,51 +34,55 @@ var batchsearchCommand = &cli.Command{
 	Aliases:  []string{"bs"},
 	Category: "Advanced",
 	Usage:    "Automatically search for the optimal scene threshold by encoding the video multiple times",
-	Description: fmt.Sprintf(
-		"Orchestrate multiple encode passes with different scene detection thresholds\n" +
-			"to find the one that produces the smallest file while still passing your VMAF targets.\n\n" +
-			"HOW IT WORKS\n" +
-			"  1. Scans the source once to map all natural scene boundaries.\n" +
-			"  2. Automatically selects thresholds so that each one eliminates at least N\n" +
-			"     scenes compared to the previous candidate. N is tuned internally so the\n" +
-			"     total number of candidates never exceeds your --maxcandidates budget.\n" +
-			"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
-			"  4. Stops after consecutive candidates fail to reduce file size (strikes).\n\n" +
-			"WHY THRESHOLD SELECTION MATTERS\n" +
-			"Scene detection splits a video into independent segments. Each segment gets\n" +
-			"its own QP, so splitting finely lets hard passages use low QP and easy ones high.\n" +
-			"But every split forces an I-frame, and short runs starve B/P compression. Split\n" +
-			"coarsely and B/P frames thrive across long runs, yet the whole scene must bow\n" +
-			"to its hardest passage — easy sections pay for quality they do not need.\n\n" +
-			"The sweet spot is a threshold that gives each scene enough freedom to use its\n" +
-			"own QP while leaving enough continuous frames for the encoder to compress\n" +
-			"efficiently. batchsearch finds this automatically by testing candidates across\n" +
-			"the spectrum.\n\n" +
-			"CONTROLLING SEARCH COST\n" +
-			"Each candidate is a full encode pass with VMAF validation. The complete\n" +
-			"batchsearch process is slow:\n" +
-			"  * GPU search: may take several days in total.\n" +
-			"  * CPU search: can take several weeks in total.\n\n" +
-			"Use --maxcandidates to set your budget. The default (40) is a reasonable\n" +
-			"balance between thoroughness and total search time. Lower values (20-30)\n" +
-			"reduce overall duration but may miss the optimal threshold. Higher values\n" +
-			"increase precision at a linear time cost. Internally, the algorithm tunes\n" +
-			"the 'scene drop' — how many scene boundaries disappear between two tested\n" +
-			"thresholds — to fit within your budget.\n\n" +
-			"ENCODERS\n" +
-			"Use --" + encoderFlagName + " to choose the encoder for the search loop. GPU encoders\n" +
-			"(e.g. hevc_nvenc) are strongly recommended for speed. If available, also\n" +
-			"enable CUDA VMAF acceleration (--vmafcuda) to avoid bottlenecking the search\n" +
-			"on CPU-side quality validation.\n\n" +
-			"FINAL ENCODE\n" +
-			"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command\n" +
-			"automatically derives the equivalent CPU encoder of the same codec\n" +
-			"(e.g. hevc_nvenc -> libx265) and performs the final encode with the discovered\n" +
-			"threshold. The GPU-found threshold is usually close enough for the\n" +
-			"CPU pass to be worth the speedup, though it may not be exactly optimal.\n\n" +
-			"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op because\n" +
-			"the search result is already the most precise result possible.",
-	),
+	Description: "Orchestrate multiple encode passes with different scene detection thresholds\n" +
+		"to find the one that produces the smallest file while still passing your VMAF targets.\n\n" +
+		"HOW IT WORKS\n" +
+		"  1. Scans the source once to map all natural scene boundaries.\n" +
+		"  2. Automatically selects thresholds so that each one eliminates at least N\n" +
+		"     scenes compared to the previous candidate. N is tuned internally so the\n" +
+		"     total number of candidates never exceeds your --maxcandidates budget.\n" +
+		"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
+		"  4. Stops after consecutive candidates fail to reduce file size (strikes).\n\n" +
+		"WHY THRESHOLD SELECTION MATTERS\n" +
+		"Scene detection splits a video into independent segments. Each segment gets\n" +
+		"its own QP, so splitting finely lets hard passages use low QP and easy ones high.\n" +
+		"But every split forces an I-frame, and short runs starve B/P compression. Split\n" +
+		"coarsely and B/P frames thrive across long runs, yet the whole scene must bow\n" +
+		"to its hardest passage — easy sections pay for quality they do not need.\n\n" +
+		"The sweet spot is a threshold that gives each scene enough freedom to use its\n" +
+		"own QP while leaving enough continuous frames for the encoder to compress\n" +
+		"efficiently. batchsearch finds this automatically by testing candidates across\n" +
+		"the spectrum.\n\n" +
+		"CONTROLLING SEARCH COST\n" +
+		"Each candidate is a full encode pass with VMAF validation. The complete\n" +
+		"batchsearch process is slow:\n" +
+		"  * GPU search: may take several days in total.\n" +
+		"  * CPU search: can take several weeks in total.\n\n" +
+		"Use --maxcandidates to set your budget. The default (40) is a reasonable\n" +
+		"balance between thoroughness and total search time. Lower values (20-30)\n" +
+		"reduce overall duration but may miss the optimal threshold. Higher values\n" +
+		"increase precision at a linear time cost. Internally, the algorithm tunes\n" +
+		"the 'scene drop' — how many scene boundaries disappear between two tested\n" +
+		"thresholds — to fit within your budget.\n\n" +
+		"ENCODERS\n" +
+		"Use --" + encoderFlagName + " to choose the encoder for the search loop. GPU encoders\n" +
+		"(e.g. hevc_nvenc) are strongly recommended for speed. If available, also\n" +
+		"enable CUDA VMAF acceleration (--vmafcuda) to avoid bottlenecking the search\n" +
+		"on CPU-side quality validation.\n\n" +
+		"FINAL ENCODE\n" +
+		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command\n" +
+		"automatically derives the equivalent CPU encoder of the same codec\n" +
+		"(e.g. hevc_nvenc -> libx265) and performs the final encode with the discovered\n" +
+		"threshold. The GPU-found threshold is usually close enough for the\n" +
+		"CPU pass to be worth the speedup, though it may not be exactly optimal.\n\n" +
+		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op because\n" +
+		"the search result is already the most precise result possible.\n\n" +
+		"CACHE ISOLATION\n" +
+		"By default all encodes for the same encoder + VMAF profile combo share a single\n" +
+		"QP history cache. If you encode content with wildly different visual characteristics\n" +
+		"(e.g. grainy film vs. clean CGI), sharing history can pollute the model and slow\n" +
+		"convergence. Use --" + cacheProfileFlagName + " to create a separate cache namespace\n" +
+		"for a specific type of content (e.g. pixar_animation, sopranos_s01, grainy_90s).",
 	Flags: func() (flags []cli.Flag) {
 		flags = []cli.Flag{
 			&cli.StringFlag{
@@ -141,7 +144,7 @@ var batchsearchCommand = &cli.Command{
 			&cli.StringFlag{
 				Name:     cacheProfileFlagName,
 				Aliases:  []string{"c"},
-				Usage:    "Cache profile name to further isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile of the encoder + VMAF profile combination.",
+				Usage:    "Isolate QP history to a named profile",
 				Value:    "",
 				OnlyOnce: true,
 				Category: "Cache isolation",
@@ -264,16 +267,14 @@ var batchsearchCommand = &cli.Command{
 			cmd.Float64(vmafMinFlagName), cmd.Float64(vmafP1FlagName), cmd.Float64(vmafP5FlagName), cmd.Float64(vmafP10FlagName),
 			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafHMeanFlagName), cmd.Float64(vmafMeanFlagName))
 		if err != nil {
-			err = fmt.Errorf("failed to create VMAF auditor: %w", err)
-			return
+			return fmt.Errorf("failed to create VMAF auditor: %w", err)
 		}
 
 		// Get the stats cache
 		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), ffmpeg.Encoder(cmd.String(encoderFlagName)),
 			vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
-			err = fmt.Errorf("failed to create stats cache: %w", err)
-			return
+			return fmt.Errorf("failed to create stats cache: %w", err)
 		}
 		if cmd.Bool(debugFlagName) {
 			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
@@ -334,7 +335,7 @@ var batchsearchCommand = &cli.Command{
 		)
 
 		// Find optimal candidates within budget
-		candidates, effectiveMinDrop := getOptimalMinDrop(scenes, cmd.Int(maxCandidatesFlagName))
+		candidates, effectiveMinDrop := core.GetOptimalMinDrop(scenes, cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within --%s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
 		)
@@ -349,60 +350,4 @@ var batchsearchCommand = &cli.Command{
 
 		return nil
 	},
-}
-
-// getOptimalMinDrop finds the smallest minDrop that produces at most maxCandidates candidates.
-// It returns the candidate list and the effective minDrop used.
-func getOptimalMinDrop(scenes []ffmpeg.Scene, maxCandidates int) (candidates []float64, minDrop int) {
-	for minDrop = 1; ; minDrop++ {
-		candidates = getSearchThresholdCandidates(scenes, minDrop)
-		if len(candidates) <= maxCandidates {
-			return
-		}
-	}
-}
-
-// getSearchThresholdCandidates builds candidate thresholds using pure scene-drop logic.
-// Each candidate (after the first) eliminates at least minDrop more scenes than the previous candidate.
-func getSearchThresholdCandidates(scenes []ffmpeg.Scene, minDrop int) (candidates []float64) {
-	if len(scenes) == 0 {
-		return
-	}
-
-	// Collect unique scores and sort them ascending
-	uniqueScores := make([]float64, 0, len(scenes))
-	seen := make(map[float64]bool, len(scenes))
-	for _, scene := range scenes {
-		if !seen[scene.Score] {
-			seen[scene.Score] = true
-			uniqueScores = append(uniqueScores, scene.Score)
-		}
-	}
-	sort.Float64s(uniqueScores)
-
-	// Helper: count scenes eliminated at a given threshold
-	// (scenes with score < threshold are merged/eliminated)
-	countEliminated := func(threshold float64) int {
-		count := 0
-		for _, scene := range scenes {
-			if scene.Score < threshold {
-				count++
-			}
-		}
-		return count
-	}
-
-	// First candidate is always the lowest score (baseline)
-	candidates = append(candidates, uniqueScores[0])
-	lastEliminated := countEliminated(uniqueScores[0])
-
-	for i := 1; i < len(uniqueScores); i++ {
-		eliminated := countEliminated(uniqueScores[i])
-		if eliminated-lastEliminated >= minDrop {
-			candidates = append(candidates, uniqueScores[i])
-			lastEliminated = eliminated
-		}
-	}
-
-	return
 }

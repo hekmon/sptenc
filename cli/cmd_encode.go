@@ -93,7 +93,7 @@ var encodeCommand = &cli.Command{
 			&cli.StringFlag{
 				Name:     cacheProfileFlagName,
 				Aliases:  []string{"c"},
-				Usage:    "Cache profile name to further isolate QP history (e.g. pixar_animation, sopranos_s01, grainy_90s). Defaults to the shared profile of the encoder + VMAF profile combination.",
+				Usage:    "Isolate QP history to a named profile",
 				Value:    "",
 				OnlyOnce: true,
 				Category: "Cache isolation",
@@ -756,4 +756,3 @@ func newVMAFFlags() []cli.Flag {
 		},
 	}
 }
-
