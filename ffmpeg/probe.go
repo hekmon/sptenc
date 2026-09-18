@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hekmon/processpriority"
@@ -323,11 +325,64 @@ func (s *FFProbeBinaryStream) IsInterlaced() bool {
 	return s.FieldOrder != "progressive" && s.FieldOrder != "unknown"
 }
 
+// parseFrameRate converts an ffprobe frame-rate string into a float64.
+//
+// ffprobe reports the same rate in multiple formats depending on the container
+// and encoder (e.g. "24000/1001", "23.976024", "30/1", or "30"). String
+// comparison therefore rejects legitimate CFR content. This helper normalises
+// both rational and decimal forms so callers can compare numerically.
+func parseFrameRate(s string) (float64, error) {
+	if s == "" {
+		return 0, errors.New("empty frame rate")
+	}
+	if strings.Contains(s, "/") {
+		parts := strings.SplitN(s, "/", 2)
+		num, err := strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid frame rate numerator %q: %w", parts[0], err)
+		}
+		den, err := strconv.ParseFloat(parts[1], 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid frame rate denominator %q: %w", parts[1], err)
+		}
+		if den == 0 {
+			return 0, errors.New("frame rate denominator is zero")
+		}
+		return num / den, nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid frame rate %q: %w", s, err)
+	}
+	return v, nil
+}
+
 // IsConstantFrameRate reports whether the stream appears to have a constant frame rate.
-// It compares r_frame_rate and avg_frame_rate from ffprobe. If they differ, the stream
-// is likely variable frame rate (VFR), which can cause frame misalignment in VMAF comparisons.
+//
+// It compares r_frame_rate and avg_frame_rate from ffprobe. Both values are
+// metadata-level estimates (not ground-truth measurements), so the check is
+// intentionally conservative: unparseable or missing values are treated as VFR.
+//
+// The old implementation used string equality, which produced false rejections
+// when the same rate was expressed differently (e.g. "24000/1001" vs "23.976024").
+// We now parse both fields as float64 and allow a small tolerance.
+//
+// Epsilon choice: the smallest gap between common *different* standard rates is
+// ~0.024 fps (24 vs 23.976). 1e-3 is 24× smaller than that gap, so it cannot
+// conflate two genuine standards, while being ~40 000× larger than the float
+// representation noise we are trying to absorb.
 func (s *FFProbeBinaryStream) IsConstantFrameRate() bool {
-	return s.RFrameRate == s.AvgFrameRate
+	r, err := parseFrameRate(s.RFrameRate)
+	if err != nil {
+		// Fail-safe: if we cannot parse the declared rate, assume VFR.
+		return false
+	}
+	avg, err := parseFrameRate(s.AvgFrameRate)
+	if err != nil {
+		return false
+	}
+	const epsilon = 1e-3
+	return math.Abs(r-avg) <= epsilon
 }
 
 // FFProbeBinaryStreamDisposition describes the role and properties of a stream.
