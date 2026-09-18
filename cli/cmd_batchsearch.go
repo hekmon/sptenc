@@ -104,9 +104,11 @@ var batchsearchCommand = &cli.Command{
 		"CANDIDATE DENSITY (--" + maxCandidatesFlagName + ", --" + minDropFlagName + ")\n" +
 		"--" + maxCandidatesFlagName + " sets your absolute budget (default " + strconv.Itoa(maxCandidatesDefault) + "). The algorithm auto-tunes the\n" +
 		"'scene drop' — how many boundaries disappear between two tested thresholds — to fit within it.\n" +
-		"--" + minDropFlagName + " is a floor for that tuning (default " + strconv.Itoa(minDropMinimum) + "). A low mindrop creates candidates that\n" +
-		"are very close together; the file-size differences between them are often small, yet each still\n" +
-		"costs a full encode. Raising the floor skips these diminishing returns and focuses the budget on\n" +
+		"--" + minDropFlagName + " is a floor for that tuning (default " + strconv.Itoa(minDropMinimum) + "). On long content with many\n" +
+		"scenes the auto-tuner naturally exceeds this floor, so it has no effect. It mainly protects\n" +
+		"shorter content (e.g. OVAs, episodes) from over-sampling: a low mindrop creates candidates that\n" +
+		"are very close together, where the file-size differences are often small yet each still costs a\n" +
+		"full encode. Raising the floor skips these diminishing returns and focuses the budget on\n" +
 		"thresholds that are meaningfully different. Lower it only if you suspect the optimum sits between\n" +
 		"two tightly spaced boundaries.\n\n" +
 		"EARLY EXIT (--" + strikesFlagName + ")\n" +
