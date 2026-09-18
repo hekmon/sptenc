@@ -293,7 +293,7 @@ var batchsearchCommand = &cli.Command{
 		/*
 		 * Execute process
 		 */
-		// completeRunStart := time.Now()
+		completeRunStart := time.Now()
 
 		fmt.Fprintf(bypass, "\nStarting batch search encoding of %s (%s) with %s.\n",
 			shellescape.Quote(filepath.Base(inputPath)),
@@ -346,7 +346,7 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Step 2 - Create the master for encoding
-		_, _, _, err = createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
+		masterFile, _, _, err := createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
 		if err != nil {
 			return fmt.Errorf("failed to create the master file: %w", err)
 		}
@@ -384,9 +384,69 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tWill produce %d scenes\n", len(runScenes))
 
 			// Step 3.B - Split scenes
-			time.Sleep(3 * time.Second)
+			fmt.Fprintf(bypass, "Splitting scenes...\n")
+			start = time.Now()
+			if err = liveSplitScenes(ctx, masterFile, candidateWorkdir, totalDuration, runScenes, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to split scenes: %w", err)
+			}
+			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
+				1+len(runScenes), time.Since(start).Round(time.Second),
+			)
+			// Build segment paths directly from known naming convention rather than
+			// scanning the directory, which avoids filesystem ordering issues.
+			segmentsPaths := make([]string, len(runScenes)+1)
+			for i := range segmentsPaths {
+				segmentsPaths[i] = filepath.Join(candidateWorkdir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
+			}
+
+			// Step 3.C - QP search on this candidate scenes
+			_, batch.encoded[batch.currentCandidateIndex], err = processSegments(ctx, segmentsPaths, candidateWorkdir, totalDuration,
+				vmafAuditor, statsCache, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
+				cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
+			if err != nil {
+				return fmt.Errorf("candidate %s: %w", candidateStr, err)
+			}
+
+			// Step 3.D - Ending this candidate
+			var encodedStats os.FileInfo
+			if encodedStats, err = os.Stat(batch.encoded[batch.currentCandidateIndex]); err != nil {
+				return fmt.Errorf("failed to stat encoded file %s of candidate %s: %w",
+					shellescape.Quote(batch.encoded[batch.currentCandidateIndex]), candidateStr, err,
+				)
+			}
+			batch.sizes[batch.currentCandidateIndex] = encodedStats.Size()
+			fmt.Fprintf(bypass, "\nCandidate %s done, weighting %s\n",
+				candidateStr, cunits.ImportInBytes(float64(encodedStats.Size())),
+			)
+			batch.ComputeBest()
+			if batch.bestCandidateIndex != 0 && batch.bestCandidateIndex == batch.currentCandidateIndex {
+				fmt.Fprintf(bypass, "\tNew best found !\n")
+			}
+			// Once the video concatened, delete all segments to free up some disk space for next candidate
+			for _, segmentPath := range segmentsPaths {
+				if err = os.Remove(segmentPath); err != nil {
+					return fmt.Errorf("failed to delete candidate %s segment %s: %w",
+						candidateStr, shellescape.Quote(segmentPath), err,
+					)
+				}
+			}
 		}
 
+		// Step 4 - final encode ? (CPU)
+		if finalEncoder != "" {
+			// TODO
+		}
+
+		// Step 5 - compute final VMAF
+		// TODO
+
+		// Step 6 - remuxing
+		// TODO
+
+		// Step 7 - done
+		// TODO print some stats about candidates, their size and relative size against best candidate
+		fmt.Fprintf(bypass, "\nBatch search ended in %s\n\n", time.Since(completeRunStart).Round(time.Second))
 		return nil
 	},
 }
@@ -395,6 +455,9 @@ type batchStatus struct {
 	candidates            []float64
 	currentCandidateIndex int
 	bestCandidateIndex    int
+	// results
+	encoded []string
+	sizes   []int64
 	// line formating
 	currentCandidateStyle termenv.Style
 	bestCandidateStyle    termenv.Style
@@ -407,6 +470,9 @@ type batchStatus struct {
 }
 
 func (bs *batchStatus) Start() {
+	// Prepare results
+	bs.encoded = make([]string, len(bs.candidates))
+	bs.sizes = make([]int64, len(bs.candidates))
 	// Init styles
 	termenvProfile := liveprogress.GetTermProfile()
 	bs.currentCandidateStyle = termenvProfile.String().Underline()
@@ -434,6 +500,18 @@ func (bs *batchStatus) Start() {
 		}),
 	)
 	bs.separatorLine = liveprogress.AddCustomLine(func() string { return "" })
+}
+
+func (bs *batchStatus) ComputeBest() {
+	for index, size := range bs.sizes {
+		if size == 0 {
+			// candidate not processed yet
+			return
+		}
+		if size < bs.sizes[bs.bestCandidateIndex] {
+			bs.bestCandidateIndex = index
+		}
+	}
 }
 
 func (bs *batchStatus) Stop() {

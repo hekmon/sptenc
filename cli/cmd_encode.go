@@ -351,77 +351,22 @@ var encodeCommand = &cli.Command{
 			return
 		}
 
-		// Step 2 - Encode segments
-		fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
-		lqps := &LiveQPSearch{
-			PrintDebug: cmd.Bool(debugFlagName),
-		}
-		lqps.Start(len(segmentsPaths), totalDuration)
-		start := time.Now()
-		results, err := core.FindAllSegmentsQP(ctx, lqps,
-			core.QPSearchConfig{
-				SegmentsPaths:     segmentsPaths,
-				Auditor:           vmafAuditor,
-				WorkingDir:        workingDir,
-				StatsCache:        statsCache,
-				KeepInvalidQP:     cmd.Bool(debugFlagName),
-				Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
-				NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
-				VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
-				D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
-				VMAFNeg:           cmd.Bool(vmafNegFlagName),
-				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
-			},
-		)
+		// Step 2 - Process segments
+		results, encodedSegmentsMerged, err := processSegments(ctx, segmentsPaths, workingDir, totalDuration,
+			vmafAuditor, statsCache, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
+			cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
 		if err != nil {
-			lqps.Stop()
-			err = fmt.Errorf("Failed to encode segments: %w", err)
+			err = fmt.Errorf("failed to encode segments: %w", err)
 			return
 		}
-		duration := time.Since(start)
-		lqps.Stop()
-		// Print stats
-		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Segments QPs: %+v\n", results.QPs)
-		}
-		minQP, maxQP := results.GetMinMaxQPs()
-		fmt.Fprintf(bypass, "\t***\n\tSegments QP range: [%d,%d]\n", minQP, maxQP)
-		if results.NbBestEfforts > 0 {
-			if results.NbBestEfforts == 1 {
-				fmt.Fprintln(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
-			} else {
-				fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
-					results.NbBestEfforts,
-				)
-			}
-		}
-		segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
-		if err != nil {
-			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
-			err = nil
-		}
-		fmt.Fprintf(bypass, "\tSegment QP mean is %s with a standard deviation of %s.\n",
-			strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
-		)
-		fmt.Fprintf(bypass, "\tWeighted global QP is %s.\n", strconv.FormatFloat(results.GlobalWeightedQP, 'f', -1, 64))
-		fmt.Fprintf(bypass, "\t%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
-			results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
-		)
-		fmt.Fprintf(bypass, "\tAttempts ratio: x%s\n", strconv.FormatFloat(float64(results.TotalNbAttempts)/float64(len(segmentsPaths)), 'f', -1, 64))
-		fmt.Fprintf(bypass, "\tFrames ratio: x%s\n", strconv.FormatFloat(float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames), 'f', -1, 64))
-		fmt.Fprintf(bypass, "\tSegments encoding QP search done in %s.\n", duration.Round(time.Second))
 
-		// Step 3 - merging
-		fmt.Fprintln(bypass, "Merging segments...")
-		encodedSegmentsMerged := filepath.Join(workingDir, "encoded_segments_merged.mkv")
-		start = time.Now()
-		if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
-			err = fmt.Errorf("failed to concat encoded segments: %w", err)
-			return
-		}
-		duration = time.Since(start)
-		fmt.Fprintf(bypass, "\tEncoded segments merged in %s.\n", duration.Round(time.Second))
-		var vmafSource string
+		// Step 3 - Prepare source for VMAF if necessary
+		var (
+			start      time.Time
+			duration   time.Duration
+			vmafSource string
+		)
 		if inputInfos.IsDir() {
 			fmt.Fprintln(bypass, "Merging source segments...")
 			vmafSource = filepath.Join(workingDir, "source_segments_merged.mkv")
@@ -576,6 +521,83 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "Complete split encoding took %s\n", duration.Round(time.Millisecond))
 		return
 	},
+}
+
+// processSegments runs QP search on the given segments and concatenates the encoded results.
+func processSegments(ctx context.Context, segmentsPaths []string, workingDir string, totalDuration time.Duration,
+	vmafAuditor core.VMAFChecker, statsCache *core.StatsCacheHistory, encoder ffmpeg.Encoder, nvidiaGPUIndex int, vaapiRendererPath string,
+	d3d12vaGPUIndex int, vmafNeg, vmafCUDA, debug bool) (results core.QPSearchResults, encodedSegmentsMerged string, err error) {
+	bypass := liveprogress.Bypass()
+	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
+	lqps := &LiveQPSearch{
+		PrintDebug: debug,
+	}
+	lqps.Start(len(segmentsPaths), totalDuration)
+	start := time.Now()
+	results, err = core.FindAllSegmentsQP(ctx, lqps,
+		core.QPSearchConfig{
+			SegmentsPaths:     segmentsPaths,
+			Auditor:           vmafAuditor,
+			WorkingDir:        workingDir,
+			StatsCache:        statsCache,
+			KeepInvalidQP:     debug,
+			Encoder:           encoder,
+			NVIDIAGPUIndex:    nvidiaGPUIndex,
+			VAAPIRendererPath: vaapiRendererPath,
+			D3D12VAGPUIndex:   d3d12vaGPUIndex,
+			VMAFNeg:           vmafNeg,
+			VMAFCUDA:          vmafCUDA,
+		},
+	)
+	if err != nil {
+		lqps.Stop()
+		err = fmt.Errorf("failed to encode segments: %w", err)
+		return
+	}
+	duration := time.Since(start)
+	lqps.Stop()
+	// Print stats
+	if debug {
+		fmt.Fprintf(bypass, "DEBUG: Segments QPs: %+v\n", results.QPs)
+	}
+	minQP, maxQP := results.GetMinMaxQPs()
+	fmt.Fprintf(bypass, "\t***\n\tSegments QP range: [%d,%d]\n", minQP, maxQP)
+	if results.NbBestEfforts > 0 {
+		if results.NbBestEfforts == 1 {
+			fmt.Fprintln(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
+		} else {
+			fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
+				results.NbBestEfforts,
+			)
+		}
+	}
+	segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
+	if err != nil {
+		fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
+		err = nil
+	}
+	fmt.Fprintf(bypass, "\tSegment QP mean is %s with a standard deviation of %s.\n",
+		strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
+	)
+	fmt.Fprintf(bypass, "\tWeighted global QP is %s.\n", strconv.FormatFloat(results.GlobalWeightedQP, 'f', -1, 64))
+	fmt.Fprintf(bypass, "\t%d encoding attempts (for a total of %d encoded frames) were necessary to encode %d segments (containing %d frames) to their optimal QP.\n",
+		results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
+	)
+	fmt.Fprintf(bypass, "\tAttempts ratio: x%s\n", strconv.FormatFloat(float64(results.TotalNbAttempts)/float64(len(segmentsPaths)), 'f', -1, 64))
+	fmt.Fprintf(bypass, "\tFrames ratio: x%s\n", strconv.FormatFloat(float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames), 'f', -1, 64))
+	fmt.Fprintf(bypass, "\tSegments encoding QP search done in %s.\n", duration.Round(time.Second))
+
+	// Merge encoded segments
+	fmt.Fprintln(bypass, "Merging segments...")
+	encodedSegmentsMerged = filepath.Join(workingDir, "encoded_segments_merged.mkv")
+	start = time.Now()
+	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, results.TotalSegmentsFrames, debug); err != nil {
+		err = fmt.Errorf("failed to concat encoded segments: %w", err)
+		return
+	}
+	duration = time.Since(start)
+	fmt.Fprintf(bypass, "\tEncoded segments merged in %s.\n", duration.Round(time.Second))
+	return
 }
 
 const (
