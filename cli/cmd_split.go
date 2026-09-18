@@ -23,7 +23,7 @@ const (
 	masterFlagName          = "master"
 	nvdecFlagName           = "nvdec"
 	vaapiDecFlagName        = "vaapidec"
-	d3d12DecFlagName        = "d3d12dec"
+	d3d12DecFlagName        = "d3d12vadec"
 	videoToolboxDecFlagName = "videotoolboxdec"
 )
 
@@ -129,7 +129,7 @@ var splitCommand = &cli.Command{
 		},
 		&cli.IntFlag{
 			Name:     d3d12vaGPUIndexFlagName,
-			Usage:    "GPU to use with --d3d12dec",
+			Usage:    "GPU to use with --d3d12vadec",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
 			Category: "Hardware accelerated decoding",
@@ -185,7 +185,7 @@ var splitCommand = &cli.Command{
 			hwDecFlags++
 		}
 		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapidec, --d3d12dec, --videotoolboxdec)")
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapidec, --d3d12vadec, --videotoolboxdec)")
 		}
 		return ctx, nil
 	},

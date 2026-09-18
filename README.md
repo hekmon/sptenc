@@ -141,7 +141,7 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 
 > Use `--analyze` with the `split` command to preview detected scenes without splitting. Experiment with `--threshold` (1–100, default 10): higher values detect fewer scenes, lower values detect more.
 >
-> Both `master` and `split` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` to speed up lossless master creation.
+> Both `master` and `split` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12vadec`, or `--videotoolboxdec` to speed up lossless master creation.
 
 ## VMAF
 
@@ -252,7 +252,7 @@ When using a GPU encoder, you can target a specific device:
 | `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
 | `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
 
-> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
+> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12vadec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
 
 ## Adaptive QP Search
 

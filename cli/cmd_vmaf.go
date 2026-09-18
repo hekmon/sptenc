@@ -162,7 +162,7 @@ var vmafCommand = &cli.Command{
 			hwDecFlags++
 		}
 		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapidec, --d3d12dec, --videotoolboxdec)")
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapidec, --d3d12vadec, --videotoolboxdec)")
 		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
