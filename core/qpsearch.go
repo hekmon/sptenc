@@ -288,18 +288,16 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			if bestValid == qpMin {
 				if candidateQP = mean - len(results)*stddev; candidateQP < qpMin {
 					if _, alreadyComputed = results[qpMin]; alreadyComputed {
-						finalQP = qpMin
-						bestEffort = true
-						return
+						// qpMin is already known valid but we have not closed the bracket.
+						// Jump to the opposite extreme to find an invalid bound so that
+						// interpolation can narrow the range instead of giving up.
+						candidateQP = qpMax
+					} else {
+						candidateQP = qpMin
 					}
-					candidateQP = qpMin
 				}
 			} else if firstInvalid == qpMax {
 				if candidateQP = mean + len(results)*stddev; candidateQP > qpMax {
-					if _, alreadyComputed = results[qpMax]; alreadyComputed {
-						finalQP = qpMax
-						return
-					}
 					candidateQP = qpMax
 				}
 			} else {
