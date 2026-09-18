@@ -237,7 +237,7 @@ var splitCommand = &cli.Command{
 					)
 				}
 				defer func() {
-					if err != nil || cmd.Bool(debugFlagName) {
+					if (err != nil && !errors.Is(err, context.Canceled)) || cmd.Bool(debugFlagName) {
 						fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
 							shellescape.Quote(workingDir),
 						)
