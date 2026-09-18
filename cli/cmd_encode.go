@@ -230,7 +230,7 @@ var encodeCommand = &cli.Command{
 		// Create the VMAF auditor
 		vmafAuditor, err := core.NewVMAFChecker(
 			cmd.Float64(vmafMinFlagName), cmd.Float64(vmafP1FlagName), cmd.Float64(vmafP5FlagName), cmd.Float64(vmafP10FlagName),
-			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafHMeanFlagName), cmd.Float64(vmafMeanFlagName))
+			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafMeanFlagName), cmd.Float64(vmafHMeanFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create VMAF auditor: %w", err)
 			return
@@ -752,17 +752,17 @@ func newVMAFFlags() []cli.Flag {
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
-			Name:      vmafHMeanFlagName,
-			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
-			Value:     93,
+			Name:      vmafMeanFlagName,
+			Usage:     "Minimum acceptable VMAF score for mean.",
+			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
-			Name:      vmafMeanFlagName,
-			Usage:     "Minimum acceptable VMAF score for mean.",
-			Value:     core.VMAFOffValue,
+			Name:      vmafHMeanFlagName,
+			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
+			Value:     93,
 			OnlyOnce:  true,
 			Category:  "VMAF",
 			Validator: vmafValueValidator,

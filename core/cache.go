@@ -157,8 +157,8 @@ func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker, cach
 	builder.WriteString(strconv.FormatFloat(profile.p10, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.p25, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.median, 'f', -1, 64))
-	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
 	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
+	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
 	filename := fmt.Sprintf("qphistory_%s_vmaf-%s", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 	if cacheProfile != "" {
 		filename += "_" + base64.RawURLEncoding.EncodeToString([]byte(cacheProfile))

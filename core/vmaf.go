@@ -25,9 +25,9 @@ const (
 // NewVMAFChecker creates a new VMAFChecker with the given thresholds.
 // Each threshold can be set to VMAFOffValue to disable that specific check.
 // Returns an error if all values are off or if any value is out of the valid VMAF range.
-func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc VMAFChecker, err error) {
+func NewVMAFChecker(min, p1, p5, p10, p25, median, mean, hmean float64) (vc VMAFChecker, err error) {
 	if min == VMAFOffValue && p1 == VMAFOffValue && p5 == VMAFOffValue && p10 == VMAFOffValue &&
-		p25 == VMAFOffValue && median == VMAFOffValue && hmean == VMAFOffValue && mean == VMAFOffValue {
+		p25 == VMAFOffValue && median == VMAFOffValue && mean == VMAFOffValue && hmean == VMAFOffValue {
 		err = errors.New("all values are off")
 		return
 	}
@@ -61,16 +61,16 @@ func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc VMAF
 		return
 	}
 	vc.median = median
-	if (hmean < VMAFMinValue || hmean > VMAFMaxValue) && hmean != VMAFOffValue {
-		err = fmt.Errorf("hmean value %f is out of range [%d, %d]", hmean, VMAFMinValue, VMAFMaxValue)
-		return
-	}
-	vc.hmean = hmean
 	if (mean < VMAFMinValue || mean > VMAFMaxValue) && mean != VMAFOffValue {
 		err = fmt.Errorf("mean value %f is out of range [%d, %d]", mean, VMAFMinValue, VMAFMaxValue)
 		return
 	}
 	vc.mean = mean
+	if (hmean < VMAFMinValue || hmean > VMAFMaxValue) && hmean != VMAFOffValue {
+		err = fmt.Errorf("hmean value %f is out of range [%d, %d]", hmean, VMAFMinValue, VMAFMaxValue)
+		return
+	}
+	vc.hmean = hmean
 	return
 }
 
@@ -82,8 +82,8 @@ type VMAFChecker struct {
 	p10    float64
 	p25    float64
 	median float64
-	hmean  float64
 	mean   float64
+	hmean  float64
 }
 
 // Validate checks whether the provided VMAFStats meet all configured thresholds.
@@ -107,10 +107,10 @@ func (vc VMAFChecker) Validate(stats ffmpeg.VMAFStats) bool {
 	if vc.median != VMAFOffValue && stats.Median < vc.median {
 		return false
 	}
-	if vc.hmean != VMAFOffValue && stats.HarmonicMean < vc.hmean {
+	if vc.mean != VMAFOffValue && stats.Mean < vc.mean {
 		return false
 	}
-	if vc.mean != VMAFOffValue && stats.Mean < vc.mean {
+	if vc.hmean != VMAFOffValue && stats.HarmonicMean < vc.hmean {
 		return false
 	}
 	return true
@@ -139,10 +139,10 @@ func (vc VMAFChecker) String() string {
 	if vc.median != VMAFOffValue {
 		alignments = append(alignments, tw.AlignCenter)
 	}
-	if vc.hmean != VMAFOffValue {
+	if vc.mean != VMAFOffValue {
 		alignments = append(alignments, tw.AlignCenter)
 	}
-	if vc.mean != VMAFOffValue {
+	if vc.hmean != VMAFOffValue {
 		alignments = append(alignments, tw.AlignCenter)
 	}
 	// Create table with custom symbols and alignment
@@ -185,11 +185,11 @@ func (vc VMAFChecker) String() string {
 	if vc.median != VMAFOffValue {
 		headers = append(headers, "Median")
 	}
-	if vc.hmean != VMAFOffValue {
-		headers = append(headers, "Harmonic Mean")
-	}
 	if vc.mean != VMAFOffValue {
 		headers = append(headers, "Mean")
+	}
+	if vc.hmean != VMAFOffValue {
+		headers = append(headers, "Harmonic Mean")
 	}
 	table.Header(headers)
 	// body
@@ -212,11 +212,11 @@ func (vc VMAFChecker) String() string {
 	if vc.median != VMAFOffValue {
 		body = append(body, strconv.FormatFloat(vc.median, 'f', -1, 64))
 	}
-	if vc.hmean != VMAFOffValue {
-		body = append(body, strconv.FormatFloat(vc.hmean, 'f', -1, 64))
-	}
 	if vc.mean != VMAFOffValue {
 		body = append(body, strconv.FormatFloat(vc.mean, 'f', -1, 64))
+	}
+	if vc.hmean != VMAFOffValue {
+		body = append(body, strconv.FormatFloat(vc.hmean, 'f', -1, 64))
 	}
 	table.Append(body)
 	// Build table
