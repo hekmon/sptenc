@@ -12,6 +12,29 @@ This approach produces the smallest possible file without compromising the targe
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding, and the VMAF perceptual quality models that power it.
 
+## Key Features
+
+- 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
+- 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
+- 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
+- 🔍 **4 VMAF models, auto-selected** - Automatically uses 1080p or 4K model based on input resolution; add `--vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
+- 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
+- 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
+- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
+- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmafcuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
+- 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
+- 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
+- 🔬 **Automatic threshold search** - `batchsearch` tests multiple scene detection thresholds to find the one that produces the smallest file while still meeting your VMAF targets
+
+## How It Works
+
+1. **Scene detection** - For a single input file, a lossless FFV1 master is created first so every frame is self-contained and can be cut precisely at any point. The master is then analyzed with FFmpeg `scdet` to find scene boundaries, producing semantically coherent segments for consistent per-segment VMAF scoring.
+2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `svtav1`).
+3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
+4. **Adaptive QP search** - sptenc maintains a QP statistics database per encoder and VMAF profile across runs (see below). This significantly accelerates convergence on subsequent runs.
+5. **Best effort** - If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
+6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
+
 ## Commands
 
 sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed usage of each.
@@ -24,38 +47,6 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
 | `batchsearch` | `bs` | Advanced | Automatically search for the optimal scene detection threshold by encoding multiple candidates |
-
-Global flags (available on all commands):
-
-| Flag | Short | Default | Description |
-|---|---|---|---|
-| `--debug` | `-d` | `false` | Print debug logs and preserve temporary directories |
-| `--ffmpegpath` | | `ffmpeg` | Path to the ffmpeg binary |
-| `--ffprobepath` | | `ffprobe` | Path to the ffprobe binary |
-| `--mkvpropeditpath` | | `mkvpropedit` | Path to the mkvpropedit binary |
-
-## How It Works
-
-1. **Scene detection** - For a single input file, a lossless FFV1 master is created first so every frame is self-contained and can be cut precisely at any point. The master is then analyzed with FFmpeg `scdet` to find scene boundaries, producing semantically coherent segments for consistent per-segment VMAF scoring.
-2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `svtav1`).
-3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
-4. **Adaptive QP search** - sptenc maintains a QP statistics database per encoder and VMAF profile across runs (see below). This significantly accelerates convergence on subsequent runs.
-5. **Best effort** - If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
-6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
-
-## Key Features
-
-- 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
-- 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
-- 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
-- 🔍 **4 VMAF models, auto-selected** - Automatically uses 1080p or 4K model based on input resolution; add `--vmafneg` for NEG variants (recommended for upscaled/denoised/sharpened sources)
-- 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
-- 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
-- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`libaom-av1`, `svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
-- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmafcuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
-- 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
-- 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
-- 🔬 **Automatic threshold search** - `batchsearch` tests multiple scene detection thresholds to find the one that produces the smallest file while still meeting your VMAF targets
 
 ## Input Requirements
 
@@ -138,13 +129,12 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `hevc_nvenc` | HEVC | NVIDIA GPU | All (NVIDIA GPU required) |
 | `hevc_vaapi` | HEVC | VAAPI GPU | Linux |
 | `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
-| `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS |
-| `libaom-av1` | AV1 | CPU | All |
+| `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS (Apple Silicon) |
 | `svtav1` | AV1 | CPU | All |
 | `av1_nvenc` | AV1 | NVIDIA GPU | All |
 | `av1_vaapi` | AV1 | VAAPI GPU | Linux |
 
-> **Tip:** `svtav1` is preferred over `libaom-av1` for speed when using CPU AV1 encoding. Run `sptenc verify` to see which encoders your ffmpeg build supports.
+> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `svtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc verify` to see which encoders your ffmpeg build supports.
 
 ### Encoder selection vs file size
 
@@ -165,22 +155,6 @@ When using a GPU encoder, you can target a specific device:
 | `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
 
 > These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
-
-### Base ffmpeg encode options
-
-Under the hood, here are the base ffmpeg encoding options used by sptenc.
-
-#### libx265
-
-```bash
-ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset 'slow' -qp 'X' -x265-params 'aq-mode=3' [...]
-```
-
-#### NVENC
-
-```bash
-ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial_aq 1 -temporal_aq 1 [...]
-```
 
 ## VMAF
 
@@ -287,6 +261,54 @@ Because a given VMAF target can require very different QP distributions dependin
 | `--statscachedir` | `-s` | OS cache dir (`~/.cache/sptenc` or equivalent) | Directory where QP statistics are stored |
 | `--cacheprofile` | `-c` | *(none)* | Isolate cache history between content types |
 
+## Base ffmpeg encode options
+
+Under the hood, here are the base ffmpeg encoding options used by sptenc. `X` is the QP value being tested for the current segment.
+
+### HEVC
+
+**libx265**
+```bash
+ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset 'slow' -qp 'X' -x265-params 'aq-mode=3' [...]
+```
+
+**hevc_nvenc**
+```bash
+ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial_aq 1 -temporal_aq 1 [...]
+```
+
+**hevc_vaapi**
+```bash
+ffmpeg [...] -c:v 'hevc_vaapi' -profile:v 'main10' -rc_mode 'CQP' -qp 'X' [...]
+```
+
+**hevc_d3d12va**
+```bash
+ffmpeg [...] -c:v 'hevc_d3d12va' -profile:v 'main10' -rc_mode 'CQP' -qp 'X' [...]
+```
+
+**hevc_videotoolbox**
+```bash
+ffmpeg [...] -c:v 'hevc_videotoolbox' -profile:v 'main10' -q:v 'X' [...]
+```
+
+### AV1
+
+**svtav1**
+```bash
+ffmpeg [...] -c:v 'libsvtav1' -pix_fmt 'yuv420p10le' -preset '6' -qp 'X' [...]
+```
+
+**av1_nvenc**
+```bash
+ffmpeg [...] -c:v 'av1_nvenc' -preset 'p4' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial_aq 1 -temporal_aq 1 [...]
+```
+
+**av1_vaapi**
+```bash
+ffmpeg [...] -c:v 'av1_vaapi' -profile:v 'main' -rc_mode 'CQP' -global_quality 'X' [...]
+```
+
 ## Output
 
 The final output file is named:
@@ -313,7 +335,7 @@ The output file contains the following metadata tags on the video stream:
 
 ## Installation
 
-Build from source (Go 1.23+ required):
+Build from source:
 
 ```bash
 git clone https://github.com/hekmon/sptenc.git
