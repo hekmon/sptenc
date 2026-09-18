@@ -12,6 +12,19 @@ This approach produces the smallest possible file without compromising the targe
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding, and the VMAF perceptual quality models that power it. This project is built for power users encoding on their own hardware, not for streaming-scale infrastructure.
 
+## Who is this for?
+
+You probably don't need sptenc if you just want to quickly shrink a video for your phone. Standard tools like HandBrake or ffmpeg with CRF are faster and perfectly fine for that.
+
+sptenc is built for workflows where you want the **smallest file size that still meets a provable quality floor**:
+
+- **Archival & preservation** — You have a high-bitrate source or lossless master (or an expensive AI-upscaled restoration) and want to compress it without ever dropping below a perceptual quality floor you can prove.
+- **Quality-per-bit optimization** — You target specific visual fidelity at the smallest possible size and currently do manual CRF sweeps, screenshot comparisons, or test encodes to find the right settings. sptenc automates that search and produces a VMAF report proving the result.
+- **Large collection processing** — You process many files against a single, carefully tuned quality profile. sptenc treats that profile as a contract: every segment is encoded, measured, and corrected until it passes, with no manual verification required.
+- **NAS / media server optimization** — You maintain a personal library of high-bitrate remuxes and need to balance quality against storage costs. sptenc replaces manual CRF trial-and-error with a measurable guarantee, so you keep the quality that matters and reclaim the space that doesn't.
+
+If you already know why CRF averages can hide bad frames, sptenc closes the loop: encode, measure, correct, converge.
+
 ## Key Features
 
 - 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
