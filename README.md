@@ -1,4 +1,4 @@
-# sptenc - Split Encoder
+# Split Encoder
 
 `sptenc` (Split Encoder) is a scene-aware, [VMAF](https://github.com/Netflix/vmaf)-driven video transcoder.
 
@@ -28,11 +28,11 @@ This approach produces the smallest possible file without compromising the targe
 
 ## How It Works
 
-1. **Scene detection** - For a single input file, a lossless FFV1 master is created first so every frame is self-contained and can be cut precisely at any point. The master is then analyzed with FFmpeg `scdet` to find scene boundaries, producing semantically coherent segments for consistent per-segment VMAF scoring.
+1. **Scene detection** - FFmpeg `scdet` analyzes the video to find scene boundaries, producing semantically coherent segments. For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so splits can happen at any frame without quality loss or dropped frames.
 2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `svtav1`).
 3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
-4. **Adaptive QP search** - sptenc maintains a QP statistics database per encoder and VMAF profile across runs (see below). This significantly accelerates convergence on subsequent runs.
-5. **Best effort** - If QP=0 is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
+4. **Adaptive QP search** - Each segment starts from a smart QP estimate, brackets the valid range with stepped probes, then uses interpolation to converge on the highest valid QP (smallest file) in just a few attempts. Persistent stats from previous runs further accelerate this (see below).
+5. **Best effort** - If the encoder's minimum QP is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
 6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
 
 ## Commands
@@ -119,43 +119,6 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 >
 > Both `master` and `split` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` to speed up lossless master creation.
 
-## Encoders
-
-sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`) selects which one to use.
-
-| Encoder | Codec | Type | Platforms |
-|---|---|---|---|
-| `libx265` | HEVC | CPU | All |
-| `hevc_nvenc` | HEVC | NVIDIA GPU | All (NVIDIA GPU required) |
-| `hevc_vaapi` | HEVC | VAAPI GPU | Linux |
-| `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
-| `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS (Apple Silicon) |
-| `svtav1` | AV1 | CPU | All |
-| `av1_nvenc` | AV1 | NVIDIA GPU | All |
-| `av1_vaapi` | AV1 | VAAPI GPU | Linux |
-
-> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `svtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc verify` to see which encoders your ffmpeg build supports.
-
-### Encoder selection vs file size
-
-| | CPU encoders (`libx265`, `svtav1`) | GPU encoders (`*_nvenc`, `*_vaapi`) |
-|---|---|---|
-| Output file size | ✅ Optimal | ❌ ~1.5–2× larger |
-| Speed | Slower | ✅ Much faster |
-| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search |
-
-### GPU selection flags
-
-When using a GPU encoder, you can target a specific device:
-
-| Flag | Default | Used with |
-|---|---|---|
-| `--nvidiagpuindex` | `0` | `hevc_nvenc`, `av1_nvenc` |
-| `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
-| `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
-
-> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
-
 ## VMAF
 
 ### Models
@@ -228,29 +191,67 @@ Consequences used everywhere below:
 
 > **93 vs 95?** The 93 target comes from a RealNetworks white paper showing it delivers content that is *"indistinguishable from original or with noticeable but not annoying distortion"* for most viewers ([StreamingLearningCenter — analysis](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html)). The 95 target, from a more recent paper, is the lowest score at which content is *"on average subjectively indistinguishable from the original"* — a higher bar that costs ~1400 kbps extra at the top rung. With `--vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
 
+## Encoders
+
+sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`) selects which one to use.
+
+| Encoder | Codec | Type | Platforms |
+|---|---|---|---|
+| `libx265` | HEVC | CPU | All |
+| `hevc_nvenc` | HEVC | NVIDIA GPU | All (NVIDIA GPU required) |
+| `hevc_vaapi` | HEVC | VAAPI GPU | Linux |
+| `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
+| `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS (Apple Silicon) |
+| `svtav1` | AV1 | CPU | All |
+| `av1_nvenc` | AV1 | NVIDIA GPU | All |
+| `av1_vaapi` | AV1 | VAAPI GPU | Linux |
+
+> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `svtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc verify` to see which encoders your ffmpeg build supports.
+
+### Encoder selection vs file size
+
+| | CPU encoders (`libx265`, `svtav1`) | GPU encoders (`*_nvenc`, `*_vaapi`) |
+|---|---|---|
+| Output file size | ✅ Optimal | ❌ ~1.5–2× larger |
+| Speed | Slower | ✅ Much faster |
+| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search |
+
+### GPU selection flags
+
+When using a GPU encoder, you can target a specific device:
+
+| Flag | Default | Used with |
+|---|---|---|
+| `--nvidiagpuindex` | `0` | `hevc_nvenc`, `av1_nvenc` |
+| `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
+| `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
+
+> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master` or `split`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
+
 ## Adaptive QP Search
 
-One of sptenc's core performance features. After each complete encode job finishes (all segments processed), sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments.
+sptenc's per-segment QP search uses a 3-step algorithm that converges on the highest valid QP (smallest file) efficiently, even on the first run:
 
-This results in significantly fewer encode iterations and improved encode time. Here are some examples:
+1. **Smart start** — The first candidate is the weighted mean QP from previous runs. On a cold start, it falls back to the midpoint of the encoder's QP range (e.g. QP 26 for libx265's 0–51 range).
+2. **Bracketing** — Steps from the starting point in increment-sized steps to find one valid QP (passes VMAF) and one invalid QP (fails VMAF), closing the search range around the boundary. With cached stats the step size is the observed standard deviation; on a cold start it falls back to half the QP range midpoint.
+3. **Interpolation** — Once bracketed, **Fritsch-Butland monotone cubic interpolation** predicts the optimal candidate within the range, walking toward the highest valid QP without blind probing.
 
-| Encode job | Without stats | With stats |
+This typically requires only 3–5 encode attempts per segment, compared to a brute-force search that could probe dozens of QP values.
+
+### Persistent stats from previous runs
+
+After each encode job finishes, sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments. This further accelerates convergence on subsequent runs:
+
+| Encode job | Cold start | With cached stats |
 |---|---|---|
 | Small episode | ~7h30 | ~4h |
 | Film | ~85h | ~60h |
 
-The stats files are **profile-specific**: changing the encoder or any VMAF threshold value will change the file name and start a fresh learning curve for this new combination.
+The cache provides:
+- **Mean QP** — a better-informed starting point than the encoder midpoint
+- **Standard deviation** — a tuned step size for bracketing, rather than a heuristic fraction of the range
 
-### Persistent Stats from Previous Runs
-
-QP statistics are persisted across runs and used to accelerate future encodes with the same encoder and VMAF profile:
-
-- **Mean QP** - used as the starting point for the QP search on the next encode, avoiding blind starts from an arbitrary default
-- **Standard deviation** - used as the QP search increment when exploring QP values outside the already-observed range
-
-### Interpolation Within Already Observed Range
-
-When the next QP to test falls **inside the already-observed range** (e.g., QP 19 and QP 23 have been computed and QP 19 is ok but QP 23 is not, the next candidate will be somewhere between them), sptenc uses **Fritsch-Butland monotone cubic interpolation** on N dimensions (one per active VMAF metric) to predict the next QP candidate, rather than probing blindly.
+The stats files are **profile-specific**: changing the encoder or any VMAF threshold value starts a fresh learning curve.
 
 ### Cache isolation with profiles
 
@@ -263,7 +264,13 @@ Because a given VMAF target can require very different QP distributions dependin
 
 ## Base ffmpeg encode options
 
-Under the hood, here are the base ffmpeg encoding options used by sptenc. `X` is the QP value being tested for the current segment.
+These are the opinionated defaults sptenc passes to ffmpeg. They are intentionally not configurable: the goal is to let you tune **VMAF thresholds** and **scene detection**, not encoder minutiae. If you need full control over every ffmpeg flag, ffmpeg itself is the right tool.
+
+The defaults are selected for a single goal: **guaranteed perceptual quality at the smallest possible file size**. Every option is chosen with that trade-off in mind.
+
+> **10-bit output is mandatory.** All encoders target `yuv420p10le` (`main10` for HEVC, `main` for AV1 which includes 10-bit). 10-bit greatly reduces banding and improves compression efficiency at low bitrates — it is the modern baseline for quality encoding.
+
+Under the hood, here are the base options used by sptenc. `X` is the QP value being tested for the current segment.
 
 ### HEVC
 
