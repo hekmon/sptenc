@@ -43,7 +43,9 @@ func GenerateConcatList(dir string, files []string) (scriptPath ConcatListPath, 
 	}
 	// Write files' path
 	for _, file := range files {
-		if _, err = fmt.Fprintf(script, "file '%s'\n", strings.ReplaceAll(file, "'", "\\'")); err != nil {
+		escapedPath := strings.ReplaceAll(file, `\`, `\\`)
+		escapedPath = strings.ReplaceAll(escapedPath, `'`, `\'`)
+		if _, err = fmt.Fprintf(script, "file '%s'\n", escapedPath); err != nil {
 			err = fmt.Errorf("failed to write the file: %w", err)
 			return
 		}

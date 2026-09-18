@@ -13,5 +13,8 @@ var (
 
 func adaptVMAFPath(path string) string {
 	// https://github.com/Netflix/vmaf/blob/master/resource/doc/ffmpeg.md#note-about-the-model-path-on-windows
-	return strings.ReplaceAll(strings.ReplaceAll(path, `\`, "/"), ":/", `\\:/`)
+	path = strings.ReplaceAll(path, `\`, "/")
+	path = strings.ReplaceAll(path, ":/", `\\:/`)
+	path = strings.ReplaceAll(path, " ", `\ `)
+	return path
 }
