@@ -13,25 +13,30 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/hekmon/sptenc/ffmpeg"
-
 	"gonum.org/v1/gonum/stat"
 )
 
 // NewStatsCacheHistory initializes a stats cache for the given encoder, VMAF profile,
 // and optional user-provided cache profile. It loads any existing cache from disk or
 // starts with an empty history.
-func NewStatsCacheHistory(dir string, encoder ffmpeg.Encoder, profile VMAFChecker, cacheProfile string) (sch *StatsCacheHistory, err error) {
-	sch = &StatsCacheHistory{
-		path: filepath.Join(dir, computeCacheStatsFileName(encoder, profile, cacheProfile)),
-	}
-	var found bool
-	if sch.qpMin, sch.qpMax, found = ffmpeg.GetEncoderQPRange(encoder); !found {
-		err = fmt.Errorf("unsupported encoder %s", encoder)
+func NewStatsCacheHistory(dir string, encoder SegmentEncoder, profile VMAFChecker, cacheProfile string) (sch *StatsCacheHistory, err error) {
+	qpMin, qpMax, found := encoder.QPRange()
+	if !found {
+		err = fmt.Errorf("unsupported encoder %s", encoder.Name())
 		return
+	}
+	sch = &StatsCacheHistory{
+		path:  filepath.Join(dir, computeCacheStatsFileName(encoder.Name(), profile, cacheProfile)),
+		qpMin: qpMin,
+		qpMax: qpMax,
 	}
 	err = sch.loadStats()
 	return
+}
+
+// StatsCache provides statistical guidance for the QP search start point.
+type StatsCache interface {
+	GetMeanStdDev() (mean, stddev int)
 }
 
 // StatsCacheHistory persists and aggregates QP statistics across encoding runs
@@ -152,7 +157,7 @@ func (sch *StatsCacheHistory) saveStats() error {
 	return enc.Encode(sch.stats)
 }
 
-func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker, cacheProfile string) string {
+func computeCacheStatsFileName(encoderName string, profile VMAFChecker, cacheProfile string) string {
 	var builder bytes.Buffer
 	builder.WriteString(strconv.FormatFloat(profile.min, 'f', -1, 64))
 	builder.WriteString("|")
@@ -169,7 +174,7 @@ func computeCacheStatsFileName(encoder ffmpeg.Encoder, profile VMAFChecker, cach
 	builder.WriteString(strconv.FormatFloat(profile.mean, 'f', -1, 64))
 	builder.WriteString("|")
 	builder.WriteString(strconv.FormatFloat(profile.hmean, 'f', -1, 64))
-	filename := fmt.Sprintf("qphistory_%s_vmaf-%s", encoder, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
+	filename := fmt.Sprintf("qphistory_%s_vmaf-%s", encoderName, base64.RawURLEncoding.EncodeToString(builder.Bytes()))
 	if cacheProfile != "" {
 		filename += "_" + base64.RawURLEncoding.EncodeToString([]byte(cacheProfile))
 	}

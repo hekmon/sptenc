@@ -7,15 +7,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/hekmon/sptenc/ffmpeg"
-
 	"al.essio.dev/pkg/shellescape"
 )
 
 const (
 	segEncodedOutputFormat = "seg_%06d_qp%03d.mkv"
-	libx265Preset          = ffmpeg.Libx265PresetSlow
-	nvEncPreset            = ffmpeg.NVEncPresetP7
 )
 
 // Logger emits debug, warning, and error output during QP search.
@@ -38,10 +34,10 @@ type ProgressReporter interface {
 	OnSegmentAnalysisProgress(read int64) // not total, additional
 	OnSegmentAnalysisStop()
 	OnSegmentEncodeStart(totalFrames int)
-	OnSegmentEncodeProgress(stats ffmpeg.ProgressStats)
+	OnSegmentEncodeProgress(stats ProgressStats)
 	OnSegmentEncodeStop()
 	OnSegmentVMAFStart(totalFrames int)
-	OnSegmentVMAFProgress(stats ffmpeg.ProgressStats)
+	OnSegmentVMAFProgress(stats ProgressStats)
 	OnSegmentVMAFStop()
 }
 
@@ -63,29 +59,12 @@ type QPSearchConfig struct {
 	// WorkingDir is the directory where temporary encoded segments and VMAF reports are written during the search.
 	WorkingDir string
 	// StatsCache holds previous QP search statistics to guide and accelerate the search.
-	StatsCache *StatsCacheHistory
+	StatsCache StatsCache
 	// KeepInvalidQP, if true, retains encoded segments with non-selected QPs instead of deleting them.
 	KeepInvalidQP bool
 
-	// Encoder is the FFmpeg encoder to use for test encodes.
-	Encoder ffmpeg.Encoder
-	// NVIDIAGPUIndex is the CUDA device index to use for NVIDIA NVENC encoding.
-	// If unset, it defaults to 0.
-	NVIDIAGPUIndex int
-	// VAAPIRendererPath is the DRM render node path to use for VA-API encoding.
-	// If unset, it defaults to "/dev/dri/renderD128".
-	VAAPIRendererPath string
-	// D3D12VAGPUIndex is the Direct3D 12 adapter index to use for D3D12VA encoding.
-	// If unset, it defaults to 0.
-	D3D12VAGPUIndex int
-
-	// VMAFNeg, if true, uses VMAF NEG (No Enhancement Gain) models.
-	// Recommended when the source has undergone upscaling, sharpening, or denoising,
-	// as these can artificially inflate standard VMAF scores.
-	VMAFNeg bool
-	// VMAFCUDA, if true, enables CUDA acceleration for VMAF computation.
-	// This requires libvmaf to have been compiled with CUDA support.
-	VMAFCUDA bool
+	// Encoder abstracts the concrete backend used for test encodes and VMAF computation.
+	Encoder SegmentEncoder
 }
 
 // QPSearchResults holds the outcome of a QP search across all segments.
@@ -176,13 +155,12 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	finalQP, segmentFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
 	scb.Debug("Segment %d: Search for the right QP", segment)
 	// Prepare
-	segmentInfos, err := getStreamsInfosCF(ctx, scb, segmentPath)
+	videoTrack, err := getStreamsInfosCF(ctx, scb, config, segmentPath)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
 	}
-	duration = segmentInfos.Format.Duration
-	videoTrack := segmentInfos.VideoTrack()
+	duration = videoTrack.Duration
 	// Abort if frame count is 0 or negative
 	totalFrames := videoTrack.NbReadFrames
 	if totalFrames <= 0 {
@@ -201,13 +179,13 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 			return
 		}
 		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, finalQP))
-		var finalSegmentInfos ffmpeg.FFProbeStats
-		if finalSegmentInfos, err = getStreamsInfosCF(ctx, scb, finalQPSegmentPath); err != nil {
+		var finalStream VideoStream
+		if finalStream, err = getStreamsInfosCF(ctx, scb, config, finalQPSegmentPath); err != nil {
 			// make findSegmentQP return an error
 			err = fmt.Errorf("failed to get streams infos of final segment: %w", err)
 			return
 		}
-		if segmentFrames = finalSegmentInfos.VideoTrack().NbReadFrames; segmentFrames != totalFrames {
+		if segmentFrames = finalStream.NbReadFrames; segmentFrames != totalFrames {
 			// make findSegmentQP return an error
 			err = fmt.Errorf("final segment has %d frames instead of %d", segmentFrames, totalFrames)
 			return
@@ -240,8 +218,8 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	return
 }
 
-func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath string) (
-	stats ffmpeg.FFProbeStats, err error) {
+func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, filePath string) (
+	stream VideoStream, err error) {
 	// Recover size
 	fileInfos, err := os.Stat(filePath)
 	if err != nil {
@@ -252,20 +230,11 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 	scb.OnSegmentAnalysisStart(fileInfos.Size())
 	defer scb.OnSegmentAnalysisStop()
 	// Start analysis
-	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
-		GetStreamsInfosConfig: ffmpeg.GetStreamsInfosConfig{
-			// Input
-			Path: filePath,
-			// Reporting
-			Debug: func(s string) {
-				scb.Debug(s)
-			},
-			RuntimeError: scb.Error,
-		},
-		ReadBytesReport: func(bytesRead int) {
-			scb.OnSegmentAnalysisProgress(int64(bytesRead))
-		},
-	})
+	return config.Encoder.ProbeStream(ctx, filePath, func(bytesRead int64) {
+		scb.OnSegmentAnalysisProgress(bytesRead)
+	}, func(s string) {
+		scb.Debug(s)
+	}, scb.Error)
 }
 
 // searchSegmentQP finds the highest valid QP (smallest file) for a segment.
@@ -278,16 +247,16 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, filePath stri
 // This has held across 2+ years of production encoding; non-monotonic edge cases
 // have not been observed in practice.
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	segment int, segmentPath string, videoTrack *ffmpeg.FFProbeBinaryStream) (
+	segment int, segmentPath string, videoTrack VideoStream) (
 	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, err error) {
 	// Keep track of tested QPs
-	qpMin, qpMax, found := ffmpeg.GetEncoderQPRange(config.Encoder)
+	qpMin, qpMax, found := config.Encoder.QPRange()
 	if !found {
-		err = fmt.Errorf("failed to get QP range for encoder %s", config.Encoder)
+		err = fmt.Errorf("failed to get QP range for encoder %s", config.Encoder.Name())
 		return
 	}
 	testedQPs = make([]int, 0, qpMax-qpMin+1) // ordered
-	results := make(map[int]ffmpeg.VMAFStats, qpMax-qpMin+1)
+	results := make(map[int]VMAFStats, qpMax-qpMin+1)
 	defer func() {
 		scb.Debug("QPs tested: %+v", testedQPs)
 	}()
@@ -295,7 +264,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	var (
 		candidateQP                                          int
 		alreadyComputed, bestValidTested, firstInvalidTested bool
-		vmafStats                                            ffmpeg.VMAFStats
+		vmafStats                                            VMAFStats
 	)
 	bestValid := qpMin
 	firstInvalid := qpMax
@@ -432,7 +401,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 }
 
 func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
-	bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]ffmpeg.VMAFStats) (
+	bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]VMAFStats) (
 	candidateQP int, err error) {
 	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, scb.Debug)
 	if err != nil {
@@ -443,7 +412,7 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	// Prefer real results; predict only when missing.
 	// Return the first candidate that validates.
 	var (
-		candidateResults ffmpeg.VMAFStats
+		candidateResults VMAFStats
 		exists           bool
 	)
 	for candidateQP = firstInvalid; candidateQP > bestValid; candidateQP-- {
@@ -463,171 +432,29 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 }
 
 func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	input string, segment, qp int, videoTrack *ffmpeg.FFProbeBinaryStream) (
-	vmafStats ffmpeg.VMAFStats, err error) {
+	input string, segment, qp int, videoTrack VideoStream) (
+	vmafStats VMAFStats, err error) {
 	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	// Encode
-	if err = segmentQPEncode(ctx, scb, config, input, output, qp, videoTrack); err != nil {
-		err = fmt.Errorf("failed to encode segment: %w", err)
+	scb.OnSegmentEncodeStart(videoTrack.NbReadFrames)
+	encodeErr := config.Encoder.Encode(ctx, input, output, qp, videoTrack, scb.OnSegmentEncodeProgress, func(msg string) {
+		scb.Debug(msg)
+	}, scb.Error)
+	scb.OnSegmentEncodeStop()
+	if encodeErr != nil {
+		err = fmt.Errorf("failed to encode segment: %w", encodeErr)
 		return
 	}
 	// Compute VMAF
-	vmafReport, err := segmentVMAF(ctx, scb, config, input, output, videoTrack)
-	if err != nil {
-		err = fmt.Errorf("failed to compute VMAF for segment: %w", err)
+	scb.OnSegmentVMAFStart(videoTrack.NbReadFrames)
+	vmafStats, vmafErr := config.Encoder.ComputeVMAF(ctx, input, output, videoTrack, scb.OnSegmentVMAFProgress, func(msg string) {
+		scb.Debug(msg)
+	}, scb.Error)
+	scb.OnSegmentVMAFStop()
+	if vmafErr != nil {
+		err = fmt.Errorf("failed to compute VMAF for segment: %w", vmafErr)
 		return
 	}
-	vmafStats = vmafReport.GetStats()
 	scb.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
 	return
-}
-
-func segmentQPEncode(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	input, output string, qp int, videoTrack *ffmpeg.FFProbeBinaryStream) (err error) {
-	// Signal start & stop
-	scb.OnSegmentEncodeStart(videoTrack.NbReadFrames)
-	defer scb.OnSegmentEncodeStop()
-	// Execute the requested encoder
-	start := time.Now()
-	switch config.Encoder {
-	// HEVC
-	case ffmpeg.HEVCEncoderLibx265:
-		err = ffmpeg.HEVCLibx265EncodeQP(ctx, ffmpeg.HEVCLibx265EncodeQPConfig{
-			Input:        input,
-			Preset:       libx265Preset,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.HEVCEncoderNVEnc:
-		err = ffmpeg.HEVCNVEncEncodeQP(ctx, ffmpeg.HEVCNVEncEncodeQPConfig{
-			Input:        input,
-			Device:       config.NVIDIAGPUIndex,
-			Preset:       nvEncPreset,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.HEVCEncoderVAAPI:
-		err = ffmpeg.HEVCVAAPIEncodeQP(ctx, ffmpeg.HEVCVAAPIEncodeQPConfig{
-			Input:        input,
-			Device:       config.VAAPIRendererPath,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.HEVCEncoderD3D12VA:
-		err = ffmpeg.HEVCD3D12VAEncodeQP(ctx, ffmpeg.HEVCD3D12VAEncodeQPConfig{
-			Input:        input,
-			Device:       config.D3D12VAGPUIndex,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.HEVCEncoderVideoToolbox:
-		err = ffmpeg.HEVCVideoToolboxEncodeQP(ctx, ffmpeg.HEVCVideoToolboxEncodeQPConfig{
-			Input:        input,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	// AV1
-	case ffmpeg.AV1EncoderLibaom:
-		err = ffmpeg.AV1LibaomEncodeQP(ctx, ffmpeg.AV1LibaomEncodeQPConfig{
-			Input:        input,
-			CPUUsed:      ffmpeg.AV1LibaomCPUUsedDefault,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.AV1EncoderSVTAV1:
-		err = ffmpeg.AV1SVTAV1EncodeQP(ctx, ffmpeg.AV1SVTAV1EncodeQPConfig{
-			Input:        input,
-			Preset:       ffmpeg.AV1SVTAV1PresetDefault,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.AV1EncoderNVEnc:
-		err = ffmpeg.AV1NVEncEncodeQP(ctx, ffmpeg.AV1NVEncEncodeQPConfig{
-			Input:        input,
-			Device:       config.NVIDIAGPUIndex,
-			Preset:       nvEncPreset,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	case ffmpeg.AV1EncoderVAAPI:
-		err = ffmpeg.AV1VAAPIEncodeQP(ctx, ffmpeg.AV1VAAPIEncodeQPConfig{
-			Input:        input,
-			Device:       config.VAAPIRendererPath,
-			Quantization: qp,
-			Output:       output,
-			Debug: func(msg string) {
-				scb.Debug(msg)
-			},
-			RuntimeError:      scb.Error,
-			FFMPEGStatsReport: scb.OnSegmentEncodeProgress,
-		})
-	default:
-		return fmt.Errorf("unsupported encoder: %q", string(config.Encoder))
-	}
-	// Done
-	if err == nil {
-		scb.Debug("Segment encoded in %s", time.Since(start).Round(time.Second))
-	}
-	return
-}
-
-func segmentVMAF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	segmentOriginal, segmentEncoded string, videoTrack *ffmpeg.FFProbeBinaryStream) (stats ffmpeg.VMAFReport, err error) {
-	scb.OnSegmentVMAFStart(videoTrack.NbReadFrames)
-	defer scb.OnSegmentVMAFStop()
-	return ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
-		ReferencePath:     segmentOriginal,
-		DistortedPath:     segmentEncoded,
-		InputFrameRate:    videoTrack.RFrameRate,
-		ReportPath:        segmentEncoded + "_vmaf.json",
-		UltraHD:           videoTrack.Height >= ffmpeg.Height4K,
-		NoEnhancementGain: config.VMAFNeg,
-		VMAFCuda:          config.VMAFCUDA,
-		GPUID:             &config.NVIDIAGPUIndex,
-		Debug: func(msg string) {
-			scb.Debug(msg)
-		},
-		RuntimeError:      scb.Error,
-		FFMPEGStatsReport: scb.OnSegmentVMAFProgress,
-	})
 }

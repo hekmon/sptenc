@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
 
@@ -497,7 +498,7 @@ func (to *LiveQPSearch) OnSegmentEncodeStart(totalFrames int) {
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentEncodeProgress(stats ffmpeg.ProgressStats) {
+func (to *LiveQPSearch) OnSegmentEncodeProgress(stats core.ProgressStats) {
 	if to.encodeProgressBar != nil {
 		to.encodeProgressBar.CurrentSet(uint64(stats.CurrentFrame))
 	}
@@ -529,7 +530,7 @@ func (to *LiveQPSearch) OnSegmentVMAFStart(totalFrames int) {
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentVMAFProgress(stats ffmpeg.ProgressStats) {
+func (to *LiveQPSearch) OnSegmentVMAFProgress(stats core.ProgressStats) {
 	if to.vmafProgressBar != nil {
 		to.vmafProgressBar.CurrentSet(uint64(stats.CurrentFrame))
 	}

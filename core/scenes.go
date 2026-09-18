@@ -1,16 +1,12 @@
 package core
 
-import (
-	"sort"
-
-	"github.com/hekmon/sptenc/ffmpeg"
-)
+import "sort"
 
 // GetOptimalMinDrop finds the smallest minDrop that produces at most maxCandidates candidates.
 // It returns the candidate list and the effective minDrop used.
 // A nil candidates slice indicates the request could not be satisfied
 // (empty scenes or maxCandidates < 1).
-func GetOptimalMinDrop(scenes []ffmpeg.Scene, maxCandidates int) (candidates []float64, minDrop int) {
+func GetOptimalMinDrop(scenes []Scene, maxCandidates int) (candidates []float64, minDrop int) {
 	if len(scenes) == 0 || maxCandidates < 1 {
 		return
 	}
@@ -24,7 +20,7 @@ func GetOptimalMinDrop(scenes []ffmpeg.Scene, maxCandidates int) (candidates []f
 // GetSearchThresholdCandidates builds candidate thresholds using pure scene-drop logic.
 // Each candidate (after the first) eliminates at least minDrop more scenes than the previous candidate.
 // A nil candidates slice indicates empty input scenes.
-func GetSearchThresholdCandidates(scenes []ffmpeg.Scene, minDrop int) (candidates []float64) {
+func GetSearchThresholdCandidates(scenes []Scene, minDrop int) (candidates []float64) {
 	if len(scenes) == 0 {
 		return
 	}

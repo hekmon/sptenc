@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hekmon/sptenc/ffmpeg"
-
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -84,9 +82,41 @@ type VMAFChecker struct {
 	hmean  float64
 }
 
+// Thresholds returns a map of all active threshold names to their values.
+// Disabled thresholds (set to VMAFOffValue) are omitted.
+// Keys are: "min", "p1", "p5", "p10", "p25", "median", "mean", "hmean".
+func (vc VMAFChecker) Thresholds() map[string]float64 {
+	m := make(map[string]float64, 8)
+	if vc.min != VMAFOffValue {
+		m["min"] = vc.min
+	}
+	if vc.p1 != VMAFOffValue {
+		m["p1"] = vc.p1
+	}
+	if vc.p5 != VMAFOffValue {
+		m["p5"] = vc.p5
+	}
+	if vc.p10 != VMAFOffValue {
+		m["p10"] = vc.p10
+	}
+	if vc.p25 != VMAFOffValue {
+		m["p25"] = vc.p25
+	}
+	if vc.median != VMAFOffValue {
+		m["median"] = vc.median
+	}
+	if vc.hmean != VMAFOffValue {
+		m["hmean"] = vc.hmean
+	}
+	if vc.mean != VMAFOffValue {
+		m["mean"] = vc.mean
+	}
+	return m
+}
+
 // Validate checks whether the provided VMAFStats meet all configured thresholds.
 // It returns false if any active threshold is not met, otherwise true.
-func (vc VMAFChecker) Validate(stats ffmpeg.VMAFStats) bool {
+func (vc VMAFChecker) Validate(stats VMAFStats) bool {
 	if vc.min != VMAFOffValue && stats.Minimum < vc.min {
 		return false
 	}

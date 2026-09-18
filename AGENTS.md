@@ -21,8 +21,10 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 | Package | What lives here | What to change carefully |
 |---|---|---|
-| `core/` | QP search algorithm, interpolation, cache, VMAF threshold checking | Algorithmic changes. Currently imports concrete `ffmpeg` types; decoupling is planned but not done. |
+| `core/` | QP search algorithm, interpolation, cache, VMAF threshold checking, scene logic | Algorithmic changes. **Fully decoupled** from `ffmpeg` — do not re-introduce concrete `ffmpeg` imports here. |
 | `ffmpeg/` | ffmpeg command builders, ffprobe parsers, encoder wrappers, VMAF computation, hardware detection | Platform-specific ffmpeg logic, new encoder support, hardware acceleration paths. |
+| `pipeline/` | `EncoderAdapter` — bridges `core.SegmentEncoder` to concrete `ffmpeg` encoder functions | The adapter *is* the ffmpeg invocation mapping; changes here must be audited against the exact encoder switch in `ffmpeg/`. |
+| `metadata/` | `GenerateTags` — assembles ffmpeg metadata flags from `core` and `ffmpeg` results | Shared between CLI and any future front-ends (e.g. GUI). |
 | `cli/` | urfave/cli v3 commands, orchestration, live progress UI | UX changes, new commands, workflow modifications. |
 | `mkvtoolnix/` | `mkvpropedit` wrapper for metadata tagging | Metadata format changes. |
 
@@ -30,9 +32,11 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 - **`README.md`** — QP-vs-CRF rationale, cache system, GPU selection, all commands.
 - **`cli/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes live progress UI and statistical decision logic.
+- **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.
 - **`core/predicator.go`** — Monotonic interpolation with empirical ceiling adaptation. Contains benchmark data in comments proving method selection.
 - **`core/cache.go`** — Persistent QP history with profile isolation.
+- **`pipeline/encoder.go`** — The **adapter** that maps `core.SegmentEncoder` to concrete ffmpeg encoder invocations. Contains the explicit per-encoder switch.
 - **`ffmpeg/hevc.go` and `ffmpeg/av1.go`** — Encoder wrappers for libx265, NVENC, VAAPI, D3D12VA, VideoToolbox, SVT-AV1, libaom-av1.
 - **`ffmpeg/vmaf.go`** — VMAF computation with CUDA-accelerated path (`libvmaf_cuda`) and NVDEC auto-detection.
 
@@ -57,7 +61,7 @@ Segments are encoded **sequentially**, not in parallel. This is not an oversight
 
 ### Explicit per-encoder switches
 
-`core/qpsearch.go` contains a long, explicit `switch` for each encoder. This is intentional.
+`pipeline/encoder.go` contains a long, explicit `switch` that maps each encoder to its concrete ffmpeg invocation. This is intentional.
 
 Each encoder uses **distinct ffmpeg semantics**:
 - `libx265`: `-qp X -x265-params 'aq-mode=3'`
@@ -65,9 +69,9 @@ Each encoder uses **distinct ffmpeg semantics**:
 - VAAPI: `-rc_mode CQP -qp X`
 - VideoToolbox: `-q:v X` (note: `-q:v`, not `-qp`)
 
-These differences are subtle, encoder-specific, and break in different ways across ffmpeg versions. Abstracting them behind a generic interface would save ~30 lines and cost hours of debugging when one encoder drifts. The codebase is **intentionally WET** (Write Explicit Twice) here, not DRY.
+These differences are subtle, encoder-specific, and break in different ways across ffmpeg versions. The `core.SegmentEncoder` interface enables testability, but the adapter behind it is intentionally explicit about every ffmpeg flag. Abstracting the adapter switch behind a generic function would save ~30 lines and cost hours of debugging when one encoder drifts. The codebase is **intentionally WET** (Write Explicit Twice) here, not DRY.
 
-**Implication:** The ffmpeg invocation *is* the business logic here. Refactoring for DRYness would reduce auditability.
+**Implication:** The ffmpeg invocation *is* the business logic here. Refactoring the adapter for DRYness would reduce auditability.
 
 ### VFR is rejected at startup
 
@@ -85,11 +89,17 @@ Stats are stored per `(encoder, vmaf_profile, optional_cache_profile)`. The file
 
 Changing any VMAF threshold value by even 0.1 starts a fresh cache. This is correct — different thresholds require fundamentally different QP distributions.
 
-### core/ is not yet decoupled from ffmpeg/
+### Decoupling architecture
 
-`core/` currently imports concrete `ffmpeg` types (`VMAFStats`, `Encoder`, `GetEncoderQPRange`, progress types). This means unit tests for `core/` currently require running real ffmpeg processes.
+`core/` is fully decoupled from `ffmpeg/` behind the `core.SegmentEncoder` interface:
 
-The intended path forward is: decouple `core/` behind interfaces → add table-driven tests with mocked VMAF results. Changes that make this decoupling harder (e.g., adding new concrete `ffmpeg` imports into `core/`) work against the planned architecture.
+- `core.SegmentEncoder` abstracts `Encode`, `ComputeVMAF`, `ProbeStream`, and `QPRange`
+- `pipeline.EncoderAdapter` implements this interface by delegating to concrete `ffmpeg` functions
+- `core/` types (`VideoStream`, `VMAFStats`, `ProgressStats`, `Scene`) are owned by `core/` and have no `ffmpeg` imports
+
+This means `core/` can be unit-tested with mocked encoders that return predetermined VMAF results — no real ffmpeg processes required.
+
+**Guardrail:** Do not add new concrete `ffmpeg` imports into `core/`. That would re-tangle the packages and break the testing strategy.
 
 ## Correct frame of reference
 

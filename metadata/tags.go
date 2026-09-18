@@ -1,10 +1,11 @@
-package core
+package metadata
 
 import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
 
+	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 )
 
@@ -45,8 +46,8 @@ const (
 	sptencBestEffortTagKey       = "sptenc_best_effort_segments"
 )
 
-func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.Encoder, statsQP QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
-	flags = make(ffmpeg.FFMEGTags, 0, 56)
+func GenerateTags(format ffmpeg.FFProbeFormat, vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
+	flags = make(ffmpeg.FFMEGTags, 0, 57)
 	// Global
 	module, version := signature()
 	flags = append(flags,
@@ -60,9 +61,9 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderTagKey, encoder))
 	switch encoder {
 	case ffmpeg.HEVCEncoderLibx265:
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, libx265Preset))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpeg.Libx265PresetSlow))
 	case ffmpeg.HEVCEncoderNVEnc, ffmpeg.AV1EncoderNVEnc:
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, nvEncPreset))
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpeg.NVEncPresetP7))
 	}
 	// QP Stats
 	minQP, maxQP := statsQP.GetMinMaxQPs()
@@ -74,29 +75,20 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc VMAFChecker, encoder ffmpeg.En
 	// VMAF
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, ffmpeg.VMAFModel(ultraHD, vmafNEG)))
 	//// VMAF conf
-	if vc.min != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMinTagKey, strconv.FormatFloat(vc.min, 'f', -1, 64)))
+	thresholdTags := map[string]string{
+		"min":    sptencVMAFConfMinTagKey,
+		"p1":     sptencVMAFConfP1TagKey,
+		"p5":     sptencVMAFConfP5TagKey,
+		"p10":    sptencVMAFConfP10TagKey,
+		"p25":    sptencVMAFConfP25TagKey,
+		"median": sptencVMAFConfMedianTagKey,
+		"hmean":  sptencVMAFConfHMeanTagKey,
+		"mean":   sptencVMAFConfMeanTagKey,
 	}
-	if vc.p1 != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP1TagKey, strconv.FormatFloat(vc.p1, 'f', -1, 64)))
-	}
-	if vc.p5 != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP5TagKey, strconv.FormatFloat(vc.p5, 'f', -1, 64)))
-	}
-	if vc.p10 != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP10TagKey, strconv.FormatFloat(vc.p10, 'f', -1, 64)))
-	}
-	if vc.p25 != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfP25TagKey, strconv.FormatFloat(vc.p25, 'f', -1, 64)))
-	}
-	if vc.median != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMedianTagKey, strconv.FormatFloat(vc.median, 'f', -1, 64)))
-	}
-	if vc.hmean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfHMeanTagKey, strconv.FormatFloat(vc.hmean, 'f', -1, 64)))
-	}
-	if vc.mean != VMAFOffValue {
-		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFConfMeanTagKey, strconv.FormatFloat(vc.mean, 'f', -1, 64)))
+	for name, value := range vc.Thresholds() {
+		if tagKey, ok := thresholdTags[name]; ok {
+			flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", tagKey, strconv.FormatFloat(value, 'f', -1, 64)))
+		}
 	}
 	//// Best effort
 	if statsQP.NbBestEfforts > 0 {

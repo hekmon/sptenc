@@ -14,6 +14,7 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/metadata"
 	"github.com/hekmon/sptenc/mkvtoolnix"
 )
 
@@ -158,10 +159,22 @@ func getFileSize(path string) (size int64, err error) {
 	return
 }
 
+// AllAudioTracksPCM returns true if all audio streams in the given stats are PCM encoded.
+func AllAudioTracksPCM(stats ffmpeg.FFProbeStats) bool {
+	for _, stream := range stats.Streams {
+		if stream.CodecType == "audio" {
+			if stream.CodecName != ffmpeg.CodecAudioPCM && stream.CodecName != ffmpeg.CodecAudioPCM24b {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func computeFinalPath(input, outputDir string, encoder ffmpeg.Encoder) (final string) {
 	baseName, _ := extractFileNameInfos(input)
 	final = filepath.Join(outputDir,
-		fmt.Sprintf("%s [%s %s].mkv", baseName, encoder, core.TitleTagValue))
+		fmt.Sprintf("%s [%s %s].mkv", baseName, encoder, metadata.TitleTagValue))
 	return
 }
 

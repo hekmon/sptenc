@@ -12,6 +12,8 @@ import (
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/metadata"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -237,7 +239,15 @@ var encodeCommand = &cli.Command{
 		}
 
 		// Get the stats cache
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), ffmpeg.Encoder(cmd.String(encoderFlagName)), vmafAuditor, cmd.String(cacheProfileFlagName))
+		encoderAdapter := &pipeline.EncoderAdapter{
+			Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
+			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
+			VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
+			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
+			VMAFNeg:           cmd.Bool(vmafNegFlagName),
+			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
+		}
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter, vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create stats cache: %w", err)
 			return
@@ -357,9 +367,7 @@ var encodeCommand = &cli.Command{
 
 		// Step 2 - Process segments
 		results, encodedSegmentsMerged, err := processSegments(ctx, segmentsPaths, workingDir, totalDuration,
-			vmafAuditor, statsCache, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-			cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
+			vmafAuditor, statsCache, encoderAdapter, cmd.Bool(debugFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to encode segments: %w", err)
 			return
@@ -453,14 +461,14 @@ var encodeCommand = &cli.Command{
 		// Probe originalFile directly to get the correct audio stream info in both cases.
 		var encodeToFlac bool
 		if originalStats, err := getStreamsInfos(ctx, originalFile, cmd.Bool(debugFlagName)); err == nil {
-			encodeToFlac = core.AllAudioTracksPCM(originalStats)
+			encodeToFlac = AllAudioTracksPCM(originalStats)
 		} else {
 			fmt.Fprintf(bypass, "WARNING: failed to probe original file for audio, skipping FLAC check: %s\n", err)
 		}
 		if encodeToFlac {
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
-		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+		tags := metadata.GenerateTags(*sourceStats.Format, vmafAuditor, ffmpeg.Encoder(cmd.String(encoderFlagName)),
 			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(segmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
@@ -521,8 +529,7 @@ var encodeCommand = &cli.Command{
 
 // processSegments runs QP search on the given segments and concatenates the encoded results.
 func processSegments(ctx context.Context, segmentsPaths []string, workingDir string, totalDuration time.Duration,
-	vmafAuditor core.VMAFChecker, statsCache *core.StatsCacheHistory, encoder ffmpeg.Encoder, nvidiaGPUIndex int, vaapiRendererPath string,
-	d3d12vaGPUIndex int, vmafNeg, vmafCUDA, debug bool) (results core.QPSearchResults, encodedSegmentsMerged string, err error) {
+	vmafAuditor core.VMAFChecker, statsCache *core.StatsCacheHistory, encoder core.SegmentEncoder, debug bool) (results core.QPSearchResults, encodedSegmentsMerged string, err error) {
 	bypass := liveprogress.Bypass()
 	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
 	lqps := &LiveQPSearch{
@@ -532,17 +539,12 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 	start := time.Now()
 	results, err = core.FindAllSegmentsQP(ctx, lqps,
 		core.QPSearchConfig{
-			SegmentsPaths:     segmentsPaths,
-			Auditor:           vmafAuditor,
-			WorkingDir:        workingDir,
-			StatsCache:        statsCache,
-			KeepInvalidQP:     debug,
-			Encoder:           encoder,
-			NVIDIAGPUIndex:    nvidiaGPUIndex,
-			VAAPIRendererPath: vaapiRendererPath,
-			D3D12VAGPUIndex:   d3d12vaGPUIndex,
-			VMAFNeg:           vmafNeg,
-			VMAFCUDA:          vmafCUDA,
+			SegmentsPaths: segmentsPaths,
+			Auditor:       vmafAuditor,
+			WorkingDir:    workingDir,
+			StatsCache:    statsCache,
+			KeepInvalidQP: debug,
+			Encoder:       encoder,
 		},
 	)
 	if err != nil {

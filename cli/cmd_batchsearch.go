@@ -12,6 +12,8 @@ import (
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/metadata"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/fatih/color"
@@ -335,7 +337,15 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Get the stats cache
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), ffmpeg.Encoder(cmd.String(encoderFlagName)),
+		encoderAdapter := &pipeline.EncoderAdapter{
+			Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
+			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
+			VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
+			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
+			VMAFNeg:           cmd.Bool(vmafNegFlagName),
+			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
+		}
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter,
 			vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to create stats cache: %w", err)
@@ -411,10 +421,10 @@ var batchsearchCommand = &cli.Command{
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
 		// Cap scenes to the max threshold
-		cappedScenes := make([]ffmpeg.Scene, 0, len(scenes))
+		cappedScenes := make([]core.Scene, 0, len(scenes))
 		for _, scene := range scenes {
 			if scene.Score <= cmd.Float64(maxThresholdFlagName) {
-				cappedScenes = append(cappedScenes, scene)
+				cappedScenes = append(cappedScenes, core.Scene{Start: scene.Start, Score: scene.Score})
 			}
 		}
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
@@ -502,9 +512,7 @@ var batchsearchCommand = &cli.Command{
 
 			// Step 3.C - QP search on this candidate scenes
 			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(ctx, segmentsPaths, candidateWorkdir, totalDuration,
-				vmafAuditor, statsCache, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-				cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
+				vmafAuditor, statsCache, encoderAdapter, cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("candidate %s: %w", candidateStr, err)
 			}
@@ -569,16 +577,22 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Create stats cache for final encoder
-			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoder, vmafAuditor, cmd.String(cacheProfileFlagName))
+			finalEncoderAdapter := &pipeline.EncoderAdapter{
+				Encoder:           finalEncoder,
+				NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
+				VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
+				D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
+				VMAFNeg:           cmd.Bool(vmafNegFlagName),
+				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
+			}
+			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter, vmafAuditor, cmd.String(cacheProfileFlagName))
 			if err != nil {
 				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
 			}
 
 			// Run QP search with final encoder
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
-				vmafAuditor, finalStatsCache, finalEncoder,
-				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-				cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName))
+				vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}
@@ -650,7 +664,7 @@ var batchsearchCommand = &cli.Command{
 		outputPath := computeFinalPath(inputPath, outputDir, usedEncoder)
 		var encodeToFlac bool
 		if originalStats, err := getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err == nil {
-			encodeToFlac = core.AllAudioTracksPCM(originalStats)
+			encodeToFlac = AllAudioTracksPCM(originalStats)
 		} else {
 			fmt.Fprintf(bypass, "WARNING: failed to probe original file for audio, skipping FLAC check: %s\n", err)
 		}
@@ -658,7 +672,7 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		videoStream = sourceStats.VideoTrack()
-		tags := core.GenerateTags(*sourceStats.Format, vmafAuditor, usedEncoder,
+		tags := metadata.GenerateTags(*sourceStats.Format, vmafAuditor, usedEncoder,
 			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(results.EncodedSegmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, inputPath, encodedSegmentsMerged, outputPath, encodeToFlac, tags,

@@ -3,15 +3,13 @@ package core
 import (
 	"fmt"
 
-	"github.com/hekmon/sptenc/ffmpeg"
-
 	"gonum.org/v1/gonum/interp"
 )
 
 // NewPredicator builds an interpolator from known QP→VMAF data points.
 // It validates inputs before calling gonum because FritschButland.Fit panics
 // on insufficient points, mismatched lengths, or non-strictly-increasing x values.
-func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predicator, err error) {
+func NewPredicator(existingResults map[int]VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predicator, err error) {
 	if len(existingResults) < 2 {
 		return p, fmt.Errorf("need at least 2 data points for interpolation, got %d", len(existingResults))
 	}
@@ -97,7 +95,7 @@ type Predicator struct {
 // Predict estimates VMAF stats for a given QP using the fitted interpolators.
 // It does not return an error because gonum's Predict handles out-of-range
 // values gracefully via extrapolation; clamping and adaptation follow.
-func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats) {
+func (p *Predicator) Predict(qp int) (stats VMAFStats) {
 	qpf := float64(qp)
 	stats.Minimum = p.minInterpolator.Predict(qpf)
 	stats.Percentile1 = p.p1Interpolator.Predict(qpf)
@@ -120,7 +118,7 @@ func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats) {
 	return
 }
 
-func (p *Predicator) adapt(qp int, stats ffmpeg.VMAFStats) (adapted ffmpeg.VMAFStats) {
+func (p *Predicator) adapt(qp int, stats VMAFStats) (adapted VMAFStats) {
 	adapted = stats
 	var preIndex, postIndex int
 	// Find known values indexes sourrounding qp
