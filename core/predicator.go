@@ -8,7 +8,13 @@ import (
 	"gonum.org/v1/gonum/interp"
 )
 
+// NewPredicator builds an interpolator from known QP→VMAF data points.
+// It validates inputs before calling gonum because FritschButland.Fit panics
+// on insufficient points, mismatched lengths, or non-strictly-increasing x values.
 func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predicator, err error) {
+	if len(existingResults) < 2 {
+		return p, fmt.Errorf("need at least 2 data points for interpolation, got %d", len(existingResults))
+	}
 	// Spawn the interpolators
 	p.minInterpolator = new(interp.FritschButland)
 	p.p1Interpolator = new(interp.FritschButland)
@@ -19,43 +25,43 @@ func NewPredicator(existingResults map[int]ffmpeg.VMAFStats, qpMin, qpMax int, d
 	p.hmeanInterpolator = new(interp.FritschButland)
 	p.meanInterpolator = new(interp.FritschButland)
 	// Prepare the data sets
-	p.qps = make([]float64, len(existingResults))
-	p.mins = make([]float64, len(existingResults))
-	p.p1s = make([]float64, len(existingResults))
-	p.p5s = make([]float64, len(existingResults))
-	p.p10s = make([]float64, len(existingResults))
-	p.p25s = make([]float64, len(existingResults))
-	p.medians = make([]float64, len(existingResults))
-	p.hmeans = make([]float64, len(existingResults))
-	p.means = make([]float64, len(existingResults))
-	index := 0
+	p.qps = make([]float64, 0, len(existingResults))
+	p.mins = make([]float64, 0, len(existingResults))
+	p.p1s = make([]float64, 0, len(existingResults))
+	p.p5s = make([]float64, 0, len(existingResults))
+	p.p10s = make([]float64, 0, len(existingResults))
+	p.p25s = make([]float64, 0, len(existingResults))
+	p.medians = make([]float64, 0, len(existingResults))
+	p.hmeans = make([]float64, 0, len(existingResults))
+	p.means = make([]float64, 0, len(existingResults))
 	for qp := qpMin; qp <= qpMax; qp++ {
 		result, ok := existingResults[qp]
-		if ok {
-			p.qps[index] = float64(qp)
-			p.mins[index] = result.Minimum
-			p.p1s[index] = result.Percentile1
-			p.p5s[index] = result.Percentile5
-			p.p10s[index] = result.Percentile10
-			p.p25s[index] = result.Percentile25
-			p.medians[index] = result.Median
-			p.hmeans[index] = result.HarmonicMean
-			p.means[index] = result.Mean
-			index++
+		if !ok {
+			continue
+		}
+		p.qps = append(p.qps, float64(qp))
+		p.mins = append(p.mins, result.Minimum)
+		p.p1s = append(p.p1s, result.Percentile1)
+		p.p5s = append(p.p5s, result.Percentile5)
+		p.p10s = append(p.p10s, result.Percentile10)
+		p.p25s = append(p.p25s, result.Percentile25)
+		p.medians = append(p.medians, result.Median)
+		p.hmeans = append(p.hmeans, result.HarmonicMean)
+		p.means = append(p.means, result.Mean)
+	}
+	if len(p.qps) < 2 {
+		return p, fmt.Errorf("need at least 2 data points within QP range [%d, %d] for interpolation, got %d", qpMin, qpMax, len(p.qps))
+	}
+	for i := 1; i < len(p.qps); i++ {
+		if p.qps[i] <= p.qps[i-1] {
+			return p, fmt.Errorf("QP values must be strictly increasing for interpolation, got %v", p.qps)
 		}
 	}
 	p.debug = debug
 	if p.debug != nil {
 		p.debug("Initializing FritschButland predicator with %d points: %+v",
-			len(existingResults), p.qps)
+			len(p.qps), p.qps)
 	}
-	// Init with known points
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic encountered while initializing predicator with %d points: %+v",
-				len(existingResults), r)
-		}
-	}()
 	_ = p.minInterpolator.Fit(p.qps, p.mins)
 	_ = p.p1Interpolator.Fit(p.qps, p.p1s)
 	_ = p.p5Interpolator.Fit(p.qps, p.p5s)
@@ -88,12 +94,10 @@ type Predicator struct {
 	debug               func(format string, a ...any)
 }
 
-func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic encountered: %+v", r)
-		}
-	}()
+// Predict estimates VMAF stats for a given QP using the fitted interpolators.
+// It does not return an error because gonum's Predict handles out-of-range
+// values gracefully via extrapolation; clamping and adaptation follow.
+func (p *Predicator) Predict(qp int) (stats ffmpeg.VMAFStats) {
 	qpf := float64(qp)
 	stats.Minimum = p.minInterpolator.Predict(qpf)
 	stats.Percentile1 = p.p1Interpolator.Predict(qpf)
@@ -191,7 +195,10 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 			}
 		}
 		predicator := new(interp.FritschButland)
-		_ = predicator.Fit(newqps, newValues)
+		if err := predicator.Fit(newqps, newValues); err != nil {
+			// Fallback to the raw predicted value if the secondary interpolation fails.
+			return predicatedValue
+		}
 		adaptedValue = predicator.Predict(float64(predictedForQP))
 		if p.debug != nil {
 			p.debug("Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",

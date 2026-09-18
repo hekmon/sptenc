@@ -448,10 +448,7 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	)
 	for candidateQP = firstInvalid; candidateQP > bestValid; candidateQP-- {
 		if candidateResults, exists = existingResults[candidateQP]; !exists {
-			if candidateResults, err = predicator.Predict(candidateQP); err != nil {
-				err = fmt.Errorf("failed to predict QP %d (within %d-%d): %w", candidateQP, bestValid, firstInvalid, err)
-				return
-			}
+			candidateResults = predicator.Predict(candidateQP)
 			// Predicted result will be validated below
 		}
 		if config.Auditor.Validate(candidateResults) {
