@@ -135,6 +135,7 @@ func AV1LibaomEncodeQP(ctx context.Context, config AV1LibaomEncodeQPConfig) (err
 	)
 	// // end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
@@ -183,7 +184,8 @@ func AV1LibaomEncodeQP(ctx context.Context, config AV1LibaomEncodeQPConfig) (err
 }
 
 /*
- * SVT-AV1
+ * AV1 SVT-AV1
+ * CPU encoder, recommended for production.
  * ffmpeg -h encoder=libsvtav1
  * Much faster than libaom at comparable compression: the iteration/production
  * counterpart to libaom's final-encode role.
@@ -266,6 +268,7 @@ func AV1SVTAV1EncodeQP(ctx context.Context, config AV1SVTAV1EncodeQPConfig) (err
 	)
 	// // end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
@@ -426,6 +429,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncMaxLookahead))
 	// // end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
@@ -581,6 +585,7 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 	)
 	// // end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)

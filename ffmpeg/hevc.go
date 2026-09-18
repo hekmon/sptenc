@@ -129,6 +129,7 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 	}
 	//// end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0", // disable interleave buffering limit to avoid issues with large lossless packets
 		config.Output,
 	)
@@ -294,6 +295,7 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	args = append(args, "-rc-lookahead", strconv.Itoa(nvEncMaxLookahead))
 	//// end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
@@ -447,6 +449,7 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	)
 	//// end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
@@ -496,6 +499,7 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 
 /*
  * HEVC D3D12VA
+ * Windows only, Direct3D 12 hardware acceleration.
  * ffmpeg -h encoder=hevc_d3d12va
  * Windows only, vendor-agnostic (Intel/AMD/NVIDIA).
  * No GPU scaling filter exists for D3D12 (scale_d3d12 does not exist in FFmpeg),
@@ -614,6 +618,7 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	)
 	//// end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
@@ -761,6 +766,7 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	)
 	//// end with output
 	args = append(args,
+		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
