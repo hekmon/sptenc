@@ -738,12 +738,17 @@ var batchsearchCommand = &cli.Command{
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
 		plateauToBest := computePlateauToBest(batch.sizes, bestIndex)
+		sufficientStrikes := plateauToBest
+		if bestIndex > 0 {
+			sufficientStrikes++
+		}
 		if batch.currentCandidateIndex < len(batch.candidates) {
-			fmt.Fprintf(bypass, "Search stopped after %d strikes. Best among tested candidates was found after a plateau of %d non-improving candidate(s). A better threshold may exist among the untested ones.\n",
-				cmd.Int(strikesFlagName), plateauToBest)
+			fmt.Fprintf(bypass, "Search stopped after %d strikes.\n", cmd.Int(strikesFlagName))
+			fmt.Fprintf(bypass, "\tBest among tested candidates was found after a plateau of %d non-improving candidate(s).\n", plateauToBest)
+			fmt.Fprintf(bypass, "\tA better threshold may exist among the untested ones.\n")
 		} else {
-			fmt.Fprintf(bypass, "Best candidate found after a plateau of %d non-improving candidate(s). A strikes value of %d would have been sufficient for this file.\n",
-				plateauToBest, plateauToBest)
+			fmt.Fprintf(bypass, "Best candidate found after a plateau of %d non-improving candidate(s).\n", plateauToBest)
+			fmt.Fprintf(bypass, "\tA strikes value of %d would have been sufficient for this file.\n", sufficientStrikes)
 		}
 		fmt.Fprintf(bypass, "\nBatch search ended in %s\n\n", time.Since(completeRunStart).Round(time.Second))
 		return nil
@@ -849,8 +854,9 @@ func (bs *batchStatus) line() string {
 }
 
 // computePlateauToBest returns the longest run of consecutive non-improving
-// candidates that occurred before reaching bestIndex. This is the smallest
-// strikes value that would have been sufficient to reach bestIndex.
+// candidates that occurred before reaching bestIndex. The minimum strikes value
+// that would have been sufficient to reach bestIndex is this return value plus
+// one (except when bestIndex is 0, where 0 is already sufficient).
 func computePlateauToBest(sizes []int64, bestIndex int) int {
 	minStrikes := 0
 	bestSoFar := 0
