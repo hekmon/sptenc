@@ -155,12 +155,18 @@ var thresholdsCommand = &cli.Command{
 			return nil
 		}
 		if effectiveMinDrop < cmd.Int(minDropFlagName) {
+			fmt.Fprintf(bypass, "\tWARNING: Auto-tuned scene drop of %d is below the minimum of %d; recomputing candidates...\n",
+				effectiveMinDrop, cmd.Int(minDropFlagName),
+			)
 			candidates = core.GetSearchThresholdCandidates(cappedScenes, cmd.Int(minDropFlagName))
 			effectiveMinDrop = cmd.Int(minDropFlagName)
 		}
-		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d, producing %d candidates\n\n",
-			effectiveMinDrop, len(candidates),
+		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within %s=%d, producing %d candidates\n\n",
+			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
 		)
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
+		}
 
 		// Build table
 		var buff strings.Builder
