@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hekmon/sptenc/ffmpeg"
@@ -15,17 +18,11 @@ import (
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/urfave/cli/v3"
+	"gonum.org/v1/gonum/stat"
 )
 
-// Flag names for split-specific flags (HW dec flags are also used by master).
-const (
-	analyzeFlagName         = "analyze"
-	masterFlagName          = "master"
-	nvdecFlagName           = "nvdec"
-	vaapiDecFlagName        = "vaapidec"
-	d3d12DecFlagName        = "d3d12vadec"
-	videoToolboxDecFlagName = "videotoolboxdec"
-)
+// Flag name for split-specific flags.
+const masterFlagName = "master"
 
 var splitCommand = &cli.Command{
 	Name:     "split",
@@ -36,105 +33,49 @@ var splitCommand = &cli.Command{
 		"HOW IT WORKS\n" +
 		"By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts,\n" +
 		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
-		"WORKFLOW\n" +
-		"  1. Use --" + analyzeFlagName + " to preview detected scenes without splitting.\n" +
-		"  2. Tune --" + minThresholdFlagName + " to control sensitivity (experiment first).\n" +
-		"  3. Validate with the original file before performing the actual split.\n\n" +
 		"If the input has already been converted with the master command, use --" + masterFlagName + " to skip the\n" +
 		"master creation phase.",
-	Flags: []cli.Flag{
-		&cli.Float64Flag{
-			Name:      minThresholdFlagName,
-			Aliases:   []string{"T"},
-			Usage:     fmt.Sprintf("Scene detection threshold (%d-%d)", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
-			Value:     10,
-			OnlyOnce:  true,
-			Validator: validateSceneThreshold,
-		},
-		&cli.BoolFlag{
-			Name:     analyzeFlagName,
-			Aliases:  []string{"a"},
-			Usage:    "Simply analyze the input file (skip the master creation phase)",
-			Value:    false,
-			OnlyOnce: true,
-		},
-		&cli.BoolFlag{
-			Name:     masterFlagName,
-			Aliases:  []string{"m"},
-			Usage:    "Input is an already-processed master file",
-			Value:    false,
-			OnlyOnce: true,
-		},
-		// Directories
-		&cli.StringFlag{
-			Name:     outputDirFlagName,
-			Aliases:  []string{"o"},
-			Usage:    "Output directory for split scenes",
-			Value:    "",
-			OnlyOnce: true,
-			Category: "Directories",
-		},
-		&cli.StringFlag{
-			Name:             tmpDirFlagName,
-			Aliases:          []string{"t"},
-			Usage:            "Directory for temporary working files",
-			Value:            os.TempDir(),
-			OnlyOnce:         true,
-			Validator:        validateTmpDir,
-			ValidateDefaults: true,
-			Category:         "Directories",
-		},
+	Flags: func() []cli.Flag {
+		flags := []cli.Flag{
+			&cli.Float64Flag{
+				Name:      minThresholdFlagName,
+				Aliases:   []string{"T"},
+				Usage:     fmt.Sprintf("Scene detection threshold (%d-%d)", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
+				Value:     10,
+				OnlyOnce:  true,
+				Validator: validateSceneThreshold,
+			},
+			&cli.BoolFlag{
+				Name:     masterFlagName,
+				Aliases:  []string{"m"},
+				Usage:    "Input is an already-processed master file",
+				Value:    false,
+				OnlyOnce: true,
+			},
+			// Directories
+			&cli.StringFlag{
+				Name:     outputDirFlagName,
+				Aliases:  []string{"o"},
+				Usage:    "Output directory for split scenes",
+				Value:    "",
+				OnlyOnce: true,
+				Category: "Directories",
+			},
+			&cli.StringFlag{
+				Name:             tmpDirFlagName,
+				Aliases:          []string{"t"},
+				Usage:            "Directory for temporary working files",
+				Value:            os.TempDir(),
+				OnlyOnce:         true,
+				Validator:        validateTmpDir,
+				ValidateDefaults: true,
+				Category:         "Directories",
+			},
+		}
 		// HW dec
-		&cli.BoolFlag{
-			Name:     nvdecFlagName,
-			Usage:    "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     vaapiDecFlagName,
-			Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     d3d12DecFlagName,
-			Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     videoToolboxDecFlagName,
-			Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.IntFlag{
-			Name:     nvidiaGPUIndexFlagName,
-			Usage:    "GPU to use with --nvdec",
-			Value:    ffmpeg.CUDADefaultDevice,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.StringFlag{
-			Name:     vaapiRendererPathFlagName,
-			Usage:    "Direct Rendering Manager render node to use with --vaapidec",
-			Value:    ffmpeg.VAAPIDefaultDevice,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.IntFlag{
-			Name:     d3d12vaGPUIndexFlagName,
-			Usage:    "GPU to use with --d3d12vadec",
-			Value:    ffmpeg.D3D12VADefaultDevice,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-	},
+		flags = append(flags, hwDecodeFlags(false)...)
+		return flags
+	}(),
 	Arguments: []cli.Argument{
 		&cli.StringArg{
 			Name:      "inputfile",
@@ -216,55 +157,47 @@ var splitCommand = &cli.Command{
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
 		duration := stats.Format.Duration
-		if cmd.Bool(analyzeFlagName) {
-			fmt.Fprintf(bypass, "Analyzing scenes of %s (%s) with threshold %s\n",
-				shellescape.Quote(filepath.Base(inputFilePath)),
-				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			)
-		} else {
-			fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
-				shellescape.Quote(filepath.Base(inputFilePath)),
-				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			)
-			if !cmd.Bool(masterFlagName) {
-				// create a temporary directory
-				var workingDir string
-				if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
-					return fmt.Errorf("failed to create temporary working directory in %s: %w",
-						shellescape.Quote(cmd.String(tmpDirFlagName)), err,
+		fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
+			shellescape.Quote(filepath.Base(inputFilePath)),
+			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+		)
+		if !cmd.Bool(masterFlagName) {
+			// create a temporary directory
+			var workingDir string
+			if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
+				return fmt.Errorf("failed to create temporary working directory in %s: %w",
+					shellescape.Quote(cmd.String(tmpDirFlagName)), err,
+				)
+			}
+			defer func() {
+				if (err != nil && ctx.Err() != context.Canceled) || cmd.Bool(debugFlagName) {
+					fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
+						shellescape.Quote(workingDir),
 					)
-				}
-				defer func() {
-					if (err != nil && ctx.Err() != context.Canceled) || cmd.Bool(debugFlagName) {
-						fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
-							shellescape.Quote(workingDir),
+				} else {
+					if removeErr := os.RemoveAll(workingDir); removeErr != nil {
+						fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
+							shellescape.Quote(workingDir), removeErr,
 						)
-					} else {
-						if removeErr := os.RemoveAll(workingDir); removeErr != nil {
-							fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
-								shellescape.Quote(workingDir), removeErr,
-							)
-						}
 					}
-				}()
-				if cmd.Bool(debugFlagName) {
-					fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
 				}
-				// build optional hw decode config
-				masterConfig := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
-					cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
-					cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-				).ToFFV1MasterConfig()
-				if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
-					!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
-					fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
-				}
-				// create the master within
-				if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
-					return fmt.Errorf("failed to create the master file: %w", err)
-				}
+			}()
+			if cmd.Bool(debugFlagName) {
+				fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
+			}
+			// build optional hw decode config
+			masterConfig := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
+				cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
+			).ToFFV1MasterConfig()
+			if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
+				!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
+				fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
+			}
+			// create the master within
+			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
+				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 		}
 
@@ -272,7 +205,7 @@ var splitCommand = &cli.Command{
 		 * Execute
 		 */
 
-		// analyze
+		// detect
 		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
@@ -293,16 +226,7 @@ var splitCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-		if cmd.Bool(analyzeFlagName) {
-			if !cmd.Bool(debugFlagName) {
-				for i, scene := range scenes {
-					fmt.Fprintf(bypass, "Scene #%d at %s with score %s\n",
-						2+i, scene.Start, strconv.FormatFloat(scene.Score, 'f', -1, 64),
-					)
-				}
-			}
-			return
-		}
+		printSceneStats(bypass, scenes, duration, stats.VideoTrack())
 
 		// split
 		outputDir := cmd.String(outputDirFlagName)
@@ -320,4 +244,95 @@ var splitCommand = &cli.Command{
 
 		return
 	},
+}
+
+// printSceneStats prints length statistics for the detected scenes to help the
+// user judge whether the current threshold produces sensible boundaries.
+func printSceneStats(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time.Duration, videoTrack *ffmpeg.FFProbeBinaryStream) {
+	n := len(scenes) + 1
+	if n == 0 {
+		return
+	}
+
+	durations := make([]time.Duration, 0, n)
+	if len(scenes) == 0 {
+		durations = append(durations, totalDuration)
+	} else {
+		durations = append(durations, scenes[0].Start)
+		for i := 1; i < len(scenes); i++ {
+			durations = append(durations, scenes[i].Start-scenes[i-1].Start)
+		}
+		durations = append(durations, totalDuration-scenes[len(scenes)-1].Start)
+	}
+
+	var sum time.Duration
+	minDur := durations[0]
+	maxDur := durations[0]
+	short1s := 0
+	shortHalf := 0
+
+	var frameRate float64
+	if videoTrack != nil {
+		frameRate, _ = parseFrameRateLocal(videoTrack.RFrameRate)
+	}
+
+	for _, d := range durations {
+		sum += d
+		if d < minDur {
+			minDur = d
+		}
+		if d > maxDur {
+			maxDur = d
+		}
+		if d < time.Second {
+			short1s++
+		}
+		if d < 500*time.Millisecond {
+			shortHalf++
+		}
+	}
+
+	durationsFloat := make([]float64, len(durations))
+	for i, d := range durations {
+		durationsFloat[i] = float64(d)
+	}
+	meanF, stddevF := stat.MeanStdDev(durationsFloat, nil)
+	mean := time.Duration(meanF)
+	stddev := time.Duration(stddevF)
+
+	fmt.Fprintf(bypass, "\nScene length statistics (n=%d):\n", n)
+	fmt.Fprintf(bypass, "  Mean: %s, Std dev: %s\n", mean.Round(time.Millisecond), stddev.Round(time.Millisecond))
+	fmt.Fprintf(bypass, "  Range: %s–%s", minDur.Round(time.Millisecond), maxDur.Round(time.Millisecond))
+	if frameRate > 0 {
+		minFrames := int(math.Round(float64(minDur) * frameRate / float64(time.Second)))
+		fmt.Fprintf(bypass, " (shortest: %d frames)", minFrames)
+	}
+	fmt.Fprintln(bypass)
+
+	if shortHalf > 0 || short1s > 0 {
+		fmt.Fprintf(bypass, "  Short scenes: %d ≤ 0.5s, %d ≤ 1s\n", shortHalf, short1s)
+	}
+}
+
+// parseFrameRateLocal converts an ffprobe frame-rate string into a float64.
+func parseFrameRateLocal(s string) (float64, error) {
+	if s == "" {
+		return 0, errors.New("empty frame rate")
+	}
+	if strings.Contains(s, "/") {
+		parts := strings.SplitN(s, "/", 2)
+		num, err := strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid frame rate numerator %q: %w", parts[0], err)
+		}
+		den, err := strconv.ParseFloat(parts[1], 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid frame rate denominator %q: %w", parts[1], err)
+		}
+		if den == 0 {
+			return 0, errors.New("zero denominator in frame rate")
+		}
+		return num / den, nil
+	}
+	return strconv.ParseFloat(s, 64)
 }

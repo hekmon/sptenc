@@ -30,64 +30,19 @@ var masterCommand = &cli.Command{
 		"This command re-encodes the source into a lossless all-intra master using the FFV1 codec.\n" +
 		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss.\n" +
 		"FFV1 is mathematically lossless, so this introduces no degradation compared to the original.",
-	Flags: []cli.Flag{
-		&cli.StringFlag{
-			Name:     outputDirFlagName,
-			Aliases:  []string{"o"},
-			Usage:    "Output directory",
-			Value:    "",
-			OnlyOnce: true,
-		},
-		&cli.BoolFlag{
-			Name:     nvdecFlagName,
-			Usage:    "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     vaapiDecFlagName,
-			Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     d3d12DecFlagName,
-			Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     videoToolboxDecFlagName,
-			Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.IntFlag{
-			Name:     nvidiaGPUIndexFlagName,
-			Usage:    "GPU to use with --" + nvdecFlagName,
-			Value:    ffmpeg.CUDADefaultDevice,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.StringFlag{
-			Name:     vaapiRendererPathFlagName,
-			Usage:    "Direct Rendering Manager render node to use with --" + vaapiDecFlagName,
-			Value:    ffmpeg.VAAPIDefaultDevice,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.IntFlag{
-			Name:     d3d12vaGPUIndexFlagName,
-			Usage:    "GPU to use with --" + d3d12DecFlagName,
-			Value:    ffmpeg.D3D12VADefaultDevice,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-	},
+	Flags: func() []cli.Flag {
+		flags := []cli.Flag{
+			&cli.StringFlag{
+				Name:     outputDirFlagName,
+				Aliases:  []string{"o"},
+				Usage:    "Output directory",
+				Value:    "",
+				OnlyOnce: true,
+			},
+		}
+		flags = append(flags, hwDecodeFlags(false)...)
+		return flags
+	}(),
 	Arguments: []cli.Argument{
 		&cli.StringArg{
 			Name:      "inputfile",

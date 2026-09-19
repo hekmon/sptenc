@@ -27,17 +27,9 @@ import (
 
 // Flag names and defaults for batchsearch-specific flags.
 const (
-	finalEncodeFlagName   = "finalencode"
-	maxThresholdFlagName  = "maxthreshold"
-	maxCandidatesFlagName = "maxcandidates"
-	strikesFlagName       = "strikes"
-	strikesMinimum        = 3
-	minDropFlagName       = "mindrop"
-	minDropDefault        = 3
-
-	minThresholdDefault  = 10.0
-	maxThresholdDefault  = 40.0
-	maxCandidatesDefault = 30
+	finalEncodeFlagName = "finalencode"
+	strikesFlagName     = "strikes"
+	strikesMinimum      = 3
 )
 
 var (
@@ -140,41 +132,9 @@ var batchsearchCommand = &cli.Command{
 				Value:    false,
 				OnlyOnce: true,
 			},
-			&cli.Float64Flag{
-				Name:    minThresholdFlagName,
-				Aliases: []string{"T"},
-				Usage: fmt.Sprintf("Start threshold search at this value (valid values: %d-%d).",
-					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
-				),
-				Value:     minThresholdDefault,
-				OnlyOnce:  true,
-				Validator: validateSceneThreshold,
-				Category:  "Threshold Search",
-			},
-			&cli.Float64Flag{
-				Name: maxThresholdFlagName,
-				Usage: fmt.Sprintf("Cap threshold search at this value (valid values: %d-%d).",
-					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
-				),
-				Value:     maxThresholdDefault,
-				OnlyOnce:  true,
-				Validator: validateSceneThreshold,
-				Category:  "Threshold Search",
-			},
-			&cli.IntFlag{
-				Name:     maxCandidatesFlagName,
-				Aliases:  []string{"m"},
-				Usage:    "Maximum number of candidate thresholds to test",
-				Value:    maxCandidatesDefault,
-				OnlyOnce: true,
-				Validator: func(v int) error {
-					if v < 1 {
-						return fmt.Errorf("%s must be at least 1", maxCandidatesFlagName)
-					}
-					return nil
-				},
-				Category: "Threshold Search",
-			},
+		}
+		flags = append(flags, thresholdSearchFlags()...)
+		flags = append(flags,
 			&cli.IntFlag{
 				Name:     strikesFlagName,
 				Aliases:  []string{"S"},
@@ -189,20 +149,6 @@ var batchsearchCommand = &cli.Command{
 				},
 				Category: "Threshold Search",
 			},
-			&cli.IntFlag{
-				Name:     minDropFlagName,
-				Aliases:  []string{"d"},
-				Usage:    "Minimum scene drop between two candidate thresholds (auto-tuning will not go below this)",
-				Value:    minDropDefault,
-				OnlyOnce: true,
-				Validator: func(v int) error {
-					if v < 1 {
-						return fmt.Errorf("%s must be 1 at minimum", minDropFlagName)
-					}
-					return nil
-				},
-				Category: "Threshold Search",
-			},
 			&cli.StringFlag{
 				Name:     cacheProfileFlagName,
 				Aliases:  []string{"c"},
@@ -211,7 +157,7 @@ var batchsearchCommand = &cli.Command{
 				OnlyOnce: true,
 				Category: "Cache isolation",
 			},
-		}
+		)
 		flags = append(flags, newGPUSelectionFlags()...)
 		flags = append(flags, newDirectoryFlags(false)...)
 		flags = append(flags, newVMAFFlags()...)

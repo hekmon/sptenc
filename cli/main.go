@@ -120,6 +120,7 @@ func main() {
 			verifyCommand,
 			// tooling
 			masterCommand,
+			thresholdsCommand,
 			splitCommand,
 			concatCommand,
 			vmafCommand,

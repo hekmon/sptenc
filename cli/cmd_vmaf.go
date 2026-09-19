@@ -30,56 +30,8 @@ var vmafCommand = &cli.Command{
 		"(requires libvmaf_cuda, not available in standard ffmpeg builds). When this is enabled,\n" +
 		"NVDEC decoding is automatically used for compatible input codecs; --" + nvdecFlagName + " is implied.",
 	Flags: func() (flags []cli.Flag) {
-		flags = []cli.Flag{
-			&cli.BoolFlag{
-				Name:     nvdecFlagName,
-				Usage:    "Use NVDEC hardware-accelerated decoding for compatible codecs (NVIDIA GPU required)",
-				Value:    false,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
-			&cli.BoolFlag{
-				Name:     vaapiDecFlagName,
-				Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
-				Value:    false,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
-			&cli.BoolFlag{
-				Name:     d3d12DecFlagName,
-				Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
-				Value:    false,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
-			&cli.BoolFlag{
-				Name:     videoToolboxDecFlagName,
-				Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
-				Value:    false,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
-			&cli.IntFlag{
-				Name:     nvidiaGPUIndexFlagName,
-				Usage:    "GPU to use with --" + nvdecFlagName + " or --" + vmafCUDAFlagName,
-				Value:    ffmpeg.CUDADefaultDevice,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
-			&cli.StringFlag{
-				Name:     vaapiRendererPathFlagName,
-				Usage:    "Direct Rendering Manager render node to use with --" + vaapiDecFlagName,
-				Value:    ffmpeg.VAAPIDefaultDevice,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
-			&cli.IntFlag{
-				Name:     d3d12vaGPUIndexFlagName,
-				Usage:    "GPU to use with --" + d3d12DecFlagName,
-				Value:    ffmpeg.D3D12VADefaultDevice,
-				OnlyOnce: true,
-				Category: "Hardware accelerated decoding",
-			},
+		flags = append(flags, hwDecodeFlags(true)...)
+		flags = append(flags,
 			&cli.BoolFlag{
 				Name:     vmafCUDAFlagName,
 				Usage:    "Use CUDA acceleration for VMAF computation",
@@ -104,7 +56,7 @@ var vmafCommand = &cli.Command{
 				ValidateDefaults: true,
 				Category:         "Directories",
 			},
-		}
+		)
 		return
 	}(),
 	Arguments: []cli.Argument{
