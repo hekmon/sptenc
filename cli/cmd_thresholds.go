@@ -32,7 +32,7 @@ var (
 		Row: tw.CellConfig{
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{
-					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
+					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
 				},
 			},
 		},
@@ -187,17 +187,18 @@ var thresholdsCommand = &cli.Command{
 		// Results table
 		var buff strings.Builder
 		table := tablewriter.NewTable(&buff, tablewriter.WithConfig(thresholdsTableConfig))
-		table.Header("Threshold", "Scenes", "Mean", "Std Dev", "Shortest", "≤0.5s", "≤1s")
+		table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest", "≤1s", "≤0.5s")
 		for _, candidate := range candidates {
 			row := computeCandidateStats(scenes, duration, candidate)
 			table.Append([]string{
 				strconv.FormatFloat(candidate, 'f', -1, 64),
 				strconv.Itoa(row.scenes),
-				row.mean.Round(time.Millisecond).String(),
+				row.longest.Round(time.Millisecond).String(),
 				row.stddev.Round(time.Millisecond).String(),
+				row.mean.Round(time.Millisecond).String(),
 				row.shortest.Round(time.Millisecond).String(),
-				strconv.Itoa(row.shortHalf),
 				strconv.Itoa(row.short1s),
+				strconv.Itoa(row.shortHalf),
 			})
 		}
 		table.Render()
@@ -212,6 +213,7 @@ type candidateStats struct {
 	mean      time.Duration
 	stddev    time.Duration
 	shortest  time.Duration
+	longest   time.Duration
 	shortHalf int
 	short1s   int
 }
@@ -238,6 +240,7 @@ func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, t
 
 	durationsFloat := make([]float64, len(durations))
 	minDur := durations[0]
+	maxDur := durations[0]
 	shortHalf := 0
 	short1s := 0
 
@@ -245,6 +248,9 @@ func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, t
 		durationsFloat[i] = float64(d)
 		if d < minDur {
 			minDur = d
+		}
+		if d > maxDur {
+			maxDur = d
 		}
 		if d < 500*time.Millisecond {
 			shortHalf++
@@ -261,6 +267,7 @@ func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, t
 		mean:      time.Duration(mean),
 		stddev:    time.Duration(stddev),
 		shortest:  minDur,
+		longest:   maxDur,
 		shortHalf: shortHalf,
 		short1s:   short1s,
 	}
