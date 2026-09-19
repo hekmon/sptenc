@@ -84,14 +84,13 @@ func hwDecodeFlags(forVMAF bool) []cli.Flag {
 // Threshold search flag names and defaults.
 const (
 	minThresholdFlagName  = "minthreshold"
+	minThresholdDefault   = 14.0
 	maxThresholdFlagName  = "maxthreshold"
+	maxThresholdDefault   = 50.0
 	maxCandidatesFlagName = "maxcandidates"
+	maxCandidatesDefault  = 30
 	minDropFlagName       = "mindrop"
-
-	minThresholdDefault  = 10.0
-	maxThresholdDefault  = 40.0
-	maxCandidatesDefault = 30
-	minDropDefault       = 3
+	minDropDefault        = 3
 )
 
 // thresholdSearchFlags returns the standard threshold search tuning flags.
