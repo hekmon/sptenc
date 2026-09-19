@@ -400,7 +400,7 @@ var batchsearchCommand = &cli.Command{
 			candidates = core.GetSearchThresholdCandidates(cappedScenes, cmd.Int(minDropFlagName))
 			effectiveMinDrop = cmd.Int(minDropFlagName)
 		}
-		fmt.Fprintf(bypass, "\tAuto-tuned to scene drop of %d to fit within %s=%d, producing %d candidates\n",
+		fmt.Fprintf(bypass, "\tScene drop auto-tuned to %d to stay within %s=%d, producing %d candidates\n",
 			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
 		)
 		if cmd.Bool(debugFlagName) {
