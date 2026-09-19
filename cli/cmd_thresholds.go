@@ -131,8 +131,14 @@ var thresholdsCommand = &cli.Command{
 			shellescape.Quote(filepath.Base(inputFilePath)),
 			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
 		)
+		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+		)
+		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
+		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
 
-		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
+		fmt.Fprintf(bypass, "\nDetecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
