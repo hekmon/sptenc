@@ -8,14 +8,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/hekmon/sptenc/ffmpeg"
+
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/liveprogress/v2"
-	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/urfave/cli/v3"
 )
 
 var vmafCommand = &cli.Command{
 	Name:     "vmaf",
+	Aliases:  []string{"a"},
 	Category: "Tooling",
 	Usage:    "Compute VMAF between a reference and a distorted video",
 	Description: "Compare a distorted (encoded) video against its reference (original) using VMAF.\n\n" +

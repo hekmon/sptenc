@@ -24,7 +24,7 @@ import (
 
 var thresholdsCommand = &cli.Command{
 	Name:     "thresholds",
-	Aliases:  []string{"th"},
+	Aliases:  []string{"t"},
 	Category: "Tooling",
 	Usage:    "Preview candidate thresholds and their scene distributions",
 	Description: "Detect scene boundaries once, then simulate what segment distributions\n" +

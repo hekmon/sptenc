@@ -109,7 +109,8 @@ func thresholdSearchFlags() []cli.Flag {
 			Validator: validateSceneThreshold,
 		},
 		&cli.Float64Flag{
-			Name: maxThresholdFlagName,
+			Name:    maxThresholdFlagName,
+			Aliases: []string{"M"},
 			Usage: fmt.Sprintf("Maximum scene detection threshold (%d-%d)",
 				ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 			),

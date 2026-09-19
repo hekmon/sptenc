@@ -44,7 +44,7 @@ var (
 
 var batchsearchCommand = &cli.Command{
 	Name:     "batchsearch",
-	Aliases:  []string{"bs"},
+	Aliases:  []string{"b"},
 	Category: "Advanced",
 	Usage:    "Automatically search for the optimal scene threshold by encoding the video multiple times",
 	Description: "Orchestrate multiple encode passes with different scene detection thresholds\n" +
