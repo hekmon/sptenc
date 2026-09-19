@@ -71,6 +71,11 @@ var batchsearchCommand = &cli.Command{
 		"The sweet spot is a threshold that gives each scene enough freedom to use its own QP while\n" +
 		"leaving enough continuous frames for the encoder to compress efficiently. batchsearch finds this\n" +
 		"automatically by testing candidates across the spectrum.\n\n" +
+		"PREVIEWING CANDIDATES\n" +
+		"Use the thresholds command to preview what candidate thresholds and scene distributions your\n" +
+		"chosen range will produce, without running any encodes. It is a fast way to validate that\n" +
+		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", and --" + minDropFlagName + " are set\n" +
+		"sensibly before committing to a long batchsearch run.\n\n" +
 		"CONTROLLING SEARCH COST\n" +
 		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
 		"  * GPU search: may take several days in total.\n" +
