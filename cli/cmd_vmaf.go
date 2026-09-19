@@ -130,6 +130,9 @@ var vmafCommand = &cli.Command{
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
+		/*
+		 * Prepare
+		 */
 		referencePath := cmd.StringArg("reference")
 		distortedPath := cmd.StringArg("distorted")
 
@@ -138,8 +141,35 @@ var vmafCommand = &cli.Command{
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
-
 		bypass := liveprogress.Bypass()
+
+		// create a temporary directory
+		var workingDir string
+		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
+			return fmt.Errorf("failed to create temporary working directory in %s: %w",
+				shellescape.Quote(cmd.String(tmpDirFlagName)), err,
+			)
+		}
+		defer func() {
+			if (err != nil && ctx.Err() != context.Canceled) || cmd.Bool(debugFlagName) {
+				fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
+					shellescape.Quote(workingDir),
+				)
+			} else {
+				if removeErr := os.RemoveAll(workingDir); removeErr != nil {
+					fmt.Fprintf(bypass, "ERROR: Failed to delete temporary working directory %s: %s\n",
+						shellescape.Quote(workingDir), removeErr,
+					)
+				}
+			}
+		}()
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
+		}
+
+		/*
+		 * Execute
+		 */
 
 		// Probe reference file for stream info and frame count
 		fmt.Fprintln(bypass, "Probing reference file...")
@@ -155,9 +185,35 @@ var vmafCommand = &cli.Command{
 			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
 		}
 
-		totalFrames := videoStream.NbReadFrames
+		// Probe distorted file and validate compatibility
+		fmt.Fprintln(bypass, "Probing distorted file...")
+		distStats, err := getStreamsInfosCF(ctx, distortedPath, cmd.Bool(debugFlagName))
+		if err != nil {
+			return fmt.Errorf("failed to probe distorted file: %w", err)
+		}
+		distVideoStream := distStats.VideoTrack()
+		if distVideoStream == nil {
+			return errors.New("distorted file has no video stream")
+		}
+		if !distVideoStream.IsConstantFrameRate() {
+			return errors.New("distorted file has variable frame rate (VFR): VMAF requires CFR for frame-exact alignment")
+		}
+
+		// Validate frame counts match
+		refFrames := videoStream.NbReadFrames
+		distFrames := distVideoStream.NbReadFrames
+		if refFrames != 0 && distFrames != 0 && refFrames != distFrames {
+			return fmt.Errorf("frame count mismatch: reference has %d frames, distorted has %d frames", refFrames, distFrames)
+		}
+
+		// Validate frame rates match (same -r will be forced on both inputs)
+		if videoStream.RFrameRate != distVideoStream.RFrameRate {
+			return fmt.Errorf("frame rate mismatch: reference is %s fps, distorted is %s fps", videoStream.RFrameRate, distVideoStream.RFrameRate)
+		}
+
+		totalFrames := refFrames
 		if totalFrames == 0 {
-			totalFrames = videoStream.NbFrames
+			totalFrames = distFrames
 		}
 
 		// Build hardware decode config and warn on incompatible codecs
@@ -187,54 +243,11 @@ var vmafCommand = &cli.Command{
 			}
 		}
 
-		// create a temporary directory
-		var workingDir string
-		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
-			return fmt.Errorf("failed to create temporary working directory in %s: %w",
-				shellescape.Quote(cmd.String(tmpDirFlagName)), err,
-			)
-		}
-		defer func() {
-			if (err != nil && ctx.Err() != context.Canceled) || cmd.Bool(debugFlagName) {
-				fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
-					shellescape.Quote(workingDir),
-				)
-			} else {
-				if removeErr := os.RemoveAll(workingDir); removeErr != nil {
-					fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
-						shellescape.Quote(workingDir), removeErr,
-					)
-				}
-			}
-		}()
-		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
-		}
-
 		// Compute VMAF with progress
 		fmt.Fprintln(bypass, "Computing VMAF...")
 		start := time.Now()
-		barOpts := []liveprogress.BarOption{
-			liveprogress.WithMultiplyRunes(),
-			liveprogress.WithSameAutoSizeInternalPadding(true, false),
-			liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-				return "       VMAF | "
-			}),
-			liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-			liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-			liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-			liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-				return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
-			}),
-		}
-		if totalFrames > 0 {
-			barOpts = append(barOpts, liveprogress.WithTotal(uint64(totalFrames)))
-		}
-		vmafBar := liveprogress.AddBar(barOpts...)
-		defer liveprogress.RemoveBar(vmafBar)
-
 		gpuIndex := cmd.Int(nvidiaGPUIndexFlagName)
-		report, err := ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
+		report, err := liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
 			ReferencePath:     referencePath,
 			DistortedPath:     distortedPath,
 			InputFrameRate:    videoStream.RFrameRate,
@@ -244,18 +257,7 @@ var vmafCommand = &cli.Command{
 			VMAFCuda:          cmd.Bool(vmafCUDAFlagName),
 			GPUID:             &gpuIndex,
 			HWDecoderConfig:   decoderCfg,
-			Debug: func(s string) {
-				if cmd.Bool(debugFlagName) {
-					fmt.Fprintf(bypass, "DEBUG: %s\n", s)
-				}
-			},
-			RuntimeError: func(err error) {
-				fmt.Fprintf(bypass, "ERROR: %s\n", err)
-			},
-			FFMPEGStatsReport: func(stats ffmpeg.ProgressStats) {
-				vmafBar.CurrentSet(uint64(stats.CurrentFrame))
-			},
-		})
+		}, totalFrames, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to compute VMAF: %w", err)
 		}

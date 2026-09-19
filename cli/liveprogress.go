@@ -266,7 +266,7 @@ func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segm
 }
 
 /*
- * Encode
+ * Probe
  */
 
 func getStreamsInfos(ctx context.Context, path string, debug bool) (stats ffmpeg.FFProbeStats, err error) {
@@ -558,6 +558,58 @@ func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAt
 	to.globalAllSegmentSize = cunits.ImportInBytes(float64(currentTotalSize))
 }
 
+/*
+ * VMAF
+ */
+
+func liveVMAF(ctx context.Context, config ffmpeg.VMAFComputeConfig, totalFrames int, debug bool) (
+	stats ffmpeg.VMAFReport, err error) {
+	bypass := liveprogress.Bypass()
+	barOpts := []liveprogress.BarOption{
+		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "       VMAF | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
+		}),
+	}
+	if totalFrames > 0 {
+		barOpts = append(barOpts, liveprogress.WithTotal(uint64(totalFrames)))
+	}
+	vmafBar := liveprogress.AddBar(barOpts...)
+	defer liveprogress.RemoveBar(vmafBar)
+	// Inject progress into config (preserve caller callbacks if any)
+	origStatsReport := config.FFMPEGStatsReport
+	config.FFMPEGStatsReport = func(stats ffmpeg.ProgressStats) {
+		vmafBar.CurrentSet(uint64(stats.CurrentFrame))
+		if origStatsReport != nil {
+			origStatsReport(stats)
+		}
+	}
+	origDebug := config.Debug
+	config.Debug = func(s string) {
+		if debug {
+			fmt.Fprintf(bypass, "DEBUG: %s\n", s)
+		}
+		if origDebug != nil {
+			origDebug(s)
+		}
+	}
+	origRuntimeError := config.RuntimeError
+	config.RuntimeError = func(err error) {
+		fmt.Fprintf(bypass, "ERROR: %s\n", err)
+		if origRuntimeError != nil {
+			origRuntimeError(err)
+		}
+	}
+	return ffmpeg.VMAFCompute(ctx, config)
+}
+
 func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, totalFrames int, debug bool) (err error) {
 	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
 	if err != nil {
@@ -599,28 +651,11 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 	})
 }
 
+// liveFinalVMAF computes the final VMAF on the fully encoded/concatenated output.
+// It is used by the encode and batch-search pipelines as the last quality-check step.
 func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *ffmpeg.FFProbeBinaryStream, totalFrames, gpuIndex int, vmafNeg, vmafCUDA, debug bool) (
 	stats ffmpeg.VMAFReport, err error) {
-	vmafBar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(totalFrames)), // not derived from sourceStats as it could be from segmented input (from segment #0)
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "       VMAF | "
-		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %d/%d frames", bar.Current(), bar.Total())
-		}),
-	)
-	defer liveprogress.RemoveBar(vmafBar)
-	progress := func(stats ffmpeg.ProgressStats) {
-		vmafBar.CurrentSet(uint64(stats.CurrentFrame))
-	}
-	return ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
+	return liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
 		ReferencePath:     source,
 		DistortedPath:     distorted,
 		InputFrameRate:    videoStream.RFrameRate,
@@ -629,17 +664,12 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		NoEnhancementGain: vmafNeg,
 		VMAFCuda:          vmafCUDA,
 		GPUID:             &gpuIndex,
-		Debug: func(s string) {
-			if debug {
-				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
-			}
-		},
-		RuntimeError: func(err error) {
-			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
-		},
-		FFMPEGStatsReport: progress,
-	})
+	}, totalFrames, debug)
 }
+
+/*
+ * Post-processing
+ */
 
 func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputFile string, encodeToFLAC bool, tags ffmpeg.FFMEGTags,
 	expectedDuration time.Duration, debug bool) (err error) {
