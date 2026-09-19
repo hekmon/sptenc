@@ -80,6 +80,9 @@ var thresholdsCommand = &cli.Command{
 			return ctx, fmt.Errorf("only one hardware decode flag can be set at a time (--%s, --%s, --%s, --%s)",
 				nvdecFlagName, vaapiDecFlagName, d3d12DecFlagName, videoToolboxDecFlagName)
 		}
+		if cmd.Float64(minThresholdFlagName) >= cmd.Float64(maxThresholdFlagName) {
+			return ctx, fmt.Errorf("--%s must be strictly less than --%s", minThresholdFlagName, maxThresholdFlagName)
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
