@@ -124,7 +124,7 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 	} else {
 		args = append(args,
 			"-qp", strconv.Itoa(config.Quantization),
-			"-x265-params", fmt.Sprintf("aq-mode=%d", libx265AQMode),
+			"-x265-params", fmt.Sprintf("log-level=error:aq-mode=%d", libx265AQMode),
 		)
 	}
 	//// end with output
