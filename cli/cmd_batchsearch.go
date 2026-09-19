@@ -34,6 +34,11 @@ const (
 
 var (
 	batchTableConfig = tablewriter.Config{
+		Header: tw.CellConfig{
+			Formatting: tw.CellFormatting{
+				AutoFormat: tw.Off,
+			},
+		},
 		Row: tw.CellConfig{
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{tw.AlignCenter, tw.AlignCenter, tw.AlignCenter},

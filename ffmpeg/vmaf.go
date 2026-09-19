@@ -429,6 +429,11 @@ func (vs VMAFStats) String() string {
 				WithCenter("┼"),
 		})),
 		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Formatting: tw.CellFormatting{
+					AutoFormat: tw.Off,
+				},
+			},
 			Row: tw.CellConfig{
 				Alignment: tw.CellAlignment{Global: tw.AlignCenter},
 			},

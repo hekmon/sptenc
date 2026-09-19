@@ -163,6 +163,11 @@ var thresholdsCommand = &cli.Command{
 		var buff strings.Builder
 		table := tablewriter.NewTable(&buff,
 			tablewriter.WithConfig(tablewriter.Config{
+				Header: tw.CellConfig{
+					Formatting: tw.CellFormatting{
+						AutoFormat: tw.Off,
+					},
+				},
 				Row: tw.CellConfig{
 					Alignment: tw.CellAlignment{
 						PerColumn: []tw.Align{

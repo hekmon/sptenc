@@ -186,6 +186,9 @@ func (vc VMAFChecker) String() string {
 		})),
 		tablewriter.WithConfig(tablewriter.Config{
 			Header: tw.CellConfig{
+				Formatting: tw.CellFormatting{
+					AutoFormat: tw.Off,
+				},
 				Alignment: tw.CellAlignment{PerColumn: alignments},
 			},
 			Row: tw.CellConfig{
