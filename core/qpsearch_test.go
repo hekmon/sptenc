@@ -190,7 +190,7 @@ func TestFindAllSegmentsQP_Convergence(t *testing.T) {
 
 	// Require mean >= 80 → optimal QP is 13 (mean=80.5 at qp=13, mean=79 at qp=14).
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestFindAllSegmentsQP_BestEffort(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestFindAllSegmentsQP_CacheGuidesSearch(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestFindAllSegmentsQP_MultiSegmentDifferentQPs(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestFindAllSegmentsQP_KeepInvalidQP(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestFindAllSegmentsQP_EncodeError(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -577,7 +577,7 @@ func TestFindAllSegmentsQP_VMAFError(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestFindAllSegmentsQP_ProbeStreamError(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -664,7 +664,7 @@ func TestFindAllSegmentsQP_FinalSegmentFrameMismatch(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestFindAllSegmentsQP_BestEffortMultipleSegments(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestFindAllSegmentsQP_MockEncoderTracksCalls(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -822,7 +822,7 @@ func TestFindAllSegmentsQP_NilEncoderPanics(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -864,7 +864,7 @@ func TestFindAllSegmentsQP_NilCallbacksPanics(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -935,7 +935,7 @@ func TestFindAllSegmentsQP_CacheMeanOutOfRange(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -979,7 +979,7 @@ func TestFindAllSegmentsQP_TotalEncodedFrames(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestFindAllSegmentsQP_QPMaxIsOptimal(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 10, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 10)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -1092,7 +1092,7 @@ func TestFindAllSegmentsQP_MeanAtQPMinValid(t *testing.T) {
 	// fast-return at lines 290-293 and return QP 0 as best-effort. The fix
 	// jumps to qpMax to close the bracket, then interpolation converges to QP 6.
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 90, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 90)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -1136,7 +1136,7 @@ func TestFindAllSegmentsQP_ZeroFrames(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}
@@ -1173,7 +1173,7 @@ func TestFindAllSegmentsQP_StatError(t *testing.T) {
 	}
 
 	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create auditor: %v", err)
 	}

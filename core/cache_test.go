@@ -42,7 +42,7 @@ func TestNewStatsCacheHistory(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestStatsCacheHistory_AddRunAndDedup(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestStatsCacheHistory_AddRunConcurrent(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestStatsCacheHistory_GetMeanStdDev_Empty(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestStatsCacheHistory_GetMeanStdDev_Weighted(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestStatsCacheHistory_SaveLoadRoundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -239,12 +239,12 @@ func TestStatsCacheHistory_SaveLoadRoundtrip(t *testing.T) {
 
 func TestComputeCacheStatsFileName_Stability(t *testing.T) {
 	profile1, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 	profile2, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80.1, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80.1)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestStatsCacheHistory_AddRunInvalidDir(t *testing.T) {
 
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestStatsCacheHistory_FileCorruption(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestStatsCacheHistory_QPRangeBoundary(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 10, qpMax: 30}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestNewStatsCacheHistory_UnsupportedEncoder(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "unsupported", noRange: true}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
@@ -357,11 +357,114 @@ func TestNewStatsCacheHistory_UnsupportedEncoder(t *testing.T) {
 	}
 }
 
+func TestParseCacheFilename_Roundtrip(t *testing.T) {
+	tests := []struct {
+		name         string
+		encoder      string
+		min          float64
+		p1           float64
+		p5           float64
+		p10          float64
+		p25          float64
+		median       float64
+		mean         float64
+		hmean        float64
+		cacheProfile string
+	}{
+		{
+			name:    "no profile",
+			encoder: "libx265",
+			mean:    93,
+			hmean:   93,
+		},
+		{
+			name:         "with profile",
+			encoder:      "svtav1",
+			mean:         95,
+			hmean:        93,
+			cacheProfile: "grainy_90s",
+		},
+		{
+			name:    "all thresholds active",
+			encoder: "hevc_nvenc",
+			min:     70, p1: 75, p5: 80, p10: 82, p25: 85,
+			median: 88, mean: 90, hmean: 93,
+		},
+		{
+			name:    "mixed off values",
+			encoder: "libaom-av1",
+			min:     VMAFOffValue, p1: 75, p5: VMAFOffValue, p10: 82,
+			p25: VMAFOffValue, median: 88, mean: VMAFOffValue, hmean: 93,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile, err := NewVMAFChecker(tt.min, tt.p1, tt.p5, tt.p10, tt.p25, tt.median, tt.hmean, tt.mean)
+			if err != nil {
+				t.Fatalf("failed to create profile: %v", err)
+			}
+
+			filename := computeCacheStatsFileName(tt.encoder, profile, tt.cacheProfile)
+			identity, ok := ParseCacheFilename(filename)
+			if !ok {
+				t.Fatalf("ParseCacheFilename failed for %s", filename)
+			}
+
+			if identity.Encoder != tt.encoder {
+				t.Errorf("encoder: want %q, got %q", tt.encoder, identity.Encoder)
+			}
+			if identity.CacheProfile != tt.cacheProfile {
+				t.Errorf("cacheProfile: want %q, got %q", tt.cacheProfile, identity.CacheProfile)
+			}
+
+			// Compare thresholds via Thresholds() map
+			wantMap := profile.Thresholds()
+			gotMap := identity.Profile.Thresholds()
+			if len(gotMap) != len(wantMap) {
+				t.Errorf("threshold count: want %d, got %d", len(wantMap), len(gotMap))
+			}
+			for k, wantV := range wantMap {
+				gotV, exists := gotMap[k]
+				if !exists {
+					t.Errorf("missing threshold %s", k)
+					continue
+				}
+				if gotV != wantV {
+					t.Errorf("threshold %s: want %v, got %v", k, wantV, gotV)
+				}
+			}
+		})
+	}
+}
+
+func TestParseCacheFilename_Invalid(t *testing.T) {
+	invalidNames := []string{
+		"",
+		"qphistory_libx265_vmaf-abc.json",
+		"qphistory_libx265.json",
+		"qphistory_libx265_vmaf-.json",
+		"qphistory__vmaf-abc123.json",
+		"libx265_vmaf-abc123.json",
+		"qphistory_libx265_vmaf-abc123_extra.json",
+		"not_a_cache_file.json",
+	}
+
+	for _, name := range invalidNames {
+		t.Run(name, func(t *testing.T) {
+			_, ok := ParseCacheFilename(name)
+			if ok {
+				t.Errorf("expected ParseCacheFilename(%q) to return ok=false", name)
+			}
+		})
+	}
+}
+
 func TestStatsCacheHistory_CacheProfileInFilename(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
 	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}

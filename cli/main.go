@@ -124,6 +124,7 @@ func main() {
 			splitCommand,
 			concatCommand,
 			vmafCommand,
+			cacheCommand,
 			// advanced
 			batchsearchCommand,
 		},

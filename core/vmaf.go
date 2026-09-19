@@ -37,9 +37,9 @@ func setThreshold(name string, value float64, target *float64) error {
 // NewVMAFChecker creates a new VMAFChecker with the given thresholds.
 // Each threshold can be set to VMAFOffValue to disable that specific check.
 // Returns an error if all values are off or if any value is out of the valid VMAF range.
-func NewVMAFChecker(min, p1, p5, p10, p25, median, mean, hmean float64) (vc VMAFChecker, err error) {
+func NewVMAFChecker(min, p1, p5, p10, p25, median, hmean, mean float64) (vc VMAFChecker, err error) {
 	if min == VMAFOffValue && p1 == VMAFOffValue && p5 == VMAFOffValue && p10 == VMAFOffValue &&
-		p25 == VMAFOffValue && median == VMAFOffValue && mean == VMAFOffValue && hmean == VMAFOffValue {
+		p25 == VMAFOffValue && median == VMAFOffValue && hmean == VMAFOffValue && mean == VMAFOffValue {
 		err = errors.New("all values are off")
 		return
 	}
@@ -61,10 +61,10 @@ func NewVMAFChecker(min, p1, p5, p10, p25, median, mean, hmean float64) (vc VMAF
 	if err = setThreshold("median", median, &vc.median); err != nil {
 		return
 	}
-	if err = setThreshold("mean", mean, &vc.mean); err != nil {
+	if err = setThreshold("hmean", hmean, &vc.hmean); err != nil {
 		return
 	}
-	if err = setThreshold("hmean", hmean, &vc.hmean); err != nil {
+	if err = setThreshold("mean", mean, &vc.mean); err != nil {
 		return
 	}
 	return
@@ -78,8 +78,8 @@ type VMAFChecker struct {
 	p10    float64
 	p25    float64
 	median float64
-	mean   float64
 	hmean  float64
+	mean   float64
 }
 
 // Thresholds returns a map of all active threshold names to their values.

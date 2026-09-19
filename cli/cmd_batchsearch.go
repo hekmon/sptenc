@@ -287,7 +287,7 @@ var batchsearchCommand = &cli.Command{
 		// Create the VMAF auditor
 		vmafAuditor, err := core.NewVMAFChecker(
 			cmd.Float64(vmafMinFlagName), cmd.Float64(vmafP1FlagName), cmd.Float64(vmafP5FlagName), cmd.Float64(vmafP10FlagName),
-			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafMeanFlagName), cmd.Float64(vmafHMeanFlagName))
+			cmd.Float64(vmafP25FlagName), cmd.Float64(vmafMedianFlagName), cmd.Float64(vmafHMeanFlagName), cmd.Float64(vmafMeanFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to create VMAF auditor: %w", err)
 		}

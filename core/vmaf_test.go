@@ -35,7 +35,7 @@ func TestNewVMAFChecker_OutOfRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewVMAFChecker(tt.min, tt.p1, tt.p5, tt.p10, tt.p25, tt.med, tt.mean, tt.hmean)
+			_, err := NewVMAFChecker(tt.min, tt.p1, tt.p5, tt.p10, tt.p25, tt.med, tt.hmean, tt.mean)
 			if err == nil {
 				t.Fatal("expected error for out-of-range value, got nil")
 			}
@@ -51,7 +51,7 @@ func TestNewVMAFChecker_Valid(t *testing.T) {
 
 	// Single active threshold should work
 	_, err = NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("expected no error for single active threshold, got %v", err)
 	}
@@ -59,7 +59,7 @@ func TestNewVMAFChecker_Valid(t *testing.T) {
 
 func TestVMAFChecker_Validate(t *testing.T) {
 	vc, err := NewVMAFChecker(50, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 80, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create checker: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestVMAFChecker_Validate_OnlySomeActive(t *testing.T) {
 }
 
 func TestVMAFChecker_String(t *testing.T) {
-	vc, err := NewVMAFChecker(50, VMAFOffValue, VMAFOffValue, 60, VMAFOffValue, 70, 80, VMAFOffValue)
+	vc, err := NewVMAFChecker(50, VMAFOffValue, VMAFOffValue, 60, VMAFOffValue, 70, VMAFOffValue, 80)
 	if err != nil {
 		t.Fatalf("failed to create checker: %v", err)
 	}
@@ -148,8 +148,8 @@ func TestVMAFChecker_Thresholds(t *testing.T) {
 		"min":   50,
 		"p5":    60,
 		"p25":   70,
-		"mean":  80,
-		"hmean": 90,
+		"hmean": 80,
+		"mean":  90,
 	}
 	for k, v := range expected {
 		got, ok := m[k]
@@ -203,9 +203,9 @@ func TestVMAFChecker_Validate_AllThresholds(t *testing.T) {
 				args[4] = 50
 			case "median":
 				args[5] = 50
-			case "mean":
-				args[6] = 50
 			case "hmean":
+				args[6] = 50
+			case "mean":
 				args[7] = 50
 			}
 			vc, err := NewVMAFChecker(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7])
@@ -231,7 +231,7 @@ func TestVMAFChecker_Validate_AllThresholds(t *testing.T) {
 
 func TestVMAFChecker_String_AllOffExceptOne(t *testing.T) {
 	vc, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, 90, VMAFOffValue)
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 90)
 	if err != nil {
 		t.Fatalf("failed to create checker: %v", err)
 	}
