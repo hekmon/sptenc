@@ -149,7 +149,7 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 ./sptenc encode ./segments/ --originalfile video.mkv
 ```
 
-> Use `--analyze` with the `split` command to preview detected scenes without splitting. Experiment with `--threshold` (1–100, default 10): higher values detect fewer scenes, lower values detect more.
+> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--minthreshold` (1–100, default 14): higher values detect fewer scenes, lower values detect more.
 >
 > Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` to speed up processing.
 

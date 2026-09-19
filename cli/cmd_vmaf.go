@@ -17,7 +17,6 @@ import (
 
 var vmafCommand = &cli.Command{
 	Name:     "vmaf",
-	Aliases:  []string{"a"},
 	Category: "Tooling",
 	Usage:    "Compute VMAF between a reference and a distorted video",
 	Description: "Compare a distorted (encoded) video against its reference (original) using VMAF.\n\n" +

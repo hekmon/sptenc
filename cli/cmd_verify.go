@@ -21,10 +21,7 @@ var verifyCommand = &cli.Command{
 	Description: "Check that required external tools are available and functional:\n" +
 		"  * ffmpeg (with at least one encoder and libvmaf support)\n" +
 		"  * ffprobe\n" +
-		"  * mkvpropedit\n\n" +
-		"ENCODERS\n" +
-		"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final encode\n" +
-		"to get the smallest file size.",
+		"  * mkvpropedit",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")
