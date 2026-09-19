@@ -533,11 +533,22 @@ var batchsearchCommand = &cli.Command{
 				fmt.Fprintf(bypass, "\tNew best found!\n")
 			}
 			// Once the video concatened, delete all segments to free up some disk space for next candidate
+			//// ffv1 is the one taking the most space
 			for _, segmentPath := range segmentsPaths {
 				if err = os.Remove(segmentPath); err != nil {
 					return fmt.Errorf("failed to delete candidate %s segment %s: %w",
 						candidateStr, shellescape.Quote(segmentPath), err,
 					)
+				}
+			}
+			//// can reclain additionnal space with encoded segments as well now they are merged
+			if !cmd.Bool(debugFlagName) {
+				for _, encodedSegmentPath := range batch.results[batch.currentCandidateIndex].EncodedSegmentsPaths {
+					if err = os.Remove(encodedSegmentPath); err != nil {
+						return fmt.Errorf("failed to delete candidate %s encoded segment %s: %w",
+							candidateStr, shellescape.Quote(encodedSegmentPath), err,
+						)
+					}
 				}
 			}
 		}
