@@ -283,7 +283,7 @@ var encodeCommand = &cli.Command{
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// analyze
-			fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
+			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			)
 			var scenes []ffmpeg.Scene

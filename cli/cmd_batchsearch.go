@@ -410,7 +410,7 @@ var batchsearchCommand = &cli.Command{
 		totalDuration := sourceStats.Format.Duration
 
 		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
-		fmt.Fprintf(bypass, "Detecting scenes with threshold above %s...\n",
+		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
