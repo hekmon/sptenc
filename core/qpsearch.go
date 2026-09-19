@@ -213,7 +213,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		return
 	}
 	if bestEffort {
-		scb.Warning("Segment #%d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment)
+		scb.Warning("Segment %d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment+1)
 	}
 	return
 }

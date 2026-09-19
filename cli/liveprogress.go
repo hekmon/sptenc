@@ -365,7 +365,7 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d/%d segments done | %s",
+			return fmt.Sprintf(" left | %d/%d segments | %s",
 				to.globalNbSegmentsDone, totalSegments, to.globalAllSegmentSize,
 			)
 		}),
@@ -431,9 +431,9 @@ func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
 		defer to.segmentCandidatesAccess.Unlock()
 		if len(to.segmentCandidates) == 0 {
 			// first step is to analyse source files for total number of frames, no candidate yet
-			return fmt.Sprintf("    Segment | #%d - Searching for best QP...", segmentIndex)
+			return fmt.Sprintf("    Segment | %d - Searching for best QP...", segmentIndex+1)
 		}
-		return fmt.Sprintf("    Segment | #%d - Searching for best QP: %s", segmentIndex, strings.Join(to.segmentCandidates, ","))
+		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1, strings.Join(to.segmentCandidates, " "))
 	})
 }
 
@@ -547,8 +547,8 @@ func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAt
 	// Clean up possible orphans child status
 	to.cleanupSegmentUI()
 	// Finished segment data
-	fmt.Fprintf(liveprogress.Bypass(), "\tSegment #%d: QP %d selected for this segment of %d frames (%d attempts)\n",
-		to.segmentCurrent, segmentFinalQP, segmentFrames, segmentNbAttempts,
+	fmt.Fprintf(liveprogress.Bypass(), "\tSegment %d: QP %d selected for this segment of %d frames (%d attempts)\n",
+		to.segmentCurrent+1, segmentFinalQP, segmentFrames, segmentNbAttempts,
 	)
 	// Global progress
 	if to.globalProgressBar != nil {
