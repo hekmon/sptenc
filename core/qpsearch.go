@@ -164,13 +164,10 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	// Abort if frame count is 0 or negative
 	totalFrames := videoTrack.NbReadFrames
 	if totalFrames <= 0 {
-		totalFrames = videoTrack.NbFrames
-		if totalFrames <= 0 {
-			err = fmt.Errorf("segment %d: frame count is 0 or negative (Nb(Read)Frames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
-				segment, totalFrames, duration, videoTrack.RFrameRate,
-			)
-			return
-		}
+		err = fmt.Errorf("segment %d: frame count is 0 or negative (NbReadFrames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
+			segment, totalFrames, duration, videoTrack.RFrameRate,
+		)
+		return
 	}
 	// Verify output files frames count when done
 	defer func() {
