@@ -32,7 +32,7 @@ var (
 		Row: tw.CellConfig{
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{
-					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
+					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
 				},
 			},
 		},
@@ -48,6 +48,15 @@ var thresholdsCommand = &cli.Command{
 		"each candidate threshold would produce. This helps you choose sensible values for\n" +
 		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", and --" + minDropFlagName + " before running\n" +
 		"batchsearch, where a bad range can cost hours of encoding time.\n\n" +
+		"WHY THRESHOLD SELECTION MATTERS\n" +
+		"Scene detection splits a video into independent segments. Each segment gets its own QP, so\n" +
+		"splitting finely lets hard passages use low QP and easy ones high. But every split forces an\n" +
+		"I-frame, and short runs starve B/P compression. Split coarsely and B/P frames thrive across\n" +
+		"long runs, yet the whole scene must bow to its hardest passage — easy sections pay for quality\n" +
+		"they do not need.\n\n" +
+		"The sweet spot is a threshold that gives each scene enough freedom to use its own QP while\n" +
+		"leaving enough continuous frames for the encoder to compress efficiently. This command lets you\n" +
+		"preview where that sweet spot likely lives without running a single encode.\n\n" +
 		"The candidate generation logic is identical to batchsearch, so the preview is a\n" +
 		"faithful map of what the search will explore.",
 	Flags: func() []cli.Flag {
@@ -103,16 +112,35 @@ var thresholdsCommand = &cli.Command{
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
-		inputFilePath := cmd.StringArg("inputfile")
-
+		/*
+		 * Prepare
+		 */
 		if err = liveprogress.Start(); err != nil {
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
 
+		/*
+		 * Execute
+		 */
+
+		fmt.Fprintf(bypass, "\nDetecting scenes with threshold at %s...\n",
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+		)
+		fmt.Fprintf(bypass, "Analyzing thresholds for %s (%s)\n",
+			shellescape.Quote(filepath.Base(cmd.StringArg("inputfile"))),
+			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+		)
+		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+		)
+		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
+		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
+		// Detect scenes
 		stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
-			Path: inputFilePath,
+			Path: cmd.StringArg("inputfile"),
 			Debug: func(s string) {
 				if cmd.Bool(debugFlagName) {
 					fmt.Fprintf(bypass, "DEBUG: %s\n", s)
@@ -125,23 +153,6 @@ var thresholdsCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
-		duration := stats.Format.Duration
-
-		fmt.Fprintf(bypass, "Analyzing thresholds for %s (%s)\n",
-			shellescape.Quote(filepath.Base(inputFilePath)),
-			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
-		)
-		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
-		)
-		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
-		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
-
-		fmt.Fprintf(bypass, "\nDetecting scenes with threshold at %s...\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-		)
-		start := time.Now()
 		scenesConfig := ffmpeg.ScenesDetectionConfig{
 			NVDec:           cmd.Bool(nvdecFlagName),
 			NVDevice:        cmd.Int(nvidiaGPUIndexFlagName),
@@ -151,14 +162,15 @@ var thresholdsCommand = &cli.Command{
 			D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
 			VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
 		}
-		scenes, err := liveDetectScenes(ctx, inputFilePath, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig)
+		start := time.Now()
+		scenes, err := liveDetectScenes(ctx, cmd.StringArg("inputfile"), cmd.Float64(minThresholdFlagName),
+			stats.Format.Duration, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-
 		// Thresholds candidates refine
 		cappedScenes := make([]core.Scene, 0, len(scenes))
 		for _, scene := range scenes {
@@ -189,13 +201,12 @@ var thresholdsCommand = &cli.Command{
 		if cmd.Bool(debugFlagName) {
 			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
 		}
-
 		// Results table
 		var buff strings.Builder
 		table := tablewriter.NewTable(&buff, tablewriter.WithConfig(thresholdsTableConfig))
-		table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest", "≤1s", "≤0.5s")
+		table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest", "≤1s %", "≤1s", "≤0.5s")
 		for _, candidate := range candidates {
-			row := computeCandidateStats(scenes, duration, candidate)
+			row := computeCandidateStats(scenes, stats.Format.Duration, candidate)
 			table.Append([]string{
 				strconv.FormatFloat(candidate, 'f', -1, 64),
 				strconv.Itoa(row.scenes),
@@ -203,53 +214,56 @@ var thresholdsCommand = &cli.Command{
 				row.stddev.Round(time.Millisecond).String(),
 				row.mean.Round(time.Millisecond).String(),
 				row.shortest.Round(time.Millisecond).String(),
+				strconv.FormatFloat(row.short1sPct, 'f', 1, 64) + "%",
 				strconv.Itoa(row.short1s),
 				strconv.Itoa(row.shortHalf),
 			})
 		}
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
-
-		return nil
+		return
 	},
 }
 
 type candidateStats struct {
-	scenes    int
-	mean      time.Duration
-	stddev    time.Duration
-	shortest  time.Duration
-	longest   time.Duration
-	shortHalf int
-	short1s   int
+	scenes     int
+	mean       time.Duration
+	stddev     time.Duration
+	shortest   time.Duration
+	longest    time.Duration
+	shortHalf  int
+	short1s    int
+	short1sPct float64
 }
 
 func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, threshold float64) candidateStats {
+	// Keep only if scene validate the minimum treshold
 	filtered := make([]ffmpeg.Scene, 0, len(scenes))
 	for _, s := range scenes {
 		if s.Score >= threshold {
 			filtered = append(filtered, s)
 		}
 	}
-
-	n := len(filtered) + 1
-	durations := make([]time.Duration, 0, n)
+	// Build scenes durations list
+	nbScenes := len(filtered) + 1
+	durations := make([]time.Duration, 0, nbScenes)
 	if len(filtered) == 0 {
+		// no cut, the whole is single scene of totalDuration
 		durations = append(durations, totalDuration)
 	} else {
+		// We do have cuts, let's compute duration per scene with retained cuts
 		durations = append(durations, filtered[0].Start)
 		for i := 1; i < len(filtered); i++ {
 			durations = append(durations, filtered[i].Start-filtered[i-1].Start)
 		}
 		durations = append(durations, totalDuration-filtered[len(filtered)-1].Start)
 	}
-
+	// Extract stats
 	durationsFloat := make([]float64, len(durations))
 	minDur := durations[0]
 	maxDur := durations[0]
 	shortHalf := 0
 	short1s := 0
-
 	for i, d := range durations {
 		durationsFloat[i] = float64(d)
 		if d < minDur {
@@ -265,16 +279,16 @@ func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, t
 			short1s++
 		}
 	}
-
 	mean, stddev := stat.MeanStdDev(durationsFloat, nil)
-
+	// Return all stats
 	return candidateStats{
-		scenes:    n,
-		mean:      time.Duration(mean),
-		stddev:    time.Duration(stddev),
-		shortest:  minDur,
-		longest:   maxDur,
-		shortHalf: shortHalf,
-		short1s:   short1s,
+		scenes:     nbScenes,
+		mean:       time.Duration(mean),
+		stddev:     time.Duration(stddev),
+		shortest:   minDur,
+		longest:    maxDur,
+		shortHalf:  shortHalf,
+		short1s:    short1s,
+		short1sPct: float64(short1s) / float64(nbScenes) * 100,
 	}
 }
