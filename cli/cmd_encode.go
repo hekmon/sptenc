@@ -77,7 +77,7 @@ var encodeCommand = &cli.Command{
 				Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d)",
 					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
 				),
-				Value:     10,
+				Value:     minThresholdDefault,
 				OnlyOnce:  true,
 				Category:  "Single Video File",
 				Validator: validateSceneThreshold,
