@@ -22,6 +22,23 @@ import (
 	"gonum.org/v1/gonum/stat"
 )
 
+var (
+	thresholdsTableConfig = tablewriter.Config{
+		Header: tw.CellConfig{
+			Formatting: tw.CellFormatting{
+				AutoFormat: tw.Off,
+			},
+		},
+		Row: tw.CellConfig{
+			Alignment: tw.CellAlignment{
+				PerColumn: []tw.Align{
+					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
+				},
+			},
+		},
+	}
+)
+
 var thresholdsCommand = &cli.Command{
 	Name:     "thresholds",
 	Aliases:  []string{"t"},
@@ -136,7 +153,7 @@ var thresholdsCommand = &cli.Command{
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 
-		// Cap scenes to max threshold
+		// Thresholds candidates refine
 		cappedScenes := make([]core.Scene, 0, len(scenes))
 		for _, scene := range scenes {
 			if scene.Score <= cmd.Float64(maxThresholdFlagName) {
@@ -148,7 +165,6 @@ var thresholdsCommand = &cli.Command{
 				1+len(cappedScenes), strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
 			)
 		}
-
 		candidates, effectiveMinDrop := core.GetOptimalMinDrop(cappedScenes, cmd.Int(maxCandidatesFlagName))
 		if len(candidates) == 0 {
 			fmt.Fprintln(bypass, "No candidates found in the given range.")
@@ -168,26 +184,10 @@ var thresholdsCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
 		}
 
-		// Build table
+		// Results table
 		var buff strings.Builder
-		table := tablewriter.NewTable(&buff,
-			tablewriter.WithConfig(tablewriter.Config{
-				Header: tw.CellConfig{
-					Formatting: tw.CellFormatting{
-						AutoFormat: tw.Off,
-					},
-				},
-				Row: tw.CellConfig{
-					Alignment: tw.CellAlignment{
-						PerColumn: []tw.Align{
-							tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
-						},
-					},
-				},
-			}),
-		)
+		table := tablewriter.NewTable(&buff, tablewriter.WithConfig(thresholdsTableConfig))
 		table.Header("Threshold", "Scenes", "Mean", "Std Dev", "Shortest", "≤0.5s", "≤1s")
-
 		for _, candidate := range candidates {
 			row := computeCandidateStats(scenes, duration, candidate)
 			table.Append([]string{
