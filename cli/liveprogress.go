@@ -334,7 +334,8 @@ func getStreamsInfosCF(ctx context.Context, path string, debug bool) (stats ffmp
 // LiveQPSearch received and process search progress signals to translate them as terminal UI progress
 // it implements the core.QPSearchCallbacks interface required by core.FindAllSegmentsQP()
 type LiveQPSearch struct {
-	PrintDebug bool
+	PrintDebug  bool
+	Concurrency int
 	// Global progress
 	globalProgressBar    *liveprogress.Bar
 	globalNbSegmentsDone int
@@ -344,19 +345,26 @@ type LiveQPSearch struct {
 	 * Per worker
 	 */
 	// Segment progress (title + qp candidates listing)
-	segmentCurrent          []int
-	segmentStatusLine       []*liveprogress.CustomLine
-	segmentCandidates       [][]string
-	segmentCandidatesAccess []sync.Mutex
+	segmentsCurrent          []int
+	segmentsStatusLine       []*liveprogress.CustomLine
+	segmentsCandidates       [][]string
+	segmentsCandidatesAccess []sync.Mutex
 	// File analysis
-	analysisProgressBar []*liveprogress.Bar
+	analysisProgressBars []*liveprogress.Bar
 	// Encode
-	encodeProgressBar []*liveprogress.Bar
+	encodeProgressBars []*liveprogress.Bar
 	// VMAF
-	vmafProgressBar []*liveprogress.Bar
+	vmafProgressBars []*liveprogress.Bar
 }
 
 func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
+	to.segmentsCurrent = make([]int, to.Concurrency)
+	to.segmentsStatusLine = make([]*liveprogress.CustomLine, to.Concurrency)
+	to.segmentsCandidates = make([][]string, to.Concurrency)
+	to.segmentsCandidatesAccess = make([]sync.Mutex, to.Concurrency)
+	to.analysisProgressBars = make([]*liveprogress.Bar, to.Concurrency)
+	to.encodeProgressBars = make([]*liveprogress.Bar, to.Concurrency)
+	to.vmafProgressBars = make([]*liveprogress.Bar, to.Concurrency)
 	to.globalProgressBar = liveprogress.SetMainLineAsBar(
 		liveprogress.WithTotal(uint64(globalDuration)),
 		liveprogress.WithMultiplyRunes(),
@@ -369,39 +377,49 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			to.globalAccess.Lock()
+			done, size := to.globalNbSegmentsDone, to.globalAllSegmentSize
+			to.globalAccess.Unlock()
 			return fmt.Sprintf(" left | %d/%d segments | %s",
-				to.globalNbSegmentsDone, totalSegments, to.globalAllSegmentSize,
+				done, totalSegments, size,
 			)
 		}),
 	)
 }
 
-func (to *LiveQPSearch) cleanupSegmentUI() {
-	if to.segmentStatusLine != nil {
-		liveprogress.RemoveCustomLine(to.segmentStatusLine)
-		to.segmentStatusLine = nil
-	}
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
-		to.analysisProgressBar = nil
-	}
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
-		to.encodeProgressBar = nil
-	}
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
-		to.vmafProgressBar = nil
-	}
-}
-
 func (to *LiveQPSearch) Stop() {
-	to.cleanupSegmentUI()
+	for index, line := range to.segmentsStatusLine {
+		if line != nil {
+			liveprogress.RemoveCustomLine(line)
+			to.segmentsStatusLine[index] = nil
+		}
+	}
+	for index, bar := range to.analysisProgressBars {
+		if bar != nil {
+			liveprogress.RemoveBar(bar)
+			to.analysisProgressBars[index] = nil
+		}
+	}
+	for index, bar := range to.encodeProgressBars {
+		if bar != nil {
+			liveprogress.RemoveBar(bar)
+			to.encodeProgressBars[index] = nil
+		}
+	}
+	for index, bar := range to.vmafProgressBars {
+		if bar != nil {
+			liveprogress.RemoveBar(bar)
+			to.vmafProgressBars[index] = nil
+		}
+	}
 	if to.globalProgressBar != nil {
 		liveprogress.RemoveBar(to.globalProgressBar)
 		to.globalProgressBar = nil
 	}
 }
+
+// Debug, Warning and Error are safe for concurrent use: liveprogress.Bypass()
+// serializes writes internally with a mutex, so interleaved output is not possible.
 
 func (to *LiveQPSearch) Debug(format string, a ...any) {
 	if to.PrintDebug {
@@ -417,41 +435,43 @@ func (to *LiveQPSearch) Error(err error) {
 	fmt.Fprintln(liveprogress.Bypass(), "ERROR: "+err.Error())
 }
 
-func (to *LiveQPSearch) OnSegmentStart(segmentIndex int, segmentPath string) {
-	to.segmentCurrent = segmentIndex
-	if to.segmentCandidates != nil {
-		to.segmentCandidatesAccess.Lock()
-		for i := range to.segmentCandidates {
-			to.segmentCandidates[i] = "" // drop references
+func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {
+	to.segmentsCurrent[workerID] = segmentIndex
+	if to.segmentsCandidates[workerID] != nil {
+		to.segmentsCandidatesAccess[workerID].Lock()
+		for i := range to.segmentsCandidates[workerID] {
+			to.segmentsCandidates[workerID][i] = "" // drop references
 		}
-		to.segmentCandidates = to.segmentCandidates[:0] // reset while keeping cap
-		to.segmentCandidatesAccess.Unlock()
+		to.segmentsCandidates[workerID] = to.segmentsCandidates[workerID][:0] // reset while keeping cap
+		to.segmentsCandidatesAccess[workerID].Unlock()
 	}
-	if to.segmentStatusLine != nil {
-		liveprogress.RemoveCustomLine(to.segmentStatusLine)
+	if to.segmentsStatusLine[workerID] != nil {
+		liveprogress.RemoveCustomLine(to.segmentsStatusLine[workerID])
+		// no need to nullify we are about to reset it
 	}
-	to.segmentStatusLine = liveprogress.AddCustomLine(func() string {
-		to.segmentCandidatesAccess.Lock()
-		defer to.segmentCandidatesAccess.Unlock()
-		if len(to.segmentCandidates) == 0 {
+	to.segmentsStatusLine[workerID] = liveprogress.AddCustomLine(func() string {
+		to.segmentsCandidatesAccess[workerID].Lock()
+		defer to.segmentsCandidatesAccess[workerID].Unlock()
+		if len(to.segmentsCandidates[workerID]) == 0 {
 			// first step is to analyse source files for total number of frames, no candidate yet
 			return fmt.Sprintf("    Segment | %d - Searching for best QP...", segmentIndex+1)
 		}
-		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1, strings.Join(to.segmentCandidates, " "))
+		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1, strings.Join(to.segmentsCandidates[workerID], " "))
 	})
 }
 
-func (to *LiveQPSearch) OnSegmentNewCandidate(qpCandidate int) {
-	to.segmentCandidatesAccess.Lock()
-	to.segmentCandidates = append(to.segmentCandidates, strconv.Itoa(qpCandidate))
-	to.segmentCandidatesAccess.Unlock()
+func (to *LiveQPSearch) OnSegmentNewCandidate(workerID, qpCandidate int) {
+	to.segmentsCandidatesAccess[workerID].Lock()
+	to.segmentsCandidates[workerID] = append(to.segmentsCandidates[workerID], strconv.Itoa(qpCandidate))
+	to.segmentsCandidatesAccess[workerID].Unlock()
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize int64) {
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
+func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, fileSize int64) {
+	if to.analysisProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.analysisProgressBars[workerID])
+		// no need to nullify we are about to reset it
 	}
-	to.analysisProgressBar = liveprogress.AddBar(
+	to.analysisProgressBars[workerID] = liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(fileSize)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
@@ -468,24 +488,24 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(fileSize int64) {
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisProgress(newRead int64) {
-	if to.analysisProgressBar != nil {
-		to.analysisProgressBar.CurrentAdd(uint64(newRead))
+func (to *LiveQPSearch) OnSegmentAnalysisProgress(workerID int, newRead int64) {
+	if to.analysisProgressBars[workerID] != nil {
+		to.analysisProgressBars[workerID].CurrentAdd(uint64(newRead))
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisStop() {
-	if to.analysisProgressBar != nil {
-		liveprogress.RemoveBar(to.analysisProgressBar)
-		to.analysisProgressBar = nil
+func (to *LiveQPSearch) OnSegmentAnalysisStop(workerID int) {
+	if to.analysisProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.analysisProgressBars[workerID])
+		to.analysisProgressBars[workerID] = nil
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentEncodeStart(totalFrames int) {
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
+func (to *LiveQPSearch) OnSegmentEncodeStart(workerID, totalFrames int) {
+	if to.encodeProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.encodeProgressBars[workerID])
 	}
-	to.encodeProgressBar = liveprogress.AddBar(
+	to.encodeProgressBars[workerID] = liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalFrames)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
@@ -502,24 +522,24 @@ func (to *LiveQPSearch) OnSegmentEncodeStart(totalFrames int) {
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentEncodeProgress(stats core.ProgressStats) {
-	if to.encodeProgressBar != nil {
-		to.encodeProgressBar.CurrentSet(uint64(stats.CurrentFrame))
+func (to *LiveQPSearch) OnSegmentEncodeProgress(workerID int, stats core.ProgressStats) {
+	if to.encodeProgressBars[workerID] != nil {
+		to.encodeProgressBars[workerID].CurrentSet(uint64(stats.CurrentFrame))
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentEncodeStop() {
-	if to.encodeProgressBar != nil {
-		liveprogress.RemoveBar(to.encodeProgressBar)
-		to.encodeProgressBar = nil
+func (to *LiveQPSearch) OnSegmentEncodeStop(workerID int) {
+	if to.encodeProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.encodeProgressBars[workerID])
+		to.encodeProgressBars[workerID] = nil
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentVMAFStart(totalFrames int) {
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
+func (to *LiveQPSearch) OnSegmentVMAFStart(workerID, totalFrames int) {
+	if to.vmafProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.vmafProgressBars[workerID])
 	}
-	to.vmafProgressBar = liveprogress.AddBar(
+	to.vmafProgressBars[workerID] = liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalFrames)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
@@ -534,32 +554,53 @@ func (to *LiveQPSearch) OnSegmentVMAFStart(totalFrames int) {
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentVMAFProgress(stats core.ProgressStats) {
-	if to.vmafProgressBar != nil {
-		to.vmafProgressBar.CurrentSet(uint64(stats.CurrentFrame))
+func (to *LiveQPSearch) OnSegmentVMAFProgress(workerID int, stats core.ProgressStats) {
+	if to.vmafProgressBars[workerID] != nil {
+		to.vmafProgressBars[workerID].CurrentSet(uint64(stats.CurrentFrame))
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentVMAFStop() {
-	if to.vmafProgressBar != nil {
-		liveprogress.RemoveBar(to.vmafProgressBar)
-		to.vmafProgressBar = nil
+func (to *LiveQPSearch) OnSegmentVMAFStop(workerID int) {
+	if to.vmafProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.vmafProgressBars[workerID])
+		to.vmafProgressBars[workerID] = nil
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
-	// Clean up possible orphans child status
-	to.cleanupSegmentUI()
+func (to *LiveQPSearch) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int,
+	currentTotalDuration time.Duration, currentTotalSize int64) {
+	// Clean up this worker's child UI elements
+	if to.segmentsStatusLine[workerID] != nil {
+		liveprogress.RemoveCustomLine(to.segmentsStatusLine[workerID])
+		to.segmentsStatusLine[workerID] = nil
+	}
+	if to.analysisProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.analysisProgressBars[workerID])
+		to.analysisProgressBars[workerID] = nil
+	}
+	if to.encodeProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.encodeProgressBars[workerID])
+		to.encodeProgressBars[workerID] = nil
+	}
+	if to.vmafProgressBars[workerID] != nil {
+		liveprogress.RemoveBar(to.vmafProgressBars[workerID])
+		to.vmafProgressBars[workerID] = nil
+	}
 	// Finished segment data
 	fmt.Fprintf(liveprogress.Bypass(), "\tSegment %d: QP %d selected for this segment of %d frames (%d attempts)\n",
-		to.segmentCurrent+1, segmentFinalQP, segmentFrames, segmentNbAttempts,
+		to.segmentsCurrent[workerID]+1, segmentFinalQP, segmentFrames, segmentNbAttempts,
 	)
 	// Global progress
-	if to.globalProgressBar != nil {
+	newSize := cunits.ImportInBytes(float64(currentTotalSize))
+	to.globalAccess.Lock()
+	if to.globalProgressBar != nil && uint64(currentTotalDuration) > to.globalProgressBar.Current() {
 		to.globalProgressBar.CurrentSet(uint64(currentTotalDuration))
 	}
 	to.globalNbSegmentsDone++
-	to.globalAllSegmentSize = cunits.ImportInBytes(float64(currentTotalSize))
+	if newSize > to.globalAllSegmentSize {
+		to.globalAllSegmentSize = newSize
+	}
+	to.globalAccess.Unlock()
 }
 
 /*

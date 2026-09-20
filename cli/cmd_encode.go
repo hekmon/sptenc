@@ -23,45 +23,52 @@ import (
 
 // Flag names for encode-specific flags and shared helpers defined in this file.
 const (
-	encoderFlagName      = "encoder"
-	cacheProfileFlagName = "cache-profile"
-	originalFileFlagName = "original-file"
+	encoderFlagName            = "encoder"
+	concurrentSegmentsFlagName = "concurrent-segments"
+	cacheProfileFlagName       = "cache-profile"
+	originalFileFlagName       = "original-file"
 )
 
 var encodeCommand = &cli.Command{
 	Name:    "encode",
 	Aliases: []string{"e"},
 	Usage:   "Encode video segments to meet perceptual quality targets at minimal file size",
-	Description: fmt.Sprintf(
-		"INPUT\n"+
-			"The input path can be provided in two forms:\n"+
-			"  * Single video file: sptenc creates a lossless FFV1 master, splits it into scene-aligned\n"+
-			"    segments, and encodes each one (one-shot process).\n"+
-			"  * Directory of pre-split video files: every file is treated as an already-segmented scene.\n"+
-			"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n"+
-			"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate.\n\n"+
-			"SCENE DETECTION\n"+
-			"Use the split command to preview scene boundaries for a given threshold, the thresholds\n"+
-			"command to inspect candidate thresholds and their scene-distribution statistics (scenes count,\n"+
-			"longest segment, std dev, mean, shortest segment) so you can pick a single threshold to feed\n"+
-			"into encode, or batchsearch to find the optimal threshold automatically.\n"+
-			"VMAF METRICS\n"+
-			"Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n"+
-			"below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n"+
-			"that metric.\n\n"+
-			"STATS CACHE\n"+
-			"The cache records QP search statistics to speed up future encodes with the same encoder\n"+
-			"and VMAF profile. Different content types (clean animation vs grainy film) need very\n"+
-			"different QP distributions, so mixing them slows convergence. Use --"+cacheProfileFlagName+" to keep\n"+
-			"these histories separate.\n\n"+
-			"ENCODERS\n"+
-			"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final\n"+
-			"encode to get the smallest file size. Run 'sptenc verify' to see which encoders are\n"+
-			"available on your system.\n\n"+
-			"AUDIO\n"+
-			"If all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically compressed\n"+
-			"to FLAC during the final remux step. This reduces file size with no quality loss.",
-		core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue),
+	Description: "INPUT\n" +
+		"The input path can be provided in two forms:\n" +
+		"  * Single video file: sptenc creates a lossless FFV1 master, splits it into scene-aligned\n" +
+		"    segments, and encodes each one (one-shot process).\n" +
+		"  * Directory of pre-split video files: every file is treated as an already-segmented scene.\n" +
+		"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n" +
+		"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate.\n\n" +
+		"SCENE DETECTION\n" +
+		"Use the split command to preview scene boundaries for a given threshold, the thresholds\n" +
+		"command to inspect candidate thresholds and their scene-distribution statistics (scenes count,\n" +
+		"longest segment, std dev, mean, shortest segment) so you can pick a single threshold to feed\n" +
+		"into encode, or batchsearch to find the optimal threshold automatically.\n" +
+		"VMAF METRICS\n" +
+		fmt.Sprintf("Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n", core.VMAFMinValue, core.VMAFMaxValue) +
+		fmt.Sprintf("below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n", core.VMAFOffValue) +
+		"that metric.\n\n" +
+		"STATS CACHE\n" +
+		"The cache records QP search statistics to speed up future encodes with the same encoder\n" +
+		"and VMAF profile. Different content types (clean animation vs grainy film) need very\n" +
+		"different QP distributions, so mixing them slows convergence. Use --" + cacheProfileFlagName + " to keep\n" +
+		"these histories separate.\n\n" +
+		"ENCODERS\n" +
+		"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final\n" +
+		"encode to get the smallest file size. Run 'sptenc verify' to see which encoders are\n" +
+		"available on your system.\n\n" +
+		"CONCURRENT ENCODING\n" +
+		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel.\n" +
+		"On consumer hardware (even high-end) CPU encoders already saturate physical cores with a\n" +
+		"single segment. With hyperthreading/SMT enabled, 50% of total threads is the effective\n" +
+		"ceiling; exceeding it thrashes cache and memory bandwidth without improving throughput.\n" +
+		"This option is intended for GPU encoders, which often support multiple parallel sessions.\n" +
+		"Hard session limits vary by generation and SKU (typically 1-3 on consumer cards), so verify\n" +
+		"your specific GPU's capabilities before raising this value.\n\n" +
+		"AUDIO\n" +
+		"If all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically compressed\n" +
+		"to FLAC during the final remux step. This reduces file size with no quality loss.",
 	Flags: func() (flags []cli.Flag) {
 		flags = []cli.Flag{
 			&cli.StringFlag{
@@ -72,6 +79,14 @@ var encodeCommand = &cli.Command{
 				OnlyOnce:         true,
 				Validator:        encoderValidator,
 				ValidateDefaults: true,
+			},
+			&cli.IntFlag{
+				Name:      concurrentSegmentsFlagName,
+				Aliases:   []string{"C"},
+				Usage:     "Number of segments to encode in parallel. Not recommended for CPU encoders, see description.",
+				Value:     1,
+				OnlyOnce:  true,
+				Validator: validateConcurrentSegments,
 			},
 			&cli.Float64Flag{
 				Name:    minThresholdFlagName,
@@ -368,7 +383,7 @@ var encodeCommand = &cli.Command{
 
 		// Step 2 - Process segments
 		results, encodedSegmentsMerged, err := processSegments(ctx, segmentsPaths, workingDir, totalDuration,
-			vmafAuditor, statsCache, encoderAdapter, cmd.Bool(debugFlagName))
+			vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to encode segments: %w", err)
 			return
@@ -528,22 +543,25 @@ var encodeCommand = &cli.Command{
 
 // processSegments runs QP search on the given segments and concatenates the encoded results.
 func processSegments(ctx context.Context, segmentsPaths []string, workingDir string, totalDuration time.Duration,
-	vmafAuditor core.VMAFChecker, statsCache *core.StatsCacheHistory, encoder core.SegmentEncoder, debug bool) (results core.QPSearchResults, encodedSegmentsMerged string, err error) {
+	vmafAuditor core.VMAFChecker, statsCache *core.StatsCacheHistory, encoder core.SegmentEncoder, concurrency int, debug bool) (
+	results core.QPSearchResults, encodedSegmentsMerged string, err error) {
 	bypass := liveprogress.Bypass()
 	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
 	lqps := &LiveQPSearch{
-		PrintDebug: debug,
+		PrintDebug:  debug,
+		Concurrency: concurrency,
 	}
 	lqps.Start(len(segmentsPaths), totalDuration)
 	start := time.Now()
 	results, err = core.FindAllSegmentsQP(ctx, lqps,
 		core.QPSearchConfig{
-			SegmentsPaths: segmentsPaths,
-			Auditor:       vmafAuditor,
-			WorkingDir:    workingDir,
-			StatsCache:    statsCache,
-			KeepInvalidQP: debug,
-			Encoder:       encoder,
+			SegmentsPaths:        segmentsPaths,
+			Auditor:              vmafAuditor,
+			WorkingDir:           workingDir,
+			StatsCache:           statsCache,
+			KeepInvalidQP:        debug,
+			Encoder:              encoder,
+			NbConcurrentSegments: concurrency,
 		},
 	)
 	if err != nil {

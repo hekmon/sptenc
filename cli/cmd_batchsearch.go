@@ -110,6 +110,16 @@ var batchsearchCommand = &cli.Command{
 		"(GPU-based). GPU encoders are strongly recommended for speed. If available, also enable CUDA\n" +
 		"VMAF acceleration (--" + vmafCUDAFlagName + ") to avoid bottlenecking the search on CPU-side\n" +
 		"quality validation.\n\n" +
+		"CONCURRENT ENCODING\n" +
+		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
+		"each candidate encode. On consumer hardware (even high-end) CPU encoders already saturate physical\n" +
+		"cores with a single segment. With hyperthreading/SMT enabled, 50% of total threads is the effective\n" +
+		"ceiling; exceeding it thrashes cache and memory bandwidth without improving throughput.\n" +
+		"This option is intended for GPU encoders, which often support multiple parallel sessions.\n" +
+		"Hard session limits vary by generation and SKU (typically 1-3 on consumer cards), so verify\n" +
+		"your specific GPU's capabilities first. Once confirmed, raising this value is highly encouraged\n" +
+		"for GPU-based searches — it can significantly reduce total runtime for a process that is already\n" +
+		"long by nature.\n\n" +
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
 		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
@@ -141,6 +151,14 @@ var batchsearchCommand = &cli.Command{
 				Usage:    "Run a final CPU encode after GPU search (no-op if search encoder is already CPU).",
 				Value:    false,
 				OnlyOnce: true,
+			},
+			&cli.IntFlag{
+				Name:      concurrentSegmentsFlagName,
+				Aliases:   []string{"C"},
+				Usage:     "Number of segments to encode in parallel. Not recommended for CPU encoders, see description.",
+				Value:     1,
+				OnlyOnce:  true,
+				Validator: validateConcurrentSegments,
 			},
 		}
 		flags = append(flags, thresholdSearchFlags()...)
@@ -467,8 +485,8 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Step 3.C - QP search on this candidate scenes
-			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(ctx, segmentsPaths, candidateWorkdir, totalDuration,
-				vmafAuditor, statsCache, encoderAdapter, cmd.Bool(debugFlagName))
+			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(
+				ctx, segmentsPaths, candidateWorkdir, totalDuration, vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("candidate %s: %w", candidateStr, err)
 			}
@@ -552,14 +570,15 @@ var batchsearchCommand = &cli.Command{
 				VMAFNeg:           cmd.Bool(vmafNegFlagName),
 				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
 			}
-			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter, vmafAuditor, cmd.String(cacheProfileFlagName))
+			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter,
+				vmafAuditor, cmd.String(cacheProfileFlagName))
 			if err != nil {
 				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
 			}
 
 			// Run QP search with final encoder
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
-				vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Bool(debugFlagName))
+				vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}

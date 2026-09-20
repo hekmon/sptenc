@@ -24,12 +24,16 @@ type Logger interface {
 }
 
 // SegmentLifecycle marks the boundaries of a single segment's search.
+// workerID is guaranteed to be within [0, QPSearchConfig.NbConcurrentSegments-1],
+// so callers may index fixed-size slices rather than maintain maps or RWMutexes.
 type SegmentLifecycle interface {
 	OnSegmentStart(workerID, segmentIndex int, segmentPath string)
 	OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
 }
 
 // ProgressReporter receives fine-grained progress for UI and diagnostics.
+// workerID is guaranteed to be within [0, QPSearchConfig.NbConcurrentSegments-1],
+// so callers may index fixed-size slices rather than maintain maps or RWMutexes.
 type ProgressReporter interface {
 	OnSegmentNewCandidate(workerID, qpCandidate int)
 	OnSegmentAnalysisStart(workerID int, fileSize int64)
@@ -46,6 +50,8 @@ type ProgressReporter interface {
 // QPSearchCallbacks is the complete surface expected by FindAllSegmentsQP and its helpers.
 // It is composed of smaller role interfaces so callers can satisfy only what they need
 // (e.g. a test harness may embed Logger and SegmentLifecycle while ignoring ProgressReporter).
+// workerID is guaranteed to be within [0, QPSearchConfig.NbConcurrentSegments-1],
+// so callers may index fixed-size slices rather than maintain maps or RWMutexes.
 type QPSearchCallbacks interface {
 	Logger
 	SegmentLifecycle

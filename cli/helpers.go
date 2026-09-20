@@ -81,6 +81,13 @@ func validateSceneThreshold(v float64) error {
 	return nil
 }
 
+func validateConcurrentSegments(v int) error {
+	if v < 1 {
+		return fmt.Errorf("must be at least 1")
+	}
+	return nil
+}
+
 func validateTmpDir(path string) error {
 	// validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
 	if runtime.GOOS == "windows" && !isASCII(path) {
