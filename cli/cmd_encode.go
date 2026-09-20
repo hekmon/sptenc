@@ -428,6 +428,7 @@ var encodeCommand = &cli.Command{
 		// Step 4 - final vmaf check
 		// Verify frame counts match before computing VMAF to catch misalignment early.
 		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
+		start = time.Now()
 		var sourceFrames, encodedFrames int
 		if inputInfos.IsDir() {
 			var sourceFileInfo os.FileInfo
@@ -463,6 +464,8 @@ var encodeCommand = &cli.Command{
 				sourceFrames, encodedFrames)
 			return
 		}
+		duration = time.Since(start)
+		fmt.Fprintf(bypass, "\tFrame counts verified in %s.\n", duration.Round(time.Second))
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),

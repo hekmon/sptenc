@@ -598,6 +598,7 @@ var batchsearchCommand = &cli.Command{
 		// Step 5 - compute final VMAF
 		vmafSource := inputPath
 		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
+		start = time.Now()
 		var sourceFrames, encodedFrames int
 		// Reuse the exact frame count from createMaster instead of re-probing the source.
 		sourceFrames = sourceTotalFrames
@@ -619,6 +620,7 @@ var batchsearchCommand = &cli.Command{
 			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
 			return
 		}
+		fmt.Fprintf(bypass, "\tFrame counts verified in %s.\n", time.Since(start).Round(time.Second))
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
