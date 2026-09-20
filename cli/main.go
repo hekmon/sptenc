@@ -21,9 +21,9 @@ import (
 // Global flag names
 const (
 	debugFlagName           = "debug"
-	ffmpegPathFlagName      = "ffmpegpath"
-	ffprobePathFlagName     = "ffprobepath"
-	mkvpropeditPathFlagName = "mkvpropeditpath"
+	ffmpegPathFlagName      = "ffmpeg-path"
+	ffprobePathFlagName     = "ffprobe-path"
+	mkvpropeditPathFlagName = "mkvpropedit-path"
 )
 
 const (

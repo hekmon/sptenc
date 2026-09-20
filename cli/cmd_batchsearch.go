@@ -27,7 +27,7 @@ import (
 
 // Flag names and defaults for batchsearch-specific flags.
 const (
-	finalEncodeFlagName = "finalencode"
+	finalEncodeFlagName = "final-encode"
 	strikesFlagName     = "strikes"
 	strikesMinimum      = 3
 )

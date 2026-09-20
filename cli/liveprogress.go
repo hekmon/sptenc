@@ -339,17 +339,21 @@ type LiveQPSearch struct {
 	globalProgressBar    *liveprogress.Bar
 	globalNbSegmentsDone int
 	globalAllSegmentSize cunits.Bits
+	globalAccess         sync.Mutex
+	/*
+	 * Per worker
+	 */
 	// Segment progress (title + qp candidates listing)
-	segmentCurrent          int
-	segmentStatusLine       *liveprogress.CustomLine
-	segmentCandidates       []string
-	segmentCandidatesAccess sync.Mutex
+	segmentCurrent          []int
+	segmentStatusLine       []*liveprogress.CustomLine
+	segmentCandidates       [][]string
+	segmentCandidatesAccess []sync.Mutex
 	// File analysis
-	analysisProgressBar *liveprogress.Bar
+	analysisProgressBar []*liveprogress.Bar
 	// Encode
-	encodeProgressBar *liveprogress.Bar
+	encodeProgressBar []*liveprogress.Bar
 	// VMAF
-	vmafProgressBar *liveprogress.Bar
+	vmafProgressBar []*liveprogress.Bar
 }
 
 func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {

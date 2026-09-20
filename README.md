@@ -30,11 +30,11 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
 - 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
 - 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
-- 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmafneg` for upscaled/denoised/sharpened sources (recommended)
+- 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmaf-neg` for upscaled/denoised/sharpened sources (recommended)
 - 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
 - ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
-- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmafcuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
+- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmaf-cuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
 - 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
 - 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
 - 🔬 **Automatic threshold search** - `batchsearch` tests multiple scene detection thresholds to find the one that produces the smallest file while still meeting your VMAF targets
@@ -83,10 +83,10 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 Instead of letting sptenc split the input automatically, you can provide an already-split directory of segments. Files must be `.mkv` or `.mp4` and are processed in **alphabetical order** — name them accordingly (e.g. `seg_01.mkv`, `seg_02.mkv`) to preserve scene order. All segments must share the same codec and frame rate.
 
 ```bash
-./sptenc encode ./gop_dir/ --originalfile original_with_audio.mkv
+./sptenc encode ./gop_dir/ --original-file original_with_audio.mkv
 ```
 
-When using a pre-segmented directory, `--originalfile` (alias `-f`) is **required** so sptenc can remux audio, subtitles, and other streams into the final output.
+When using a pre-segmented directory, `--original-file` (alias `-f`) is **required** so sptenc can remux audio, subtitles, and other streams into the final output.
 
 ## Quick Start
 
@@ -102,28 +102,28 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 
 ### Strict quality with multiple thresholds
 ```bash
-./sptenc encode video.mkv --vmafmean 95 --vmafp5 85 --vmafmin 70
+./sptenc encode video.mkv --vmaf-mean 95 --vmaf-p5 85 --vmaf-min 70
 ```
 
 ### Upscaled or denoised source - use VMAF NEG
 ```bash
-./sptenc encode upscaled.mkv --vmafneg --vmafmean 93
+./sptenc encode upscaled.mkv --vmaf-neg --vmaf-mean 93
 ```
 
 ### Fast VMAF profile prototyping with NVENC on the second GPU
 ```bash
-./sptenc encode video.mkv --encoder hevc_nvenc --vmafcuda --nvidiagpuindex 1 --vmafmean 93
+./sptenc encode video.mkv --encoder hevc_nvenc --vmaf-cuda --nvidia-gpu-index 1 --vmaf-mean 93
 # Once happy with the profile, re-run with the default libx265 for the final smaller encode
 ```
 
 ### Pre-segmented directory
 ```bash
-./sptenc encode ./gop_dir/ --originalfile original_with_audio.mkv --vmafmean 95
+./sptenc encode ./gop_dir/ --original-file original_with_audio.mkv --vmaf-mean 95
 ```
 
 ### Concatenate segments without re-encoding
 ```bash
-./sptenc concat ./segments/ --outputdir ./merged/
+./sptenc concat ./segments/ --output-dir ./merged/
 ```
 
 ### Compute VMAF between two videos
@@ -132,26 +132,26 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 ./sptenc vmaf --nvdec original.mkv encoded.mkv
 
 # Full GPU acceleration (requires libvmaf_cuda)
-./sptenc vmaf --vmafcuda --vmafneg original.mkv encoded.mkv
+./sptenc vmaf --vmaf-cuda --vmaf-neg original.mkv encoded.mkv
 ```
 
 ### Find the optimal scene threshold automatically
 ```bash
-./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmafcuda --vmafhmean 93
+./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93
 # Once the optimal threshold is found, run the final CPU encode
-./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmafcuda --vmafhmean 93 --finalencode
+./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93 --final-encode
 ```
 
 ### Manual pipeline (master → split → encode)
 ```bash
 ./sptenc master video.mkv
-./sptenc split "video - ffv1 master.mkv" --master --threshold 12 --outputdir ./segments/
-./sptenc encode ./segments/ --originalfile video.mkv
+./sptenc split "video - ffv1 master.mkv" --master --threshold 12 --output-dir ./segments/
+./sptenc encode ./segments/ --original-file video.mkv
 ```
 
-> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--minthreshold` (1–100, default 14): higher values detect fewer scenes, lower values detect more.
+> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (1–100, default 14): higher values detect fewer scenes, lower values detect more.
 >
-> Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` to speed up processing.
+> Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec` to speed up processing.
 
 ## VMAF
 
@@ -162,7 +162,7 @@ When using a pre-segmented directory, `--originalfile` (alias `-f`) is **require
 | < 4K | `vmaf_v0.6.1` | `vmaf_v0.6.1neg` |
 | ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1neg` |
 
-The model is **automatically selected** based on input resolution. Use `--vmafneg` when the source has been upscaled, sharpened, or denoised: NEG models are designed so that enhancement-based processing (sharpening, upscaling filters) does not inflate the score, whereas standard models can over-score such content.
+The model is **automatically selected** based on input resolution. Use `--vmaf-neg` when the source has been upscaled, sharpened, or denoised: NEG models are designed so that enhancement-based processing (sharpening, upscaling filters) does not inflate the score, whereas standard models can over-score such content.
 
 > **Note:** NEG stands for **No Enhancement Gain**. The standard `vmaf_v0.6.1` model predicts the viewing condition of a **1080p HDTV at 3 picture heights**, and `vmaf_4k_v0.6.1` that of a **4K TV at 1.5 picture heights** — keep this in mind when interpreting scores for other display formats. See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models.md#disabling-enhancement-gain-neg-mode) for details.
 
@@ -188,44 +188,44 @@ VMAF scores range from 0 to 100. A difference of **~6 points ≈ 1 JND**
 
 | Metric | Flag | Default | Meaning (threshold T) |
 |---|---|---|---|
-| Harmonic mean | `--vmafhmean` | **93** | Penalizes local dips; **default gate** because it cannot under-deliver: hmean ≥ T mathematically implies mean ≥ T |
-| Arithmetic mean | `--vmafmean` | disabled | Average quality. Redundant as a gate whenever hmean is enabled at the same value — kept for reporting and for external comparability (Netflix 93 convention, all published ladders use arithmetic mean) |
-| Median | `--vmafmedian` | disabled | ≥ 50% of frames at or above T |
-| Percentile 25 | `--vmafp25` | disabled | ≥ 75% of frames at or above T |
-| Percentile 10 | `--vmafp10` | disabled | ≥ 90% of frames at or above T |
-| Percentile 5 | `--vmafp5` | disabled | ≥ 95% of frames at or above T |
-| Percentile 1 | `--vmafp1` | disabled | ≥ 99% of frames at or above T |
-| Min | `--vmafmin` | disabled | 100% of frames at or above T — strictest floor. Can over-fire on transient frames (title cards, flash frames) and inflate bitrate |
+| Harmonic mean | `--vmaf-hmean` | **93** | Penalizes local dips; **default gate** because it cannot under-deliver: hmean ≥ T mathematically implies mean ≥ T |
+| Arithmetic mean | `--vmaf-mean` | disabled | Average quality. Redundant as a gate whenever hmean is enabled at the same value — kept for reporting and for external comparability (Netflix 93 convention, all published ladders use arithmetic mean) |
+| Median | `--vmaf-median` | disabled | ≥ 50% of frames at or above T |
+| Percentile 25 | `--vmaf-p25` | disabled | ≥ 75% of frames at or above T |
+| Percentile 10 | `--vmaf-p10` | disabled | ≥ 90% of frames at or above T |
+| Percentile 5 | `--vmaf-p5` | disabled | ≥ 95% of frames at or above T |
+| Percentile 1 | `--vmaf-p1` | disabled | ≥ 99% of frames at or above T |
+| Min | `--vmaf-min` | disabled | 100% of frames at or above T — strictest floor. Can over-fire on transient frames (title cards, flash frames) and inflate bitrate |
 
 **Mathematically guaranteed relationships:** `min ≤ p1 ≤ p5 ≤ p10 ≤ p25`; `min ≤ hmean ≤ mean`. Beyond these, the position of hmean relative to the percentiles depends on the frame distribution: in practice, for realistic per-segment VMAF scores, hmean usually sits between the low percentiles and the mean.
 
 Consequences used everywhere below:
-- **Gate composition:** one strict measure > several modest ones. Enabling `--vmafhmean T` makes `--vmafmean T` a tautology — don't gate both at the same value.
+- **Gate composition:** one strict measure > several modest ones. Enabling `--vmaf-hmean T` makes `--vmaf-mean T` a tautology — don't gate both at the same value.
 - **Diagnostic inversion:** the **mean − hmean gap** is the signal for "uniformly good" (small gap → QP is well tuned) vs "good on average with bad patches" (large gap → per-scene splitter cut, or QP granularity issue, or move the gate to hmean/min). The mean is always logged for this reason even when it's not gated.
 
 **Rules:**
 - All enabled thresholds must pass simultaneously (AND logic)
-- Set any threshold to `-1` to disable it — remember that the harmonic mean gate is enabled by default, so pass `--vmafhmean -1` to silence it when you test other gates in isolation
+- Set any threshold to `-1` to disable it — remember that the harmonic mean gate is enabled by default, so pass `--vmaf-hmean -1` to silence it when you test other gates in isolation
 
-> 💡 **Tip:** Start with `--vmafmean 93` alone (with `--vmafhmean -1` to disable the default gate) plus the `--debug` flag to inspect each encode attempt's VMAF score and identify problematic scenes, then move the actual gate to `--vmafhmean 93`, and add `--vmafp5` or `--vmafp1` only if a profile demands explicit percentile guarantees. Running mean + hmean gates at the same value is redundant — only one of them is real work.
+> 💡 **Tip:** Start with `--vmaf-mean 93` alone (with `--vmaf-hmean -1` to disable the default gate) plus the `--debug` flag to inspect each encode attempt's VMAF score and identify problematic scenes, then move the actual gate to `--vmaf-hmean 93`, and add `--vmaf-p5` or `--vmaf-p1` only if a profile demands explicit percentile guarantees. Running mean + hmean gates at the same value is redundant — only one of them is real work.
 
 ### Recommended Values
 
 | Use Case | Gate | Target value |
 |---|---|---|
-| "I am afraid of deleting my lossless master file" | `--vmafmean` + `--vmafmin` | `99` + `93` ¹ |
-| Archival / mastering | `--vmafhmean` | `95` |
-| General streaming, VOD and live sports | `--vmafhmean` | `93` (default) ² |
-| Mobile / bandwidth-constrained | `--vmafmean` | `85–90` ¹ |
-| Quality consistency critical | `--vmafhmean` or `--vmafp5` | `90` |
+| "I am afraid of deleting my lossless master file" | `--vmaf-mean` + `--vmaf-min` | `99` + `93` ¹ |
+| Archival / mastering | `--vmaf-hmean` | `95` |
+| General streaming, VOD and live sports | `--vmaf-hmean` | `93` (default) ² |
+| Mobile / bandwidth-constrained | `--vmaf-mean` | `85–90` ¹ |
+| Quality consistency critical | `--vmaf-hmean` or `--vmaf-p5` | `90` |
 
-¹ Pass `--vmafhmean -1` to disable the default gate when the profile does not rely on it.
+¹ Pass `--vmaf-hmean -1` to disable the default gate when the profile does not rely on it.
 
 ² fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically.
 
-**Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `--vmafmean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
+**Why hmean everywhere except mobile:** hmean ≥ T implies mean ≥ T, so an hmean gate is strictly stronger than the classic mean 93 contract for no ambiguity cost — it simply also refuses segments with local dips. The mobile row keeps `--vmaf-mean 85–90` deliberately: on the cheap rung, average-level maximization *is* the contract, and an hmean gate would inflate bandwidth without any perceptible benefit at that distance/tier.
 
-> **93 vs 95?** The 93 target comes from Rassool (RealNetworks, IEEE BMSB 2017, [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to ~93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (MOS 4–5, tested on 4K clips). The 95 target comes from [Kah et al. (SPIE ADIP XLIV, 2021)](https://spie.org/Publications/Proceedings/Volume/11842): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV) — a deliberately higher bar. In Ozer's test on the 1080p *Meridian* clip, choosing 95 over 93 cost ~1400 kbps extra on the top rung (clip-specific, not universal). With `--vmafhmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
+> **93 vs 95?** The 93 target comes from Rassool (RealNetworks, IEEE BMSB 2017, [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to ~93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (MOS 4–5, tested on 4K clips). The 95 target comes from [Kah et al. (SPIE ADIP XLIV, 2021)](https://spie.org/Publications/Proceedings/Volume/11842): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV) — a deliberately higher bar. In Ozer's test on the 1080p *Meridian* clip, choosing 95 over 93 cost ~1400 kbps extra on the top rung (clip-specific, not universal). With `--vmaf-hmean 93` as default you get the 93 average backed by a no-bad-shots guarantee; the jump to 95 remains an explicit opt-in.
 
 ## Encoders
 
@@ -258,11 +258,11 @@ When using a GPU encoder, you can target a specific device:
 
 | Flag | Default | Used with |
 |---|---|---|
-| `--nvidiagpuindex` | `0` | `hevc_nvenc`, `av1_nvenc` |
-| `--vaapirendererpath` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
-| `--d3d12vagpuindex` | `0` | `hevc_d3d12va` |
+| `--nvidia-gpu-index` | `0` | `hevc_nvenc`, `av1_nvenc` |
+| `--vaapi-renderer-path` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
+| `--d3d12va-gpu-index` | `0` | `hevc_d3d12va` |
 
-> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master`, `split`, or `vmaf`, use `--nvdec`, `--vaapidec`, `--d3d12dec`, or `--videotoolboxdec` instead. The corresponding GPU selection flags (`--nvidiagpuindex`, `--vaapirendererpath`, `--d3d12vagpuindex`) also apply when decoding.
+> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master`, `split`, or `vmaf`, use `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec` instead. The corresponding GPU selection flags (`--nvidia-gpu-index`, `--vaapi-renderer-path`, `--d3d12va-gpu-index`) also apply when decoding.
 
 ## Adaptive QP Search
 
@@ -291,12 +291,12 @@ The stats files are **profile-specific**: changing the encoder or any VMAF thres
 
 ### Cache isolation with profiles
 
-Because a given VMAF target can require very different QP distributions depending on the source (e.g. clean animation vs. grainy film), mixing them into the same cache effectively poisons it. Use `--cacheprofile <name>` (e.g. `pixar_animation`, `grainy_90s`) to keep these histories separate. Without a profile, all runs with the same encoder and VMAF profile share the same cache.
+Because a given VMAF target can require very different QP distributions depending on the source (e.g. clean animation vs. grainy film), mixing them into the same cache effectively poisons it. Use `--cache-profile <name>` (e.g. `pixar_animation`, `grainy_90s`) to keep these histories separate. Without a profile, all runs with the same encoder and VMAF profile share the same cache.
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--statscachedir` | `-s` | OS cache dir (`~/.cache/sptenc` or equivalent) | Directory where QP statistics are stored |
-| `--cacheprofile` | `-c` | *(none)* | Isolate cache history between content types |
+| `--stats-cache-dir` | `-s` | OS cache dir (`~/.cache/sptenc` or equivalent) | Directory where QP statistics are stored |
+| `--cache-profile` | `-c` | *(none)* | Isolate cache history between content types |
 
 ## Base ffmpeg encode options
 

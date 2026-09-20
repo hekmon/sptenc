@@ -13,13 +13,13 @@ import (
 // Hardware decode flag names.
 const (
 	nvdecFlagName           = "nvdec"
-	vaapiDecFlagName        = "vaapidec"
-	d3d12DecFlagName        = "d3d12vadec"
-	videoToolboxDecFlagName = "videotoolboxdec"
+	vaapiDecFlagName        = "vaapi-dec"
+	d3d12DecFlagName        = "d3d12va-dec"
+	videoToolboxDecFlagName = "videotoolbox-dec"
 )
 
 // hwDecodeFlags returns the standard hardware-accelerated decoding flags.
-// When forVMAF is true, the NVIDIA GPU index flag also references --vmafcuda
+// When forVMAF is true, the NVIDIA GPU index flag also references --vmaf-cuda
 // since in the vmaf command that same index drives both NVDEC and CUDA VMAF.
 func hwDecodeFlags(forVMAF bool) []cli.Flag {
 	nvdecUsage := "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)"
@@ -83,13 +83,13 @@ func hwDecodeFlags(forVMAF bool) []cli.Flag {
 
 // Threshold search flag names and defaults.
 const (
-	minThresholdFlagName  = "minthreshold"
+	minThresholdFlagName  = "min-threshold"
 	minThresholdDefault   = 14.0
-	maxThresholdFlagName  = "maxthreshold"
+	maxThresholdFlagName  = "max-threshold"
 	maxThresholdDefault   = 50.0
-	maxCandidatesFlagName = "maxcandidates"
+	maxCandidatesFlagName = "max-candidates"
 	maxCandidatesDefault  = 30
-	minDropFlagName       = "mindrop"
+	minDropFlagName       = "min-drop"
 	minDropDefault        = 3
 )
 
@@ -150,9 +150,9 @@ func thresholdSearchFlags() []cli.Flag {
 }
 
 const (
-	nvidiaGPUIndexFlagName    = "nvidiagpuindex"
-	vaapiRendererPathFlagName = "vaapirendererpath"
-	d3d12vaGPUIndexFlagName   = "d3d12vagpuindex"
+	nvidiaGPUIndexFlagName    = "nvidia-gpu-index"
+	vaapiRendererPathFlagName = "vaapi-renderer-path"
+	d3d12vaGPUIndexFlagName   = "d3d12va-gpu-index"
 )
 
 // newGPUSelectionFlags returns the GPU encoder flags.
@@ -183,9 +183,9 @@ func newGPUSelectionFlags() []cli.Flag {
 }
 
 const (
-	outputDirFlagName     = "outputdir"
-	statsCacheDirFlagName = "statscachedir"
-	tmpDirFlagName        = "tmpdir"
+	outputDirFlagName     = "output-dir"
+	statsCacheDirFlagName = "stats-cache-dir"
+	tmpDirFlagName        = "tmp-dir"
 )
 
 // newDirectoryFlags returns the output, stats cache and temporary directory flags.
@@ -227,16 +227,16 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 }
 
 const (
-	vmafCUDAFlagName   = "vmafcuda"
-	vmafNegFlagName    = "vmafneg"
-	vmafMinFlagName    = "vmafmin"
-	vmafP1FlagName     = "vmafp1"
-	vmafP5FlagName     = "vmafp5"
-	vmafP10FlagName    = "vmafp10"
-	vmafP25FlagName    = "vmafp25"
-	vmafMedianFlagName = "vmafmedian"
-	vmafHMeanFlagName  = "vmafhmean"
-	vmafMeanFlagName   = "vmafmean"
+	vmafCUDAFlagName   = "vmaf-cuda"
+	vmafNegFlagName    = "vmaf-neg"
+	vmafMinFlagName    = "vmaf-min"
+	vmafP1FlagName     = "vmaf-p1"
+	vmafP5FlagName     = "vmaf-p5"
+	vmafP10FlagName    = "vmaf-p10"
+	vmafP25FlagName    = "vmaf-p25"
+	vmafMedianFlagName = "vmaf-median"
+	vmafHMeanFlagName  = "vmaf-hmean"
+	vmafMeanFlagName   = "vmaf-mean"
 )
 
 // newVMAFFlags returns the VMAF quality metric flags.

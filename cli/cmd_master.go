@@ -93,7 +93,7 @@ var masterCommand = &cli.Command{
 			hwDecFlags++
 		}
 		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapidec, --d3d12vadec, --videotoolboxdec)")
+			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapi-dec, --d3d12va-dec, --videotoolbox-dec)")
 		}
 		return ctx, nil
 	},
