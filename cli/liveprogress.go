@@ -372,7 +372,7 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			if to.Concurrency > 1 {
-				return "         Progress | "
+				return "        Progress | "
 			}
 			return "   Progress | "
 		}),

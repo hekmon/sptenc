@@ -283,6 +283,7 @@ var encodeCommand = &cli.Command{
 			segmentsPaths []string
 			sourceStats   ffmpeg.FFProbeStats
 			totalDuration time.Duration
+			videoStream   *ffmpeg.FFProbeBinaryStream
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
@@ -291,35 +292,41 @@ var encodeCommand = &cli.Command{
 				cmd.String(encoderFlagName),
 			)
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
-			// create master
-			var masterFile string
-			masterConfig := ffmpeg.SelectDecoderForEncoder(ctx, inputPath, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName)).ToFFV1MasterConfig()
-			if masterFile, _, totalDuration, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
-				return fmt.Errorf("failed to create the master file: %w", err)
+			// Build decoder config for scene detection on the original file (hw decoding if available)
+			decoderCfg := ffmpeg.SelectDecoderForEncoder(ctx, inputPath, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName))
+			// Get source stats and validate early
+			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
+				return fmt.Errorf("failed to probe input file: %w", err)
 			}
-			// analyze
+			videoStream = sourceStats.VideoTrack()
+			if videoStream == nil {
+				err = errors.New("no video stream found in source")
+				return
+			}
+			if !videoStream.IsConstantFrameRate() {
+				err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+				return
+			}
+			totalDuration = sourceStats.Format.Duration
+			// Detect scenes on the original file to take advantage of hw decoding
 			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			)
 			var scenes []ffmpeg.Scene
 			start := time.Now()
-			scenesConfig := ffmpeg.ScenesDetectionConfig{
-				NVDec:           masterConfig.NVDec,
-				NVDevice:        masterConfig.NVDevice,
-				VAAPIDec:        masterConfig.VAAPIDec,
-				VAAPIDevice:     masterConfig.VAAPIDevice,
-				D3D12Dec:        masterConfig.D3D12Dec,
-				D3D12Device:     masterConfig.D3D12Device,
-				VideoToolboxDec: masterConfig.VideoToolboxDec,
-			}
-			if scenes, err = liveDetectScenes(ctx, masterFile, cmd.Float64(minThresholdFlagName), totalDuration,
-				cmd.Bool(debugFlagName), scenesConfig); err != nil {
+			if scenes, err = liveDetectScenes(ctx, inputPath, cmd.Float64(minThresholdFlagName), totalDuration,
+				cmd.Bool(debugFlagName), decoderCfg.ToScenesDetectionConfig()); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 				1+len(scenes), time.Since(start).Round(time.Second),
 			)
+			// create master
+			var masterFile string
+			if masterFile, _, _, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
+				return fmt.Errorf("failed to create the master file: %w", err)
+			}
 			// split
 			fmt.Fprintf(bypass, "Splitting scenes...\n")
 			start = time.Now()
@@ -334,10 +341,6 @@ var encodeCommand = &cli.Command{
 			segmentsPaths = make([]string, len(scenes)+1)
 			for i := range segmentsPaths {
 				segmentsPaths[i] = filepath.Join(workingDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
-			}
-			// get stream infos
-			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
-				return fmt.Errorf("failed to probe input file: %w", err)
 			}
 		} else {
 			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
@@ -371,7 +374,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tTotal duration of segments: %s\n", totalDuration)
 		}
 		// Validate video stream presence and reject VFR content
-		videoStream := sourceStats.VideoTrack()
+		videoStream = sourceStats.VideoTrack()
 		if videoStream == nil {
 			err = errors.New("no video stream found in source")
 			return
