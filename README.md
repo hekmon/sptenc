@@ -35,7 +35,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
 - ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
 - 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmaf-cuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
-- 🚀 **Optional concurrent segment encoding** - GPU encoders can search multiple segments in parallel via `--concurrent-segments` (`-C`), significantly reducing total runtime for threshold discovery and large batch jobs. CPU encoders remain sequential by default to avoid cache thrashing.
+- 🚀 **Optional concurrent segment encoding** - GPU encoders can search multiple segments in parallel via `--concurrent-segments` (`-C`), significantly reducing total runtime for threshold discovery and large batch jobs. CPU encoders are locked to sequential encoding to prevent cache thrashing.
 - 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
 - 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
 - 🔬 **Automatic threshold search** - `batchsearch` tests multiple scene detection thresholds to find the one that produces the smallest file while still meeting your VMAF targets
@@ -252,6 +252,8 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | Output file size | ✅ Optimal | ❌ ~1.5–2× larger |
 | Speed | Slower | ✅ Much faster |
 | Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search |
+
+> **CPU encoders are sequential by design.** A single `libx265` or `svtav1` session already saturates physical CPU cores. Hyperthreading/SMT does not double throughput for heavy encode workloads, so running multiple instances just thrashes cache and hurts total throughput. `--concurrent-segments` is hard-limited to `1` for CPU encoders; use a GPU encoder with `-C` if you need speed, or `batchsearch --final-encode` to discover thresholds quickly on GPU and automatically re-encode with the CPU equivalent for the smallest file.
 
 ### GPU selection flags
 

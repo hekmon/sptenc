@@ -52,9 +52,9 @@ CRF varies QP frame-by-frame internally. The same CRF value produces different e
 
 ### Segment encoding concurrency
 
-Segments are encoded **sequentially by default**, but **optional concurrency** is supported via `QPSearchConfig.NbConcurrentSegments` (CLI: `--concurrent-segments` / `-C`).
+Segments are encoded **sequentially by default**, but **optional concurrency** is supported via `QPSearchConfig.NbConcurrentSegments` (CLI: `--concurrent-segments` / `-C`). The CLI rejects concurrency greater than 1 for CPU encoders.
 
-- **CPU encoders** (`libx265 slow`, `svtav1`) still default to 1 concurrent segment. They already saturate physical cores on enthusiast hardware; concurrent instances thrash cache and memory bandwidth, reducing total throughput. Raising this is not recommended.
+- **CPU encoders** (`libx265 slow`, `svtav1`) are limited to 1 concurrent segment. They already saturate physical cores on enthusiast hardware; concurrent instances thrash cache and memory bandwidth, reducing total throughput. The CLI enforces this limit with a hard error if a higher value is requested.
 - **GPU encoders** benefit from concurrency because they often support multiple parallel sessions (typically 1–3 on consumer cards, SKU-dependent). The `batchsearch` command encourages raising this value for GPU-based threshold discovery, followed by an optional sequential CPU final encode (`--final-encode`) for maximum compression efficiency.
 
 Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `core/qpsearch.go`, with worker-scoped callbacks so the UI can attribute progress to individual workers.
