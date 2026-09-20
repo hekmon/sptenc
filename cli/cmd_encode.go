@@ -453,7 +453,7 @@ var encodeCommand = &cli.Command{
 		}
 		duration = time.Since(start)
 		finalVMAFStats := finalVMAFreport.GetStats()
-		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n%s", duration.Round(time.Second), finalVMAFStats)
+		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n\n%s\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 5 - remux final file
 		fmt.Fprintln(bypass, "Remuxing to final file...")
@@ -599,7 +599,7 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 		results.TotalNbAttempts, results.TotalEncodedFrames, len(segmentsPaths), results.TotalSegmentsFrames,
 	)
 	fmt.Fprintf(bypass, "\tAttempts ratio: x%s\n", strconv.FormatFloat(float64(results.TotalNbAttempts)/float64(len(segmentsPaths)), 'f', -1, 64))
-	fmt.Fprintf(bypass, "\tFrames ratio: x%s\n", strconv.FormatFloat(float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames), 'f', -1, 64))
+	fmt.Fprintf(bypass, "\tEncoded frames ratio: x%s\n", strconv.FormatFloat(float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames), 'f', -1, 64))
 	fmt.Fprintf(bypass, "\tSegments encoding QP search done in %s.\n", duration.Round(time.Second))
 
 	// Merge encoded segments

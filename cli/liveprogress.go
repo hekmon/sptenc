@@ -371,6 +371,9 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			if to.Concurrency > 1 {
+				return "         Progress | "
+			}
 			return "   Progress | "
 		}),
 		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
@@ -454,9 +457,17 @@ func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath s
 		defer to.segmentsCandidatesAccess[workerID].Unlock()
 		if len(to.segmentsCandidates[workerID]) == 0 {
 			// first step is to analyse source files for total number of frames, no candidate yet
+			if to.Concurrency > 1 {
+				return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP...", workerID, segmentIndex+1)
+			}
 			return fmt.Sprintf("    Segment | %d - Searching for best QP...", segmentIndex+1)
 		}
-		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1, strings.Join(to.segmentsCandidates[workerID], " "))
+		if to.Concurrency > 1 {
+			return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP: %s", workerID, segmentIndex+1,
+				strings.Join(to.segmentsCandidates[workerID], " "))
+		}
+		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1,
+			strings.Join(to.segmentsCandidates[workerID], " "))
 	})
 }
 
@@ -477,6 +488,9 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, fileSize int64) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			if to.Concurrency > 1 {
+				return fmt.Sprintf(" [#%d]    Analyze | ", workerID)
+			}
 			return "    Analyze | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -511,6 +525,9 @@ func (to *LiveQPSearch) OnSegmentEncodeStart(workerID, totalFrames int) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			if to.Concurrency > 1 {
+				return fmt.Sprintf(" [#%d]     Encode | ", workerID)
+			}
 			return "     Encode | "
 		}),
 		// liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
@@ -545,6 +562,9 @@ func (to *LiveQPSearch) OnSegmentVMAFStart(workerID, totalFrames int) {
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			if to.Concurrency > 1 {
+				return fmt.Sprintf(" [#%d]       VMAF | ", workerID)
+			}
 			return "       VMAF | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
@@ -587,8 +607,12 @@ func (to *LiveQPSearch) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, s
 		to.vmafProgressBars[workerID] = nil
 	}
 	// Finished segment data
-	fmt.Fprintf(liveprogress.Bypass(), "\tSegment %d: QP %d selected for this segment of %d frames (%d attempts)\n",
-		to.segmentsCurrent[workerID]+1, segmentFinalQP, segmentFrames, segmentNbAttempts,
+	var workerTail string
+	if to.Concurrency > 1 {
+		workerTail = fmt.Sprintf(" [worker #%d]", workerID)
+	}
+	fmt.Fprintf(liveprogress.Bypass(), "\tSegment %d: QP %d selected for this segment of %d frames (%d attempts)%s\n",
+		to.segmentsCurrent[workerID]+1, segmentFinalQP, segmentFrames, segmentNbAttempts, workerTail,
 	)
 	// Global progress
 	newSize := cunits.ImportInBytes(float64(currentTotalSize))
