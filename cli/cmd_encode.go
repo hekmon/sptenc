@@ -511,7 +511,6 @@ var encodeCommand = &cli.Command{
 		}
 		duration = time.Since(start)
 		fmt.Fprintf(bypass, "\tMKV statistics tags regenerated in %s\n", duration.Round(time.Second))
-
 		// Verify container-level color metadata was propagated correctly.
 		// Bitstream-level HDR SEIs (mastering display, content light level)
 		// are the encoder's responsibility and are verified implicitly by
@@ -522,8 +521,7 @@ var encodeCommand = &cli.Command{
 		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
 
 		// Done
-		duration = time.Since(globalStart)
-		fmt.Fprintf(bypass, "Complete split encoding took %s\n", duration.Round(time.Millisecond))
+		fmt.Fprintf(bypass, "Complete split encoding took %s\n", time.Since(globalStart).Round(time.Second))
 		return
 	},
 }
