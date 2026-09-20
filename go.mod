@@ -1,6 +1,6 @@
 module github.com/hekmon/sptenc
 
-go 1.25.0
+go 1.26.0
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.0
@@ -13,6 +13,7 @@ require (
 	github.com/olekukonko/tablewriter v1.1.3
 	github.com/shirou/gopsutil/v4 v4.26.7
 	github.com/urfave/cli/v3 v3.11.0
+	golang.org/x/sync v0.23.0
 	gonum.org/v1/gonum v0.17.0
 )
 

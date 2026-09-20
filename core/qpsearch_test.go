@@ -154,22 +154,22 @@ func (m *mockStatsCache) GetMeanStdDev() (mean, stddev int) {
 // mockCallbacks satisfies QPSearchCallbacks for tests.
 type mockCallbacks struct{}
 
-func (m *mockCallbacks) Debug(format string, a ...any)                       {}
-func (m *mockCallbacks) Warning(format string, a ...any)                     {}
-func (m *mockCallbacks) Error(err error)                                     {}
-func (m *mockCallbacks) OnSegmentStart(segmentIndex int, segmentPath string) {}
-func (m *mockCallbacks) OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
+func (m *mockCallbacks) Debug(format string, a ...any)                                 {}
+func (m *mockCallbacks) Warning(format string, a ...any)                               {}
+func (m *mockCallbacks) Error(err error)                                               {}
+func (m *mockCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {}
+func (m *mockCallbacks) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
 }
-func (m *mockCallbacks) OnSegmentNewCandidate(qpCandidate int)       {}
-func (m *mockCallbacks) OnSegmentAnalysisStart(fileSize int64)       {}
-func (m *mockCallbacks) OnSegmentAnalysisProgress(read int64)        {}
-func (m *mockCallbacks) OnSegmentAnalysisStop()                      {}
-func (m *mockCallbacks) OnSegmentEncodeStart(totalFrames int)        {}
-func (m *mockCallbacks) OnSegmentEncodeProgress(stats ProgressStats) {}
-func (m *mockCallbacks) OnSegmentEncodeStop()                        {}
-func (m *mockCallbacks) OnSegmentVMAFStart(totalFrames int)          {}
-func (m *mockCallbacks) OnSegmentVMAFProgress(stats ProgressStats)   {}
-func (m *mockCallbacks) OnSegmentVMAFStop()                          {}
+func (m *mockCallbacks) OnSegmentNewCandidate(workerID, qpCandidate int)           {}
+func (m *mockCallbacks) OnSegmentAnalysisStart(workerID int, fileSize int64)       {}
+func (m *mockCallbacks) OnSegmentAnalysisProgress(workerID int, read int64)        {}
+func (m *mockCallbacks) OnSegmentAnalysisStop(workerID int)                        {}
+func (m *mockCallbacks) OnSegmentEncodeStart(workerID int, totalFrames int)        {}
+func (m *mockCallbacks) OnSegmentEncodeProgress(workerID int, stats ProgressStats) {}
+func (m *mockCallbacks) OnSegmentEncodeStop(workerID int)                          {}
+func (m *mockCallbacks) OnSegmentVMAFStart(workerID int, totalFrames int)          {}
+func (m *mockCallbacks) OnSegmentVMAFProgress(workerID int, stats ProgressStats)   {}
+func (m *mockCallbacks) OnSegmentVMAFStop(workerID int)                            {}
 
 func TestFindAllSegmentsQP_Convergence(t *testing.T) {
 	ctx := context.Background()
@@ -817,7 +817,7 @@ func TestFindAllSegmentsQP_MockEncoderTracksCalls(t *testing.T) {
 	}
 }
 
-func TestFindAllSegmentsQP_NilEncoderPanics(t *testing.T) {
+func TestFindAllSegmentsQP_NilEncoder(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
@@ -839,15 +839,13 @@ func TestFindAllSegmentsQP_NilEncoderPanics(t *testing.T) {
 		t.Fatalf("failed to create source segment: %v", err)
 	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic with nil Encoder, but did not panic")
-		}
-	}()
-	FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	_, err = FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err == nil {
+		t.Fatal("expected error with nil Encoder, but got nil")
+	}
 }
 
-func TestFindAllSegmentsQP_NilCallbacksPanics(t *testing.T) {
+func TestFindAllSegmentsQP_NilCallbacks(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
@@ -881,12 +879,10 @@ func TestFindAllSegmentsQP_NilCallbacksPanics(t *testing.T) {
 		t.Fatalf("failed to create source segment: %v", err)
 	}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic with nil callbacks, but did not panic")
-		}
-	}()
-	FindAllSegmentsQP(ctx, nil, config)
+	_, err = FindAllSegmentsQP(ctx, nil, config)
+	if err == nil {
+		t.Fatal("expected error with nil callbacks, but got nil")
+	}
 }
 
 func TestQPSearchResults_GetMinMaxQPs(t *testing.T) {
@@ -1119,6 +1115,61 @@ func TestFindAllSegmentsQP_MeanAtQPMinValid(t *testing.T) {
 	}
 	if results.NbBestEfforts != 0 {
 		t.Errorf("expected 0 best-efforts (optimal QP found), got %d", results.NbBestEfforts)
+	}
+}
+
+func TestFindAllSegmentsQP_ZeroStddev(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+	}
+
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	// stddev=0 would cause Phase 2 bracketing to retest the same QP forever.
+	// The guard in searchSegmentQP forces stddev to 1, making the search
+	// step by integer increments until the bracket is closed.
+	config := QPSearchConfig{
+		SegmentsPaths: []string{filepath.Join(tmpDir, "segment.mkv")},
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    &mockStatsCache{mean: 26, stddev: 0},
+		Encoder:       encoder,
+	}
+
+	if err := os.WriteFile(config.SegmentsPaths[0], []byte("source"), 0644); err != nil {
+		t.Fatalf("failed to create source segment: %v", err)
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if len(results.QPs) != 1 || results.QPs[0] != 13 {
+		t.Errorf("expected QP 13, got %v", results.QPs)
+	}
+	// With mean=26 and forced stddev=1, the search steps down one by one
+	// from 26 to 13, then interpolation converges. Expect ~14 attempts.
+	if results.TotalNbAttempts >= 20 {
+		t.Errorf("expected reasonable convergence (<20 attempts) with forced stddev=1, got %d", results.TotalNbAttempts)
+	}
+	if results.NbBestEfforts != 0 {
+		t.Errorf("expected no best-effort segments, got %d", results.NbBestEfforts)
 	}
 }
 

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -23,22 +25,22 @@ type Logger interface {
 
 // SegmentLifecycle marks the boundaries of a single segment's search.
 type SegmentLifecycle interface {
-	OnSegmentStart(segmentIndex int, segmentPath string)
-	OnSegmentDone(segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
+	OnSegmentStart(workerID, segmentIndex int, segmentPath string)
+	OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
 }
 
 // ProgressReporter receives fine-grained progress for UI and diagnostics.
 type ProgressReporter interface {
-	OnSegmentNewCandidate(qpCandidate int)
-	OnSegmentAnalysisStart(fileSize int64)
-	OnSegmentAnalysisProgress(read int64) // not total, additional
-	OnSegmentAnalysisStop()
-	OnSegmentEncodeStart(totalFrames int)
-	OnSegmentEncodeProgress(stats ProgressStats)
-	OnSegmentEncodeStop()
-	OnSegmentVMAFStart(totalFrames int)
-	OnSegmentVMAFProgress(stats ProgressStats)
-	OnSegmentVMAFStop()
+	OnSegmentNewCandidate(workerID, qpCandidate int)
+	OnSegmentAnalysisStart(workerID int, fileSize int64)
+	OnSegmentAnalysisProgress(workerID int, read int64) // not total, additional
+	OnSegmentAnalysisStop(workerID int)
+	OnSegmentEncodeStart(workerID int, totalFrames int)
+	OnSegmentEncodeProgress(workerID int, stats ProgressStats)
+	OnSegmentEncodeStop(workerID int)
+	OnSegmentVMAFStart(workerID int, totalFrames int)
+	OnSegmentVMAFProgress(workerID int, stats ProgressStats)
+	OnSegmentVMAFStop(workerID int)
 }
 
 // QPSearchCallbacks is the complete surface expected by FindAllSegmentsQP and its helpers.
@@ -65,6 +67,12 @@ type QPSearchConfig struct {
 
 	// Encoder abstracts the concrete backend used for test encodes and VMAF computation.
 	Encoder SegmentEncoder
+	// NbConcurrentSegments sets the number of segments that will be searched (and encoded) in parallel.
+	// Can be omitted: 0 or negative values will be set to 1.
+	// USE WITH CAUTION: GPU encoders have hard session limits, and CPU encoders already
+	// saturate physical cores in most cases. Only increase this if you know how many parallel encodes
+	// your specific hardware can sustain.
+	NbConcurrentSegments int
 }
 
 // QPSearchResults holds the outcome of a QP search across all segments.
@@ -105,57 +113,144 @@ func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
 	}
 }
 
+// workerLogWrapper delegates all QPSearchCallbacks methods to an inner implementation
+// but conditionally prefixes Debug and Error messages with the worker ID only when
+// there is more than one concurrent worker. This keeps single-worker logs clean.
+type workerLogWrapper struct {
+	QPSearchCallbacks
+	workerID     int
+	totalWorkers int
+}
+
+func (w workerLogWrapper) Debug(format string, a ...any) {
+	if w.totalWorkers > 1 {
+		w.QPSearchCallbacks.Debug("[worker %d] "+format, append([]any{w.workerID}, a...)...)
+	} else {
+		w.QPSearchCallbacks.Debug(format, a...)
+	}
+}
+
+func (w workerLogWrapper) Error(err error) {
+	if w.totalWorkers > 1 {
+		w.QPSearchCallbacks.Error(fmt.Errorf("[worker %d] %w", w.workerID, err))
+	} else {
+		w.QPSearchCallbacks.Error(err)
+	}
+}
+
+type job struct {
+	segment int
+	path    string
+}
+
 // FindAllSegmentsQP searches for the optimal QP for each segment.
 func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig) (results QPSearchResults, err error) {
+	// Validate required dependencies before spawning goroutines so that nil
+	// inputs return an error instead of a panic.
+	if scb == nil {
+		err = fmt.Errorf("scb is nil")
+		return
+	}
+	if config.Encoder == nil {
+		err = fmt.Errorf("Encoder is nil")
+		return
+	}
 	// Prepare
 	var (
-		segmentDuration, doneDuration time.Duration
-		segmentFrames                 int
-		segmentQP, segmentWeights     int
-		segmentSize, allSegmentSize   int64
-		segmentNbAttempts             int
-		bestEffort                    bool
+		segmentWeights int
+		doneDuration   time.Duration
+		allSegmentSize int64
+		resultsAccess  sync.Mutex
 	)
 	results.EncodedSegmentsPaths = make([]string, len(config.SegmentsPaths))
 	results.QPs = make([]int, len(config.SegmentsPaths))
-	// Go
-	for segment, segmentPath := range config.SegmentsPaths {
-		scb.OnSegmentStart(segment, segmentPath)
-		// Find this segment QP
-		if segmentQP, segmentFrames, segmentNbAttempts, bestEffort, segmentDuration, err = findSegmentQP(ctx, scb, config, segment, segmentPath); err != nil {
-			err = fmt.Errorf("failed to find the right encoding QP for segment %d: %w", segment, err)
-			return
+	if config.NbConcurrentSegments < 1 {
+		config.NbConcurrentSegments = 1
+	}
+	workers, workersCtx := errgroup.WithContext(ctx)
+	jobsChan := make(chan job)
+	// Launch Workers
+	for workerID := range config.NbConcurrentSegments {
+		workers.Go(func(workerCtx context.Context, wID int, jobs <-chan job) func() error {
+			var (
+				segmentDuration   time.Duration
+				segmentFrames     int
+				segmentQP         int
+				segmentSize       int64
+				segmentNbAttempts int
+				bestEffort        bool
+			)
+			wcb := workerLogWrapper{QPSearchCallbacks: scb, workerID: wID, totalWorkers: config.NbConcurrentSegments}
+			return func() (err error) {
+				for job := range jobs {
+					wcb.OnSegmentStart(wID, job.segment, job.path)
+					// Find this segment QP
+					if segmentQP, segmentFrames, segmentNbAttempts, bestEffort, segmentDuration, err =
+						findSegmentQP(workerCtx, wcb, config, wID, job.segment, job.path); err != nil {
+						err = fmt.Errorf("failed to find the right encoding QP for segment %d: %w", job.segment, err)
+						return
+					}
+					encodedSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, job.segment, segmentQP))
+					if segmentSize, err = getFileSize(encodedSegmentPath); err != nil {
+						err = fmt.Errorf("failed to get the size of segment %d: %w", job.segment, err)
+						return
+					}
+					// Update global stats
+					resultsAccess.Lock()
+					results.EncodedSegmentsPaths[job.segment] = encodedSegmentPath
+					results.QPs[job.segment] = segmentQP
+					results.TotalSegmentsFrames += segmentFrames
+					results.TotalEncodedFrames += segmentFrames * segmentNbAttempts
+					results.TotalNbAttempts += segmentNbAttempts
+					if bestEffort {
+						results.NbBestEfforts++
+					}
+					doneDuration += segmentDuration
+					allSegmentSize += segmentSize
+					segmentWeights += segmentQP * segmentFrames
+					resultsAccess.Unlock()
+					// Done
+					scb.OnSegmentDone(wID, segmentQP, segmentFrames, segmentNbAttempts, doneDuration, allSegmentSize)
+				}
+				return
+			}
+		}(workersCtx, workerID, jobsChan))
+	}
+	// Launch Feeder
+	workers.Go(func(workerCtx context.Context, jobs chan<- job) func() error {
+		return func() error {
+			defer close(jobs)
+			for segment, segmentPath := range config.SegmentsPaths {
+				select {
+				case jobs <- job{
+					segment: segment,
+					path:    segmentPath,
+				}:
+					// job sent, let's loop
+				case <-workerCtx.Done():
+					// early exit, one of the process worker encountered an error:
+					// let's close the jobs channel feeder by safety (as no one will be reading it anymore)
+					return nil
+				}
+			}
+			// All jobs sent, let's exit (and close the feeder chan to signal workers they can stop once done)
+			return nil
 		}
-		encodedSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, segmentQP))
-		if segmentSize, err = getFileSize(encodedSegmentPath); err != nil {
-			err = fmt.Errorf("failed to get the size of segment %d: %w", segment, err)
-			return
-		}
-		// Update stats
-		results.EncodedSegmentsPaths[segment] = encodedSegmentPath
-		results.QPs[segment] = segmentQP
-		results.TotalSegmentsFrames += segmentFrames
-		results.TotalEncodedFrames += segmentFrames * segmentNbAttempts
-		results.TotalNbAttempts += segmentNbAttempts
-		if bestEffort {
-			results.NbBestEfforts++
-		}
-		doneDuration += segmentDuration
-		allSegmentSize += segmentSize
-		segmentWeights += segmentQP * segmentFrames
-		// Done
-		scb.OnSegmentDone(segmentQP, segmentFrames, segmentNbAttempts, doneDuration, allSegmentSize)
+	}(workersCtx, jobsChan))
+	// Wait until the end
+	if err = workers.Wait(); err != nil {
+		return
 	}
 	results.GlobalWeightedQP = float64(segmentWeights) / float64(results.TotalSegmentsFrames)
 	return
 }
 
 func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	segment int, segmentPath string) (
+	workerID, segment int, segmentPath string) (
 	finalQP, segmentFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
 	scb.Debug("Segment %d: Search for the right QP", segment)
 	// Prepare
-	videoTrack, err := getStreamsInfosCF(ctx, scb, config, segmentPath)
+	videoTrack, err := getStreamsInfosCF(ctx, scb, config, workerID, segmentPath)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
@@ -177,7 +272,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		}
 		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, finalQP))
 		var finalStream VideoStream
-		if finalStream, err = getStreamsInfosCF(ctx, scb, config, finalQPSegmentPath); err != nil {
+		if finalStream, err = getStreamsInfosCF(ctx, scb, config, workerID, finalQPSegmentPath); err != nil {
 			// make findSegmentQP return an error
 			err = fmt.Errorf("failed to get streams infos of final segment: %w", err)
 			return
@@ -205,7 +300,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 			}
 		}()
 	}
-	if finalQP, nbAttempts, bestEffort, testedQPs, err = searchSegmentQP(ctx, scb, config, segment, segmentPath, videoTrack); err != nil {
+	if finalQP, nbAttempts, bestEffort, testedQPs, err = searchSegmentQP(ctx, scb, config, workerID, segment, segmentPath, videoTrack); err != nil {
 		err = fmt.Errorf("failed to search segment QP: %w", err)
 		return
 	}
@@ -215,7 +310,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	return
 }
 
-func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, filePath string) (
+func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, workerID int, filePath string) (
 	stream VideoStream, err error) {
 	// Recover size
 	fileInfos, err := os.Stat(filePath)
@@ -224,11 +319,11 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSear
 		return
 	}
 	// Prepare signals
-	scb.OnSegmentAnalysisStart(fileInfos.Size())
-	defer scb.OnSegmentAnalysisStop()
+	scb.OnSegmentAnalysisStart(workerID, fileInfos.Size())
+	defer scb.OnSegmentAnalysisStop(workerID)
 	// Start analysis
 	return config.Encoder.ProbeStream(ctx, filePath, func(bytesRead int64) {
-		scb.OnSegmentAnalysisProgress(bytesRead)
+		scb.OnSegmentAnalysisProgress(workerID, bytesRead)
 	}, func(s string) {
 		scb.Debug(s)
 	}, scb.Error)
@@ -244,7 +339,7 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSear
 // This has held across 2+ years of production encoding; non-monotonic edge cases
 // have not been observed in practice.
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	segment int, segmentPath string, videoTrack VideoStream) (
+	workerID, segment int, segmentPath string, videoTrack VideoStream) (
 	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, err error) {
 	// Keep track of tested QPs
 	qpMin, qpMax, found := config.Encoder.QPRange()
@@ -266,6 +361,9 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	bestValid := qpMin
 	firstInvalid := qpMax
 	mean, stddev := config.StatsCache.GetMeanStdDev()
+	if stddev == 0 {
+		stddev = 1
+	}
 	for {
 		// Find a candidate
 		_, bestValidTested = results[bestValid]
@@ -304,7 +402,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			}
 		} else {
 			// Step 3: the range is closed - narrow it with interpolation.
-			if candidateQP, err = interpolateCandidate(scb, config, bestValid, firstInvalid, qpMin, qpMax, results); err != nil {
+			if candidateQP, err = interpolateCandidate(scb, config, workerID, bestValid, firstInvalid, qpMin, qpMax, results); err != nil {
 				err = fmt.Errorf("failed to find candidate: %w", err)
 				return
 			}
@@ -379,8 +477,8 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			}
 		}
 		// Test candidate and narrow the search
-		scb.OnSegmentNewCandidate(candidateQP)
-		if vmafStats, err = segmentQP(ctx, scb, config, segmentPath, segment, candidateQP, videoTrack); err != nil {
+		scb.OnSegmentNewCandidate(workerID, candidateQP)
+		if vmafStats, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, candidateQP, videoTrack); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
@@ -396,7 +494,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 }
 
 func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
-	bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]VMAFStats) (
+	workerID, bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]VMAFStats) (
 	candidateQP int, err error) {
 	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, scb.Debug)
 	if err != nil {
@@ -427,25 +525,29 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 }
 
 func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	input string, segment, qp int, videoTrack VideoStream) (
+	input string, workerID, segment, qp int, videoTrack VideoStream) (
 	vmafStats VMAFStats, err error) {
 	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	// Encode
-	scb.OnSegmentEncodeStart(videoTrack.NbReadFrames)
-	encodeErr := config.Encoder.Encode(ctx, input, output, qp, videoTrack, scb.OnSegmentEncodeProgress, func(msg string) {
+	scb.OnSegmentEncodeStart(workerID, videoTrack.NbReadFrames)
+	encodeErr := config.Encoder.Encode(ctx, input, output, qp, videoTrack, func(stats ProgressStats) {
+		scb.OnSegmentEncodeProgress(workerID, stats)
+	}, func(msg string) {
 		scb.Debug(msg)
 	}, scb.Error)
-	scb.OnSegmentEncodeStop()
+	scb.OnSegmentEncodeStop(workerID)
 	if encodeErr != nil {
 		err = fmt.Errorf("failed to encode segment: %w", encodeErr)
 		return
 	}
 	// Compute VMAF
-	scb.OnSegmentVMAFStart(videoTrack.NbReadFrames)
-	vmafStats, vmafErr := config.Encoder.ComputeVMAF(ctx, input, output, videoTrack, scb.OnSegmentVMAFProgress, func(msg string) {
+	scb.OnSegmentVMAFStart(workerID, videoTrack.NbReadFrames)
+	vmafStats, vmafErr := config.Encoder.ComputeVMAF(ctx, input, output, videoTrack, func(stats ProgressStats) {
+		scb.OnSegmentVMAFProgress(workerID, stats)
+	}, func(msg string) {
 		scb.Debug(msg)
 	}, scb.Error)
-	scb.OnSegmentVMAFStop()
+	scb.OnSegmentVMAFStop(workerID)
 	if vmafErr != nil {
 		err = fmt.Errorf("failed to compute VMAF for segment: %w", vmafErr)
 		return
