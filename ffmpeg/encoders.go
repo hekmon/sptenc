@@ -50,6 +50,17 @@ const (
  * GPU/CPU encoders relationship
  */
 
+// IsGPU reports whether the encoder is a hardware (GPU) encoder.
+func IsGPU(encoder Encoder) bool {
+	switch encoder {
+	case HEVCEncoderNVEnc, HEVCEncoderVAAPI, HEVCEncoderD3D12VA, HEVCEncoderVideoToolbox,
+		AV1EncoderNVEnc, AV1EncoderVAAPI:
+		return true
+	default:
+		return false
+	}
+}
+
 // GetCPURelative returns whether the given encoder is a GPU encoder and its CPU equivalent.
 // For GPU encoders (e.g. hevc_nvenc, av1_nvenc), it returns true and the corresponding CPU
 // encoder in the same codec family (libx265 for HEVC, svtav1 for AV1). For CPU encoders,

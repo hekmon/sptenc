@@ -217,6 +217,11 @@ var batchsearchCommand = &cli.Command{
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc verify' to see available encoders", requestedEncoder)
 		}
+		// Reject concurrent segments with CPU encoders
+		if cmd.Int(concurrentSegmentsFlagName) > 1 && !ffmpeg.IsGPU(ffmpeg.Encoder(requestedEncoder)) {
+			return ctx, fmt.Errorf("--%s is only supported with GPU encoders; %s is a CPU encoder. Use a GPU encoder for the search loop with --%s for a CPU final pass",
+				concurrentSegmentsFlagName, requestedEncoder, finalEncodeFlagName)
+		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
 			filters, err := ffmpeg.GetFilters(ctx)
@@ -579,8 +584,9 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Run QP search with final encoder
+			// Final encode always uses a CPU encoder, so concurrency must be 1.
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
-				vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+				vmafAuditor, finalStatsCache, finalEncoderAdapter, 1, cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}

@@ -147,6 +147,10 @@ var encodeCommand = &cli.Command{
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc verify' to see available encoders", requestedEncoder)
 		}
+		// Reject concurrent segments with CPU encoders
+		if cmd.Int(concurrentSegmentsFlagName) > 1 && !ffmpeg.IsGPU(ffmpeg.Encoder(requestedEncoder)) {
+			return ctx, fmt.Errorf("--%s is only supported with GPU encoders; %s is a CPU encoder", concurrentSegmentsFlagName, requestedEncoder)
+		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
 			filters, err := ffmpeg.GetFilters(ctx)
