@@ -50,14 +50,16 @@ CRF varies QP frame-by-frame internally. The same CRF value produces different e
 
 **Implication:** Adding CRF modes, adaptive quantizers, or "hybrid CRF/QP" approaches would require redesigning the entire search algorithm, not just adding a flag.
 
-### Sequential segment encoding
+### Segment encoding concurrency
 
-Segments are encoded **sequentially**, not in parallel. This is not an oversight.
+Segments are encoded **sequentially by default**, but **optional concurrency** is supported via `QPSearchConfig.NbConcurrentSegments` (CLI: `--concurrent-segments` / `-C`).
 
-- **CPU encoders** (`libx265 slow`, `svtav1`) already saturate physical cores on enthusiast hardware. Concurrent instances thrash cache and memory bandwidth, reducing total throughput.
-- **GPU encoders** are bounded by hard NVENC session limits (1–3 on consumer cards, SKU-dependent). Safe concurrency requires NVML probing and varies by hardware generation.
+- **CPU encoders** (`libx265 slow`, `svtav1`) still default to 1 concurrent segment. They already saturate physical cores on enthusiast hardware; concurrent instances thrash cache and memory bandwidth, reducing total throughput. Raising this is not recommended.
+- **GPU encoders** benefit from concurrency because they often support multiple parallel sessions (typically 1–3 on consumer cards, SKU-dependent). The `batchsearch` command encourages raising this value for GPU-based threshold discovery, followed by an optional sequential CPU final encode (`--final-encode`) for maximum compression efficiency.
 
-**Implication:** Parallelizing segment encodes requires solving the hardware constraints above first. Naive goroutine-per-segment approaches would hurt performance or fail on hardware limits.
+Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `core/qpsearch.go`, with worker-scoped callbacks so the UI can attribute progress to individual workers.
+
+**Implication:** The default remains sequential for safety. Only raise concurrency when you know your hardware can sustain it. Naive goroutine-per-segment approaches would hurt performance or fail on hardware limits.
 
 ### Explicit per-encoder switches
 
