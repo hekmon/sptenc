@@ -280,10 +280,11 @@ var encodeCommand = &cli.Command{
 
 		// Step 1 - Segments and media infos
 		var (
-			segmentsPaths []string
-			sourceStats   ffmpeg.FFProbeStats
-			totalDuration time.Duration
-			videoStream   *ffmpeg.FFProbeBinaryStream
+			segmentsPaths     []string
+			sourceStats       ffmpeg.FFProbeStats
+			totalDuration     time.Duration
+			videoStream       *ffmpeg.FFProbeBinaryStream
+			sourceTotalFrames int
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
@@ -324,7 +325,7 @@ var encodeCommand = &cli.Command{
 			)
 			// create master
 			var masterFile string
-			if masterFile, _, _, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
+			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// split
@@ -415,34 +416,40 @@ var encodeCommand = &cli.Command{
 
 		// Step 4 - final vmaf check
 		// Verify frame counts match before computing VMAF to catch misalignment early.
-		// Use -count_frames (NbReadFrames) via liveCountNbFrames for accurate counts.
 		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
 		var sourceFrames, encodedFrames int
-		sourceFileInfo, err := os.Stat(vmafSource)
-		if err != nil {
-			fmt.Fprintf(bypass, "WARNING: could not stat source for frame count verification: %s\n", err)
-		} else {
+		if inputInfos.IsDir() {
+			var sourceFileInfo os.FileInfo
+			sourceFileInfo, err = os.Stat(vmafSource)
+			if err != nil {
+				err = fmt.Errorf("could not stat source for frame count verification: %w", err)
+				return
+			}
 			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, sourceFileInfo.Size(), cmd.Bool(debugFlagName))
 			if err != nil {
-				fmt.Fprintf(bypass, "WARNING: could not count frames in source for verification: %s\n", err)
-				sourceFrames = 0
+				err = fmt.Errorf("could not count frames in source for verification: %w", err)
+				return
 			}
-		}
-		encodedFileInfo, err := os.Stat(encodedSegmentsMerged)
-		if err != nil {
-			fmt.Fprintf(bypass, "WARNING: could not stat encoded output for frame count verification: %s\n", err)
 		} else {
-			encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
-			if err != nil {
-				fmt.Fprintf(bypass, "WARNING: could not count frames in encoded output for verification: %s\n", err)
-				encodedFrames = 0
-			}
+			// Reuse the exact frame count from createMaster instead of re-probing the source.
+			sourceFrames = sourceTotalFrames
+		}
+		var encodedFileInfo os.FileInfo
+		if encodedFileInfo, err = os.Stat(encodedSegmentsMerged); err != nil {
+			err = fmt.Errorf("could not stat encoded output for frame count verification: %w", err)
+			return
+		}
+		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
+		if err != nil {
+			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
+			return
 		}
 		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Frame counts — source: %d, encoded: %d\n", sourceFrames, encodedFrames)
+			fmt.Fprintf(bypass, "DEBUG: Frame counts - source: %d, encoded: %d\n", sourceFrames, encodedFrames)
 		}
-		if sourceFrames > 0 && encodedFrames > 0 && sourceFrames != encodedFrames {
-			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
+		if sourceFrames != encodedFrames {
+			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment",
+				sourceFrames, encodedFrames)
 			return
 		}
 		fmt.Fprintln(bypass, "Computing final VMAF...")

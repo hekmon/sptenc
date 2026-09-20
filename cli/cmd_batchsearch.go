@@ -431,7 +431,7 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Step 2 - Create the master for encoding
-		masterFile, _, _, err := createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
+		masterFile, sourceTotalFrames, _, err := createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
 		if err != nil {
 			return fmt.Errorf("failed to create the master file: %w", err)
 		}
@@ -597,30 +597,23 @@ var batchsearchCommand = &cli.Command{
 		vmafSource := inputPath
 		fmt.Fprintln(bypass, "Verifying frame counts for final VMAF...")
 		var sourceFrames, encodedFrames int
-		sourceFileInfo, err := os.Stat(vmafSource)
+		// Reuse the exact frame count from createMaster instead of re-probing the source.
+		sourceFrames = sourceTotalFrames
+		var encodedFileInfo os.FileInfo
+		encodedFileInfo, err = os.Stat(encodedSegmentsMerged)
 		if err != nil {
-			fmt.Fprintf(bypass, "WARNING: could not stat source for frame count verification: %s\n", err)
-		} else {
-			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, sourceFileInfo.Size(), cmd.Bool(debugFlagName))
-			if err != nil {
-				fmt.Fprintf(bypass, "WARNING: could not count frames in source for verification: %s\n", err)
-				sourceFrames = 0
-			}
+			err = fmt.Errorf("could not stat encoded output for frame count verification: %w", err)
+			return
 		}
-		encodedFileInfo, err := os.Stat(encodedSegmentsMerged)
+		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
 		if err != nil {
-			fmt.Fprintf(bypass, "WARNING: could not stat encoded output for frame count verification: %s\n", err)
-		} else {
-			encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
-			if err != nil {
-				fmt.Fprintf(bypass, "WARNING: could not count frames in encoded output for verification: %s\n", err)
-				encodedFrames = 0
-			}
+			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
+			return
 		}
 		if cmd.Bool(debugFlagName) {
 			fmt.Fprintf(bypass, "DEBUG: Frame counts — source: %d, encoded: %d\n", sourceFrames, encodedFrames)
 		}
-		if sourceFrames > 0 && encodedFrames > 0 && sourceFrames != encodedFrames {
+		if sourceFrames != encodedFrames {
 			err = fmt.Errorf("frame count mismatch: source has %d frames but encoded output has %d frames. This will cause VMAF misalignment", sourceFrames, encodedFrames)
 			return
 		}
