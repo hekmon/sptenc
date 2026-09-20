@@ -19,13 +19,6 @@ import (
 	"github.com/hekmon/liveprogress/v2"
 )
 
-type ctxKey string
-
-const (
-	inputFileSizeCtxKey  ctxKey = "inputsize"
-	inputFileInfosCtxKey ctxKey = "fileInfos"
-)
-
 func checkFFMPEG(ctx context.Context) error {
 	if _, err := ffmpeg.GetFFMPEGVersion(ctx); err != nil {
 		return fmt.Errorf("ffmpeg check failed: %w", err)

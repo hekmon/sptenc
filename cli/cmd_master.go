@@ -68,7 +68,6 @@ var masterCommand = &cli.Command{
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input file must be a regular file")
 		}
-		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		// Check output directory if explicitly provided
 		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
 			if fileInfos, err = os.Stat(outputDir); err != nil {
@@ -100,9 +99,13 @@ var masterCommand = &cli.Command{
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		// handle input file
 		inputFilePath := cmd.StringArg("inputfile")
+		fileInfos, err := os.Stat(inputFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to access input file: %w", err)
+		}
 		fmt.Printf("Creating a master of %s (%s)\n",
 			shellescape.Quote(filepath.Base(inputFilePath)),
-			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 		// start live progress
 		if err = liveprogress.Start(); err != nil {
@@ -124,7 +127,7 @@ var masterCommand = &cli.Command{
 			outputDir = filepath.Dir(inputFilePath)
 		}
 		var outputFile string
-		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig)
+		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputDir, fileInfos.Size(), cmd.Bool(debugFlagName), masterConfig)
 		if err == nil {
 			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
 		}

@@ -101,7 +101,6 @@ var splitCommand = &cli.Command{
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input file must be a regular file")
 		}
-		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		// Check output directory if explicitly provided
 		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
 			if fileInfos, err = os.Stat(outputDir); err != nil {
@@ -132,6 +131,10 @@ var splitCommand = &cli.Command{
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		inputFilePath := cmd.StringArg("inputfile")
+		fileInfos, err := os.Stat(inputFilePath)
+		if err != nil {
+			return fmt.Errorf("failed to access input file: %w", err)
+		}
 
 		// start live progress
 		if err = liveprogress.Start(); err != nil {
@@ -159,7 +162,7 @@ var splitCommand = &cli.Command{
 		duration := stats.Format.Duration
 		fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
 			shellescape.Quote(filepath.Base(inputFilePath)),
-			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+			cunits.ImportInBytes(float64(fileInfos.Size())),
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		if !cmd.Bool(masterFlagName) {
@@ -196,7 +199,7 @@ var splitCommand = &cli.Command{
 				fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 			}
 			// create the master within
-			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), masterConfig); err != nil {
+			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, workingDir, fileInfos.Size(), cmd.Bool(debugFlagName), masterConfig); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 		}

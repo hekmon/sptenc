@@ -165,13 +165,11 @@ var encodeCommand = &cli.Command{
 		if err != nil {
 			return ctx, fmt.Errorf("failed to access input file: %w", err)
 		}
-		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
 		inputIsDir := fileInfos.IsDir()
 		if !inputIsDir {
 			if !fileInfos.Mode().IsRegular() {
 				return ctx, errors.New("input path must be a directory or a regular file")
 			}
-			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 			// --original-file is only meaningful with directory input; reject it for single files
 			if cmd.String(originalFileFlagName) != "" {
 				return ctx, errors.New("--original-file can not be used when input path is a single file")
@@ -187,7 +185,6 @@ var encodeCommand = &cli.Command{
 			if !fileInfos.Mode().IsRegular() {
 				return ctx, errors.New("original file must be a regular file")
 			}
-			ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		}
 		// Check output directory if explicitly provided
 		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
@@ -211,7 +208,21 @@ var encodeCommand = &cli.Command{
 
 		// retreive input infos
 		inputPath := cmd.StringArg("inputpath")
-		inputInfos := ctx.Value(inputFileInfosCtxKey).(os.FileInfo)
+		inputInfos, err := os.Stat(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to access input file: %w", err)
+		}
+		var inputFileSize int64
+		if !inputInfos.IsDir() {
+			inputFileSize = inputInfos.Size()
+		} else {
+			originalFilePath := cmd.String(originalFileFlagName)
+			originalInfos, err := os.Stat(originalFilePath)
+			if err != nil {
+				return fmt.Errorf("failed to access original file: %w", err)
+			}
+			inputFileSize = originalInfos.Size()
+		}
 
 		// start live progress
 		if err = liveprogress.Start(); err != nil {
@@ -325,7 +336,7 @@ var encodeCommand = &cli.Command{
 			)
 			// create master
 			var masterFile string
-			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, workingDir, ctx.Value(inputFileSizeCtxKey).(int64), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
+			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, workingDir, inputFileSize, cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// split
@@ -347,7 +358,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\nStarting split encoding of already splitted video files within %s\n\t(source: %s (%s)) with %s.\n",
 				shellescape.Quote(filepath.Base(inputPath)),
 				shellescape.Quote(filepath.Base(cmd.String(originalFileFlagName))),
-				cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+				cunits.ImportInBytes(float64(inputFileSize)),
 				cmd.String(encoderFlagName),
 			)
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)

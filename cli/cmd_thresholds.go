@@ -88,7 +88,6 @@ var thresholdsCommand = &cli.Command{
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input file must be a regular file")
 		}
-		ctx = context.WithValue(ctx, inputFileSizeCtxKey, fileInfos.Size())
 		var hwDecFlags int
 		if cmd.Bool(nvdecFlagName) {
 			hwDecFlags++
@@ -128,9 +127,13 @@ var thresholdsCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\nDetecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
+		fileInfos, err := os.Stat(cmd.StringArg("inputfile"))
+		if err != nil {
+			return fmt.Errorf("failed to access input file: %w", err)
+		}
 		fmt.Fprintf(bypass, "Analyzing thresholds for %s (%s)\n",
 			shellescape.Quote(filepath.Base(cmd.StringArg("inputfile"))),
-			cunits.ImportInBytes(float64(ctx.Value(inputFileSizeCtxKey).(int64))),
+			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),

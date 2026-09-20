@@ -241,7 +241,6 @@ var batchsearchCommand = &cli.Command{
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input path must be a regular file")
 		}
-		ctx = context.WithValue(ctx, inputFileInfosCtxKey, fileInfos)
 		// Check output directory if explicitly provided
 		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
 			if fileInfos, err = os.Stat(outputDir); err != nil {
@@ -268,7 +267,10 @@ var batchsearchCommand = &cli.Command{
 
 		// retreive input infos
 		inputPath := cmd.StringArg("inputpath")
-		inputInfos := ctx.Value(inputFileInfosCtxKey).(os.FileInfo)
+		inputInfos, err := os.Stat(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to access input file: %w", err)
+		}
 
 		// start live progress
 		if err = liveprogress.Start(); err != nil {
