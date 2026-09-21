@@ -25,7 +25,7 @@ const (
 	concurrentSegmentsFlagName = "concurrent-segments"
 	vmafCUDAFlagName           = "vmaf-cuda"
 
-	hardwareAccelerationCategoryName = "Hardware acceleration"
+	hardwareAccelerationCategoryName = "Hardware Acceleration"
 )
 
 // hwAccelScope controls which hardware acceleration flags are emitted.
