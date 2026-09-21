@@ -76,11 +76,14 @@ var batchsearchCommand = &cli.Command{
 		"thresholds command to inspect distributions, pick a threshold manually, and run encode.\n\n" +
 		"SEGMENT LENGTH\n" +
 		"The --" + minSegmentLengthFlagName + " filter removes boundaries that would create segments shorter\n" +
-		"than the given duration. It is applied before candidate generation, so the auto-tuner operates\n" +
-		"on the same post-filter scene count that each candidate encode will use.\n" +
+		"than the given duration. It is applied on each candidate after its threshold, exactly as encode\n" +
+		"does: the scenes of a candidate only depend on its threshold and on this flag, so the best\n" +
+		"threshold can be reused as is with encode (for example on the other episodes of a series).\n" +
+		"Candidates ending up with the same scenes once merged are only tested once, and the scene drop\n" +
+		"(--" + minDropFlagName + ", --" + maxCandidatesFlagName + ") counts real scenes: the merged ones that will be encoded.\n" +
 		"Segments shorter than ~5 seconds produce unreliable VMAF percentile metrics and starve\n" +
-		"B/P-frame compression. The filter prevents both problems by merging short segments before\n" +
-		"the search begins. It does not protect against the opposite problem: segments that are too long.\n\n" +
+		"B/P-frame compression. The filter prevents both problems by merging short segments.\n" +
+		"It does not protect against the opposite problem: segments that are too long.\n\n" +
 		"PREVIEWING CANDIDATES\n" +
 		"Use the thresholds command to preview what candidate thresholds and scene distributions your\n" +
 		"chosen range will produce, without running any encodes. It is a fast way to validate that\n" +
@@ -422,46 +425,14 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-		// Apply min-segment-length filter to the full scene list once. All downstream
-		// steps (candidate generation, per-candidate splits, final encode) use this
-		// filtered list, so filtering never needs to happen again.
-		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
-			filtered := pipeline.FilterShortScenes(scenes, totalDuration, minSegLen)
-			if removed := len(scenes) - len(filtered); removed > 0 {
-				fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
-					removed, minSegLen, 1+len(filtered))
-			}
-			scenes = filtered
-		}
-		// Cap scenes to the max threshold
-		cappedScenes := make([]core.Scene, 0, len(scenes))
-		for _, scene := range scenes {
-			if scene.Score <= cmd.Float64(maxThresholdFlagName) {
-				cappedScenes = append(cappedScenes, core.Scene{Start: scene.Start, Score: scene.Score})
-			}
-		}
-		if len(cappedScenes) < len(scenes) {
-			fmt.Fprintf(bypass, "\tCapped to %d scenes with score ≤ %s\n",
-				1+len(cappedScenes), strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
-			)
-		}
-		candidates, effectiveMinDrop := core.GetOptimalMinDrop(cappedScenes, cmd.Int(maxCandidatesFlagName))
+		// Candidates and their scenes (see searchCandidates)
+		candidates, segmentations := searchCandidates(bypass, cmd, scenes, totalDuration)
 		if len(candidates) == 0 {
 			return fmt.Errorf("no candidates found in the %s–%s range",
 				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 				strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
 			)
 		}
-		if effectiveMinDrop < cmd.Int(minDropFlagName) {
-			fmt.Fprintf(bypass, "\tWARNING: Auto-tuned scene drop of %d is below the minimum of %d; recomputing candidates...\n",
-				effectiveMinDrop, cmd.Int(minDropFlagName),
-			)
-			candidates = core.GetSearchThresholdCandidates(cappedScenes, cmd.Int(minDropFlagName))
-			effectiveMinDrop = cmd.Int(minDropFlagName)
-		}
-		fmt.Fprintf(bypass, "\tScene drop auto-tuned to %d to stay within %s=%d, producing %d candidates\n",
-			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
-		)
 		if cmd.Bool(debugFlagName) {
 			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
 		}
@@ -496,14 +467,8 @@ var batchsearchCommand = &cli.Command{
 				return fmt.Errorf("failed to create workdir for candidate %s: %w", candidateStr, err)
 			}
 
-			// Step 3.A - Build the filtered scenes list
-			// scenes was already filtered upfront, so no additional merging is needed.
-			runScenes := make([]ffmpeg.Scene, 0, len(scenes))
-			for _, scene := range scenes {
-				if scene.Score >= batch.candidates[batch.currentCandidateIndex] {
-					runScenes = append(runScenes, scene)
-				}
-			}
+			// Step 3.A - Get the scenes list of this candidate
+			runScenes := segmentations[batch.currentCandidateIndex]
 			fmt.Fprintf(bypass, "\tWill produce %d scenes\n", 1+len(runScenes))
 
 			// Step 3.B - Split scenes
@@ -581,14 +546,8 @@ var batchsearchCommand = &cli.Command{
 				return fmt.Errorf("failed to create workdir for final encode: %w", err)
 			}
 
-			// Build the filtered scenes list for the best candidate
-			// scenes was already filtered upfront, so no additional merging is needed.
-			bestScenes := make([]ffmpeg.Scene, 0, len(scenes))
-			for _, scene := range scenes {
-				if scene.Score >= batch.candidates[bestIndex] {
-					bestScenes = append(bestScenes, scene)
-				}
-			}
+			// Get the scenes list of the best candidate
+			bestScenes := segmentations[bestIndex]
 
 			// Split scenes
 			fmt.Fprintf(bypass, "Splitting scenes for final encode...\n")

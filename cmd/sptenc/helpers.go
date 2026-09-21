@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,10 +13,13 @@ import (
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
+	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"github.com/hekmon/liveprogress/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func checkFFMPEG(ctx context.Context) error {
@@ -205,4 +209,52 @@ func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *f
 	if sourceStream.ColorPrimaries != "" && outStream.ColorPrimaries != sourceStream.ColorPrimaries {
 		fmt.Fprintf(bypass, "WARNING: output color_primaries (%s) does not match source (%s)\n", outStream.ColorPrimaries, sourceStream.ColorPrimaries)
 	}
+}
+
+// searchCandidates turns detected scenes into the threshold candidates of a search (batchsearch,
+// thresholds) along with the scenes each one produces: segmentations[i] are the scenes of thresholds[i].
+// The reasoning behind each step lives in core/scenes.go ("Threshold candidates"), in short:
+//
+//  1. scenes have been detected with --min-threshold (done by the caller)
+//  2. candidates are capped to --max-threshold
+//  3. raw candidates are the unique scene scores in that range
+//  4. the scenes of each raw candidate are computed from the full scenes list: threshold first,
+//     then --min-segment-length, exactly what encode does with its own threshold
+//  5. candidates ending up with the same scenes are dropped
+//  6. last, candidates are thinned out by scene drop (counted on real scenes, once merged) to fit
+//     --max-candidates, without going below --min-drop
+//
+// No candidates are returned if there is no scene within the range.
+func searchCandidates(out io.Writer, cmd *cli.Command, scenes []ffmpeg.Scene, totalDuration time.Duration) (
+	thresholds []float64, segmentations [][]ffmpeg.Scene) {
+	// Steps 2 to 5
+	allCandidates := core.GetCandidates(pipeline.ToCoreScenes(scenes), cmd.Float64(maxThresholdFlagName),
+		totalDuration, cmd.Duration(minSegmentLengthFlagName))
+	if len(allCandidates) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "\tFound %d distinct candidates up to threshold %s (min segment length of %s enforced on each)\n",
+		len(allCandidates), strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+		cmd.Duration(minSegmentLengthFlagName),
+	)
+	// Step 6
+	candidates, effectiveMinDrop := core.GetOptimalMinDrop(allCandidates, cmd.Int(maxCandidatesFlagName))
+	if effectiveMinDrop < cmd.Int(minDropFlagName) {
+		fmt.Fprintf(out, "\tWARNING: Auto-tuned scene drop of %d is below the minimum of %d; recomputing candidates...\n",
+			effectiveMinDrop, cmd.Int(minDropFlagName),
+		)
+		candidates = core.FilterCandidatesByDrop(allCandidates, cmd.Int(minDropFlagName))
+		effectiveMinDrop = cmd.Int(minDropFlagName)
+	}
+	fmt.Fprintf(out, "\tScene drop auto-tuned to %d to stay within %s=%d, producing %d candidates\n",
+		effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
+	)
+	// Split results for callers
+	thresholds = make([]float64, len(candidates))
+	segmentations = make([][]ffmpeg.Scene, len(candidates))
+	for i, candidate := range candidates {
+		thresholds[i] = candidate.Threshold
+		segmentations[i] = pipeline.FromCoreScenes(candidate.Scenes)
+	}
+	return
 }

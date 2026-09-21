@@ -11,9 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
-	"github.com/hekmon/sptenc/pipeline"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -63,8 +61,10 @@ var thresholdsCommand = &cli.Command{
 		"choose based on your own tolerance for file size vs quality visibility.\n\n" +
 		"SEGMENT LENGTH\n" +
 		"The --" + minSegmentLengthFlagName + " filter removes boundaries that would create segments shorter\n" +
-		"than the given duration. It is applied before candidate generation, so the auto-tuner and the\n" +
-		"table both operate on the same post-filter scene count that encode and batchsearch will use.\n" +
+		"than the given duration. It is applied on each candidate after its threshold, exactly as encode\n" +
+		"and batchsearch do: each row shows the scenes encode would produce with that threshold.\n" +
+		"Candidates ending up with the same scenes once merged are only listed once, and the scene drop\n" +
+		"(--" + minDropFlagName + ", --" + maxCandidatesFlagName + ") counts real scenes: the merged ones that will be encoded.\n" +
 		"When disabled (--" + minSegmentLengthFlagName + " 0), the table shows raw distributions plus a column\n" +
 		"indicating how many segments the default filter would catch.\n\n" +
 		"The candidate generation logic is identical to batchsearch, so the preview is a\n" +
@@ -185,44 +185,14 @@ var thresholdsCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-		// Apply min-segment-length filter to the full scene list once. All downstream
-		// steps (candidate generation and table stats) use this filtered list.
+		// Candidates and their scenes (see searchCandidates)
 		minSegLen := cmd.Duration(minSegmentLengthFlagName)
-		if minSegLen > 0 {
-			filtered := pipeline.FilterShortScenes(scenes, stats.Format.Duration, minSegLen)
-			if removed := len(scenes) - len(filtered); removed > 0 {
-				fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
-					removed, minSegLen, 1+len(filtered))
-			}
-			scenes = filtered
-		}
-		// Cap scenes to the max threshold
-		cappedScenes := make([]core.Scene, 0, len(scenes))
-		for _, scene := range scenes {
-			if scene.Score <= cmd.Float64(maxThresholdFlagName) {
-				cappedScenes = append(cappedScenes, core.Scene{Start: scene.Start, Score: scene.Score})
-			}
-		}
-		if len(cappedScenes) < len(scenes) {
-			fmt.Fprintf(bypass, "\tCapped to %d scenes with score ≤ %s\n",
-				1+len(cappedScenes), strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
-			)
-		}
-		candidates, effectiveMinDrop := core.GetOptimalMinDrop(cappedScenes, cmd.Int(maxCandidatesFlagName))
+		candidates, segmentations := searchCandidates(bypass, cmd, scenes, stats.Format.Duration)
 		if len(candidates) == 0 {
 			fmt.Fprintln(bypass, "No candidates found in the given range.")
 			return nil
 		}
-		if effectiveMinDrop < cmd.Int(minDropFlagName) {
-			fmt.Fprintf(bypass, "\tWARNING: Auto-tuned scene drop of %d is below the minimum of %d; recomputing candidates...\n",
-				effectiveMinDrop, cmd.Int(minDropFlagName),
-			)
-			candidates = core.GetSearchThresholdCandidates(cappedScenes, cmd.Int(minDropFlagName))
-			effectiveMinDrop = cmd.Int(minDropFlagName)
-		}
-		fmt.Fprintf(bypass, "\tScene drop auto-tuned to %d to stay within %s=%d, producing %d candidates\n\n",
-			effectiveMinDrop, maxCandidatesFlagName, cmd.Int(maxCandidatesFlagName), len(candidates),
-		)
+		fmt.Fprintln(bypass)
 		if cmd.Bool(debugFlagName) {
 			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
 		}
@@ -253,8 +223,8 @@ var thresholdsCommand = &cli.Command{
 			table.Header("Threshold", "Scenes", "Min", "P1", "P5", "P10", "P25", "Median", "P75", "P90", "Max",
 				fmt.Sprintf("≤%s", minSegmentLengthDefault), "≤1s", "≤0.5s")
 		}
-		for _, candidate := range candidates {
-			row := computeCandidateStats(scenes, stats.Format.Duration, candidate, minSegLen)
+		for i, candidate := range candidates {
+			row := computeCandidateStats(segmentations[i], stats.Format.Duration, filterActive)
 			if filterActive {
 				table.Append([]string{
 					strconv.FormatFloat(candidate, 'f', -1, 64),
@@ -314,20 +284,13 @@ type candidateStats struct {
 	subDefaultPct int
 }
 
-func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, threshold float64, minSegLen time.Duration) candidateStats {
-	// Keep only scenes that meet the threshold
-	filtered := make([]ffmpeg.Scene, 0, len(scenes))
-	for _, s := range scenes {
-		if s.Score >= threshold {
-			filtered = append(filtered, s)
-		}
-	}
+// computeCandidateStats computes the segments statistics of a candidate from its scenes
+// (threshold and min segment length already applied, see searchCandidates).
+func computeCandidateStats(candidateScenes []ffmpeg.Scene, totalDuration time.Duration, filterActive bool) candidateStats {
+	durations := buildDurations(candidateScenes, totalDuration)
 
-	// Build segment durations from threshold-filtered boundaries
-	durations := buildDurations(filtered, totalDuration)
-
-	if minSegLen > 0 {
-		// Input is already pre-filtered upstream; just compute stats.
+	if filterActive {
+		// Short segments are already merged; just compute stats.
 		return buildStats(durations, 0, 0, 0, 0)
 	}
 
