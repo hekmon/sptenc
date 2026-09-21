@@ -30,7 +30,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level as measured by VMAF, not just a CRF or bitrate target (see [what VMAF does not see](#what-vmaf-does-not-see))
 - 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
 - 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
-- 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmaf-neg` for upscaled/denoised/sharpened sources (recommended)
+- 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmaf-neg`
 - 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
 - ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`libsvtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
@@ -114,9 +114,9 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 ./sptenc encode video.mkv output.mkv --vmaf-mean 95 --vmaf-p5 85 --vmaf-min 70
 ```
 
-### Upscaled or denoised source - use VMAF NEG
+### Use the VMAF NEG models
 ```bash
-./sptenc encode upscaled.mkv output.mkv --vmaf-neg --vmaf-mean 93
+./sptenc encode video.mkv output.mkv --vmaf-neg
 ```
 
 ### Fast VMAF profile prototyping with NVENC on the second GPU
@@ -211,7 +211,7 @@ Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scen
 | < 4K | `vmaf_v0.6.1` | `vmaf_v0.6.1neg` |
 | ≥ 4K (2160p) | `vmaf_4k_v0.6.1` | `vmaf_4k_v0.6.1neg` |
 
-The model is **automatically selected** based on input resolution. Use `--vmaf-neg` when the source has been upscaled, sharpened, or denoised: NEG models are designed so that enhancement-based processing (sharpening, upscaling filters) does not inflate the score, whereas standard models can over-score such content.
+The model is **automatically selected** based on input resolution. Use `--vmaf-neg` to select its NEG variant.
 
 > **Note:** NEG stands for **No Enhancement Gain**. The standard `vmaf_v0.6.1` model predicts the viewing condition of a **1080p HDTV at 3 picture heights**, and `vmaf_4k_v0.6.1` that of a **4K TV at 1.5 picture heights** — keep this in mind when interpreting scores for other display formats. See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models_v0.md#disabling-enhancement-gain-neg-mode) for details.
 
