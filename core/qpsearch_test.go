@@ -7,12 +7,18 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 // mockEncoder is a test double that returns pre-computed VMAF results without calling ffmpeg.
+// It is safe for concurrent use: FindAllSegmentsQP calls it from several workers at once.
 type mockEncoder struct {
+	mu            sync.Mutex
+	encodeDelay   time.Duration // makes encodes of different workers overlap
+	activeEncodes int
+	maxActive     int // highest number of encodes seen running at the same time
 	name          string
 	qpMin         int
 	qpMax         int
@@ -54,7 +60,15 @@ func (m *mockEncoder) Encode(_ context.Context, input, output string, qp int, _ 
 	if m.validateQP && (qp < m.qpMin || qp > m.qpMax) {
 		return fmt.Errorf("QP %d out of range [%d, %d]", qp, m.qpMin, m.qpMax)
 	}
+	m.mu.Lock()
+	m.activeEncodes++
+	m.maxActive = max(m.maxActive, m.activeEncodes)
+	m.mu.Unlock()
+	time.Sleep(m.encodeDelay)
+	m.mu.Lock()
+	m.activeEncodes--
 	m.encodeCalls = append(m.encodeCalls, mockEncodeCall{input, output, qp})
+	m.mu.Unlock()
 	// Create a dummy file so getFileSize succeeds for the selected QP.
 	return os.WriteFile(output, []byte("dummy"), 0644)
 }
@@ -64,7 +78,9 @@ func (m *mockEncoder) ComputeVMAF(_ context.Context, reference, distorted string
 	if m.vmafErr != nil {
 		return VMAFStats{}, m.vmafErr
 	}
+	m.mu.Lock()
 	m.vmafCalls = append(m.vmafCalls, mockVMAFCall{reference, distorted})
+	m.mu.Unlock()
 	seg, qp, err := extractSegmentAndQP(distorted)
 	if err != nil {
 		return VMAFStats{}, err
@@ -90,6 +106,8 @@ func (m *mockEncoder) ProbeStream(_ context.Context, _ string, _ func(int64),
 	if m.probeErr != nil {
 		return VideoStream{}, m.probeErr
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.probeCallIdx < len(m.probeResults) {
 		res := m.probeResults[m.probeCallIdx]
 		m.probeCallIdx++
@@ -1671,5 +1689,127 @@ func TestFindAllSegmentsQP_MeanAtQPMaxValid(t *testing.T) {
 	}
 	if results.TotalNbAttempts != 1 {
 		t.Errorf("expected a single attempt, got %d", results.TotalNbAttempts)
+	}
+}
+
+// recordingCallbacks records what FindAllSegmentsQP reports, from any number of workers.
+type recordingCallbacks struct {
+	mockCallbacks
+	mu            sync.Mutex
+	workerIDs     map[int]bool
+	doneCalls     int
+	lastDuration  time.Duration // highest total duration reported
+	lastTotalSize int64         // highest total size reported
+}
+
+func (r *recordingCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.workerIDs == nil {
+		r.workerIDs = make(map[int]bool)
+	}
+	r.workerIDs[workerID] = true
+}
+
+func (r *recordingCallbacks) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int,
+	currentTotalDuration time.Duration, currentTotalSize int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.doneCalls++
+	r.lastDuration = max(r.lastDuration, currentTotalDuration)
+	r.lastTotalSize = max(r.lastTotalSize, currentTotalSize)
+}
+
+// TestFindAllSegmentsQP_Concurrent runs the search with several workers. Along with the race
+// detector (go test -race), it is what covers the concurrent mode: GPU encoders only accept a
+// limited number of sessions, NbConcurrentSegments must never be exceeded.
+func TestFindAllSegmentsQP_Concurrent(t *testing.T) {
+	const (
+		nbSegments = 12
+		nbWorkers  = 4
+	)
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Each segment has its own response, so its own optimal QP: results must not get mixed up
+	// between workers. With mean >= 70: slope 1 -> QP 30, slope 1.5 -> QP 20, slope 2 -> QP 15.
+	slopes := []float64{1, 1.5, 2}
+	expectedQPs := []int{30, 20, 15}
+	vmafBySegment := make(map[int]map[int]VMAFStats, nbSegments)
+	segments := make([]string, nbSegments)
+	for segment := range nbSegments {
+		vmafBySegment[segment] = make(map[int]VMAFStats, 52)
+		for qp := 0; qp <= 51; qp++ {
+			mean := 100 - slopes[segment%len(slopes)]*float64(qp)
+			vmafBySegment[segment][qp] = VMAFStats{
+				Mean: mean, Minimum: mean - 5, Percentile1: mean - 4, Percentile5: mean - 3, Percentile10: mean - 2,
+				Percentile25: mean - 1, Median: mean, HarmonicMean: mean - 0.5, Maximum: mean + 2,
+			}
+		}
+		segments[segment] = filepath.Join(tmpDir, fmt.Sprintf("seg_%06d.mkv", segment))
+		if err := os.WriteFile(segments[segment], []byte("source"), 0644); err != nil {
+			t.Fatalf("failed to create source segment: %v", err)
+		}
+	}
+
+	encoder := &mockEncoder{
+		name:          "mock",
+		qpMin:         0,
+		qpMax:         51,
+		vmafBySegment: vmafBySegment,
+		encodeDelay:   2 * time.Millisecond,
+	}
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 70)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+	callbacks := &recordingCallbacks{}
+
+	results, err := FindAllSegmentsQP(ctx, callbacks, QPSearchConfig{
+		SegmentsPaths:        segments,
+		Auditor:              auditor,
+		WorkingDir:           tmpDir,
+		StatsCache:           &mockStatsCache{mean: 26, stddev: 13},
+		Encoder:              encoder,
+		NbConcurrentSegments: nbWorkers,
+	})
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	// Results are per segment, whatever the worker and the order they ended in
+	for segment, qp := range results.QPs {
+		if expected := expectedQPs[segment%len(expectedQPs)]; qp != expected {
+			t.Errorf("segment %d: expected QP %d, got %d", segment, expected, qp)
+		}
+		if _, qpInPath, err := extractSegmentAndQP(results.EncodedSegmentsPaths[segment]); err != nil || qpInPath != qp {
+			t.Errorf("segment %d: encoded path %q does not match QP %d", segment, results.EncodedSegmentsPaths[segment], qp)
+		}
+	}
+	if results.TotalSegmentsFrames != nbSegments*1000 {
+		t.Errorf("expected %d frames, got %d", nbSegments*1000, results.TotalSegmentsFrames)
+	}
+	if results.TotalNbAttempts != len(encoder.encodeCalls) {
+		t.Errorf("expected %d attempts (encode calls), got %d", len(encoder.encodeCalls), results.TotalNbAttempts)
+	}
+	// Workers: really concurrent, never more than asked, IDs usable as slice indexes
+	if encoder.maxActive < 2 || encoder.maxActive > nbWorkers {
+		t.Errorf("expected between 2 and %d encodes at the same time, got %d", nbWorkers, encoder.maxActive)
+	}
+	for workerID := range callbacks.workerIDs {
+		if workerID < 0 || workerID >= nbWorkers {
+			t.Errorf("worker ID %d is out of [0, %d]", workerID, nbWorkers-1)
+		}
+	}
+	// Progress: one call per segment, the last totals being the complete ones
+	if callbacks.doneCalls != nbSegments {
+		t.Errorf("expected %d OnSegmentDone calls, got %d", nbSegments, callbacks.doneCalls)
+	}
+	if callbacks.lastDuration != nbSegments*time.Minute {
+		t.Errorf("expected a total duration of %v, got %v", nbSegments*time.Minute, callbacks.lastDuration)
+	}
+	if expectedSize := int64(nbSegments * len("dummy")); callbacks.lastTotalSize != expectedSize {
+		t.Errorf("expected a total size of %d, got %d", expectedSize, callbacks.lastTotalSize)
 	}
 }

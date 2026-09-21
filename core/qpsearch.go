@@ -27,6 +27,8 @@ type Logger interface {
 // SegmentLifecycle marks the boundaries of a single segment's search.
 // workerID is guaranteed to be within [0, QPSearchConfig.NbConcurrentSegments-1],
 // so callers may index fixed-size slices rather than maintain maps or RWMutexes.
+// With several workers, OnSegmentDone calls can come out of order: totals are consistent
+// within a call but a call can carry lower totals than the previous one. Keep the highest.
 type SegmentLifecycle interface {
 	OnSegmentStart(workerID, segmentIndex int, segmentPath string)
 	OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
@@ -214,9 +216,13 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 					allSegmentSize += segmentSize
 					segmentWeights += segmentQP * segmentFrames
 					config.ephemeral.addQP(segmentQP)
+					// The totals to report must be read while the lock is held: another worker
+					// can be updating them as soon as it is released. The callback itself is
+					// called without the lock, a slow callback must not hold the other workers.
+					currentTotalDuration, currentTotalSize := doneDuration, allSegmentSize
 					resultsAccess.Unlock()
 					// Done
-					scb.OnSegmentDone(wID, segmentQP, segmentFrames, segmentNbAttempts, doneDuration, allSegmentSize)
+					scb.OnSegmentDone(wID, segmentQP, segmentFrames, segmentNbAttempts, currentTotalDuration, currentTotalSize)
 				}
 				return
 			}
