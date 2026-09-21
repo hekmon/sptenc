@@ -464,3 +464,28 @@ func (vs VMAFStats) String() string {
 	table.Render()
 	return tableBuffer.String()
 }
+
+// vmafPathEscaper applies the two levels of escaping needed by a filter option value
+// embedded in a filtergraph description (without any quoting):
+//   - 1st level, the filter option value: \ ' and : are special
+//   - 2nd level, the filtergraph description: \ ' [ ] , and ; are special
+//
+// Each replacement below is the 1st level escaping of the character, escaped again for the 2nd level.
+// https://ffmpeg.org/ffmpeg-filters.html#Notes-on-filtergraph-escaping
+//
+// The same escaping works on every platform: Windows paths do not need their backslashes
+// converted, only escaped (checked against a Windows ffmpeg build, drive colon included).
+var vmafPathEscaper = strings.NewReplacer(
+	`\`, `\\\\`,
+	`'`, `\\\'`,
+	`:`, `\\:`,
+	`[`, `\[`,
+	`]`, `\]`,
+	`,`, `\,`,
+	`;`, `\;`,
+)
+
+// adaptVMAFPath escapes a file path to be used as the libvmaf log_path within a filtergraph description.
+func adaptVMAFPath(path string) string {
+	return vmafPathEscaper.Replace(path)
+}

@@ -8,8 +8,3 @@ var (
 	// FFMPEGBinary is the path to the ffmpeg executable.
 	FFMPEGBinary = "ffmpeg"
 )
-
-func adaptVMAFPath(path string) string {
-	// no issue on linux
-	return path
-}
