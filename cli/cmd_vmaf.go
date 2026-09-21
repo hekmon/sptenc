@@ -17,6 +17,7 @@ import (
 
 var vmafCommand = &cli.Command{
 	Name:     "vmaf",
+	Aliases:  []string{"v"},
 	Category: "Tooling",
 	Usage:    "Compute VMAF between a reference and a distorted video",
 	Description: "Compare a distorted (encoded) video against its reference (original) using VMAF.\n\n" +
@@ -117,7 +118,7 @@ var vmafCommand = &cli.Command{
 				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
 			}
 			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
 			}
 		}
 		return ctx, nil

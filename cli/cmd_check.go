@@ -14,10 +14,10 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-var verifyCommand = &cli.Command{
-	Name:    "verify",
-	Aliases: []string{"v"},
-	Usage:   "Verify third-party tools are present and usable",
+var checkCommand = &cli.Command{
+	Name:    "check",
+	Aliases: []string{"k"},
+	Usage:   "Check that third-party tools are present and usable",
 	Description: "Check that required external tools are available and functional:\n" +
 		"  * ffmpeg (with at least one encoder and libvmaf support)\n" +
 		"  * ffprobe\n" +

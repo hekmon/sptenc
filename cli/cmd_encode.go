@@ -56,7 +56,7 @@ var encodeCommand = &cli.Command{
 		"these histories separate.\n\n" +
 		"ENCODERS\n" +
 		"Use GPU encoders for quick VMAF profile testing, but prefer CPU encoders for the final\n" +
-		"encode to get the smallest file size. Run 'sptenc verify' to see which encoders are\n" +
+		"encode to get the smallest file size. Run 'sptenc check' to see which encoders are\n" +
 		"available on your system.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel.\n" +
@@ -151,7 +151,7 @@ var encodeCommand = &cli.Command{
 		}
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
-			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc verify' to see available encoders", requestedEncoder)
+			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}
 		// Reject concurrent segments with CPU encoders
 		if cmd.Int(concurrentSegmentsFlagName) > 1 && !ffmpeg.IsGPU(ffmpeg.Encoder(requestedEncoder)) {
@@ -164,7 +164,7 @@ var encodeCommand = &cli.Command{
 				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
 			}
 			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
 			}
 		}
 		// Check arguments

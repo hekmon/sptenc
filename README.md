@@ -67,12 +67,12 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | Command | Alias | Category | Purpose |
 |---|---|---|---|
 | `encode` | `e` | Main | Full pipeline: split (if needed), encode segments, validate VMAF, remux, and tag |
-| `verify` | `v` | Main | Verify that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
+| `check` | `verify` | Main | Check that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
 | `master` | `m` | Tooling | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
 | `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
 | `remux` | `r` | Tooling | Replace the video track of a file with a new one without re-encoding |
-| `vmaf` | | Tooling | Compute VMAF between a reference and a distorted video |
+| `vmaf` | `v` | Tooling | Compute VMAF between a reference and a distorted video |
 | `batchsearch` | `bs` | Advanced | Search for the scene threshold that yields the smallest passing file by encoding multiple candidates |
 
 ## Input Requirements
@@ -92,9 +92,9 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 
 ## Quick Start
 
-### Verify your environment
+### Check your environment
 ```bash
-./sptenc verify
+./sptenc check
 ```
 
 ### Basic encode - VMAF harmonic mean ≥ 93 (default)
@@ -274,7 +274,7 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `av1_nvenc` | AV1 | NVIDIA GPU | All |
 | `av1_vaapi` | AV1 | VAAPI GPU | Linux |
 
-> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `svtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc verify` to see which encoders your ffmpeg build supports.
+> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `svtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc check` to see which encoders your ffmpeg build supports.
 
 ### Encoder selection vs file size
 

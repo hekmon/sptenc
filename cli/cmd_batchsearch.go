@@ -158,7 +158,7 @@ var batchsearchCommand = &cli.Command{
 			},
 			&cli.BoolFlag{
 				Name:     finalEncodeFlagName,
-				Aliases:  []string{"f"},
+				Aliases:  []string{"F"},
 				Usage:    "Run a final CPU encode after GPU search (no-op if search encoder is already CPU).",
 				Value:    false,
 				OnlyOnce: true,
@@ -223,7 +223,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
-			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc verify' to see available encoders", requestedEncoder)
+			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}
 		// Reject concurrent segments with CPU encoders
 		if cmd.Int(concurrentSegmentsFlagName) > 1 && !ffmpeg.IsGPU(ffmpeg.Encoder(requestedEncoder)) {
@@ -237,7 +237,7 @@ var batchsearchCommand = &cli.Command{
 				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
 			}
 			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
+				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
 			}
 		}
 		// Check arguments: batchsearch only accepts a single regular file

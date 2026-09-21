@@ -120,7 +120,7 @@ func main() {
 		Commands: []*cli.Command{
 			// main
 			encodeCommand,
-			verifyCommand,
+			checkCommand,
 			// tooling
 			masterCommand,
 			thresholdsCommand,
