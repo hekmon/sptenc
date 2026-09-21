@@ -430,14 +430,20 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 					for i := candidateQP + 1; i <= qpMax; i++ {
 						if vmafStats, found = results[i]; found {
 							// we already computed this candidate
-							if i == qpMax {
-								// we reached qp max, which is already computed, we are done
-								finalQP = i
-								return
-							}
+							// Validity must be checked before the qpMax shortcut: being already
+							// computed does not make qpMax valid. It is even the opposite, a valid
+							// qpMax ends the search as soon as it is tested (see the end of the
+							// loop), so a qpMax found here is one that failed during bracketing.
+							// Returning it because "we can not go higher" would accept a segment
+							// below its VMAF profile when the optimal QP is qpMax-1.
 							if !config.Auditor.Validate(vmafStats) {
 								// Invalid, previous was the last valid
 								finalQP = i - 1
+								return
+							}
+							if i == qpMax {
+								// we reached qp max, already computed and valid: we are done
+								finalQP = i
 								return
 							}
 							// else continue to go up

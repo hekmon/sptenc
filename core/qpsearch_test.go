@@ -1099,6 +1099,72 @@ func TestFindAllSegmentsQP_QPMaxIsOptimal(t *testing.T) {
 	}
 }
 
+// TestFindAllSegmentsQP_QPMaxMinusOneIsOptimal covers the case where qpMax has been tested
+// and rejected during bracketing, and the highest valid QP is its direct neighbour. Once
+// qpMax-1 validates, the search looks up and finds qpMax already computed: it must conclude
+// on qpMax-1, not on qpMax because it "can not go higher". This is not a best effort either:
+// best effort only exists at qpMin.
+func TestFindAllSegmentsQP_QPMaxMinusOneIsOptimal(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+	}
+
+	// Threshold 25: QP 50 validates (mean 25), QP 51 does not (mean 23.5).
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 25)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	config := QPSearchConfig{
+		SegmentsPaths: []string{filepath.Join(tmpDir, "segment.mkv")},
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
+		Encoder:       encoder,
+	}
+
+	if err := os.WriteFile(config.SegmentsPaths[0], []byte("source"), 0644); err != nil {
+		t.Fatalf("failed to create source segment: %v", err)
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if len(results.QPs) != 1 || results.QPs[0] != 50 {
+		t.Fatalf("expected QP 50, got %v", results.QPs)
+	}
+	if !auditor.Validate(vmafResults[results.QPs[0]]) {
+		t.Errorf("selected QP %d does not validate the VMAF profile", results.QPs[0])
+	}
+	if results.NbBestEfforts != 0 {
+		t.Errorf("expected no best-effort segments, got %d", results.NbBestEfforts)
+	}
+	// qpMax must have been tested (and rejected) for qpMax-1 to be proven optimal
+	var qpMaxTested bool
+	for _, call := range encoder.encodeCalls {
+		if call.qp == 51 {
+			qpMaxTested = true
+		}
+	}
+	if !qpMaxTested {
+		t.Error("expected qpMax to be tested before concluding on qpMax-1")
+	}
+}
+
 func TestFindAllSegmentsQP_MeanAtQPMinValid(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
