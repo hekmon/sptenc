@@ -539,6 +539,14 @@ var batchsearchCommand = &cli.Command{
 		bestCandidateStr := strconv.FormatFloat(batch.candidates[bestIndex], 'f', -1, 64)
 		encodedSegmentsMerged := batch.encoded[bestIndex]
 		results := batch.results[bestIndex]
+		// Feed the stats cache of the search encoder with the winning candidate, and only with it.
+		// Every candidate is the same content encoded again: saving them all would over-represent
+		// this file in the history. The winner is saved even when a final encode replaces its
+		// file: the cache is about which QPs this encoder needs for this VMAF profile, and that
+		// stays valid data whatever happens to the file.
+		if _, _, err := statsCache.AddRun(results.QPs); err != nil {
+			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
+		}
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\n\nBest candidate is %s, running final encode with %s...\n", bestCandidateStr, finalEncoder)
 			finalWorkdir := filepath.Join(workingDir, "final-encode")
@@ -590,6 +598,10 @@ var batchsearchCommand = &cli.Command{
 				vmafAuditor, finalStatsCache, finalEncoderAdapter, 1, cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
+			}
+			// The final encode feeds the stats cache of its own encoder.
+			if _, _, err := finalStatsCache.AddRun(results.QPs); err != nil {
+				fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
 			}
 
 			// Clean up final segments to free disk space
