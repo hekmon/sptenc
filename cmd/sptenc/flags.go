@@ -220,8 +220,10 @@ func thresholdSearchFlags() []cli.Flag {
 			Category: thresholdCategoryName,
 		},
 		&cli.IntFlag{
-			Name:     minDropFlagName,
-			Aliases:  []string{"d"},
+			Name: minDropFlagName,
+			// Not "d": it is the alias of the global --debug flag, which can be given after the
+			// command name too. A local "d" would silently shadow it there.
+			Aliases:  []string{"D"},
 			Usage:    "Minimum scene drop between two candidate thresholds (auto-tuning will not go below this)",
 			Value:    minDropDefault,
 			OnlyOnce: true,
