@@ -125,14 +125,34 @@ func getFileSize(path string) (size int64, err error) {
 	return
 }
 
-// validateOutputPath checks that the output path has a .mkv extension and
-// does not already exist.
+// validateOutputPath checks that the output path has a .mkv extension, does not
+// already exist and that its parent directory exists and is writable. The output
+// file is only written at the very end of what can be a multi-day process, so a
+// bad destination must be caught upfront.
 func validateOutputPath(outputPath string) error {
 	if filepath.Ext(outputPath) != ".mkv" {
 		return errors.New("output file must have a .mkv extension")
 	}
 	if _, err := os.Stat(outputPath); err == nil {
 		return fmt.Errorf("output file already exists: %s", shellescape.Quote(outputPath))
+	}
+	outputDir := filepath.Dir(outputPath)
+	dirInfos, err := os.Stat(outputDir)
+	if err != nil {
+		return fmt.Errorf("output directory is not accessible: %w", err)
+	}
+	if !dirInfos.IsDir() {
+		return fmt.Errorf("output file parent is not a directory: %s", shellescape.Quote(outputDir))
+	}
+	// Permission bits do not tell the whole story (ACLs, read-only mounts, Windows...):
+	// actually try to create a file.
+	probe, err := os.CreateTemp(outputDir, ".sptenc-write-test-*")
+	if err != nil {
+		return fmt.Errorf("output directory is not writable: %w", err)
+	}
+	probe.Close()
+	if err = os.Remove(probe.Name()); err != nil {
+		return fmt.Errorf("failed to remove the write test file: %w", err)
 	}
 	return nil
 }
