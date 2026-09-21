@@ -35,9 +35,9 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 - **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.
 - **`core/predicator.go`** — Monotonic interpolation with empirical ceiling adaptation. Contains benchmark data in comments proving method selection.
-- **`core/cache.go`** — Persistent QP history with profile isolation.
+- **`core/cache_persistent.go`** and **`core/cache_ephemeral.go`** — Persistent QP history with profile isolation, plus in-memory ephemeral stats for the current encode run.
 - **`pipeline/encoder.go`** — The **adapter** that maps `core.SegmentEncoder` to concrete ffmpeg encoder invocations. Contains the explicit per-encoder switch.
-- **`ffmpeg/hevc.go` and `ffmpeg/av1.go`** — Encoder wrappers for libx265, NVENC, VAAPI, D3D12VA, VideoToolbox, SVT-AV1, libaom-av1.
+- **`ffmpeg/hevc.go` and `ffmpeg/av1.go`** — Encoder wrappers for libx265, NVENC, VAAPI, D3D12VA, VideoToolbox, SVT-AV1. `libaom-av1` exists in the adapter but is blocked from CLI selection as too slow for iterative QP search.
 - **`ffmpeg/vmaf.go`** — VMAF computation with CUDA-accelerated path (`libvmaf_cuda`) and NVDEC auto-detection.
 
 ## Key architectural constraints
@@ -87,7 +87,7 @@ Variable frame rate (VFR) content is rejected because VMAF requires frame-exact 
 
 ### Cache isolation
 
-Stats are stored per `(encoder, vmaf_profile, optional_cache_profile)`. The filename is a Base64 hash of all threshold values + encoder + profile name. This is unambiguous and filesystem-safe across Windows/Linux/macOS.
+Stats are stored per `(encoder, vmaf_profile, optional_cache_profile)`. The filename is a Base64 encoding of all threshold values + encoder + profile name. This is unambiguous and filesystem-safe across Windows/Linux/macOS.
 
 Changing any VMAF threshold value by even 0.1 starts a fresh cache. This is correct — different thresholds require fundamentally different QP distributions.
 
@@ -116,7 +116,7 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 **Critical test files:**
 - `core/qpsearch_test.go` — Convergence, best-effort fallback, cache guidance, multi-segment runs, error propagation from `Encode`/`ComputeVMAF`/`ProbeStream`, `KeepInvalidQP` behavior.
 - `core/predicator_test.go` — Interpolation accuracy, extrapolation clamping, VMAF 100 ceiling adaptation, monotonicity, insufficient-point errors.
-- `core/cache_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability.
+- `core/cache_persistent_test.go` and `core/cache_ephemeral_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability, ephemeral convergence.
 - `core/vmaf_test.go` — Checker construction errors, boundary values, active/inactive threshold combinations.
 - `core/scenes_test.go` — Candidate generation, deduplication, `minDrop` spacing, `GetOptimalMinDrop` edge cases.
 

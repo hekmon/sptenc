@@ -67,12 +67,14 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | Command | Alias | Category | Purpose |
 |---|---|---|---|
 | `encode` | `e` | Main | Full pipeline: split (if needed), encode segments, validate VMAF, remux, and tag |
-| `check` | `verify` | Main | Check that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
+| `check` | `k` | Main | Check that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
 | `master` | `m` | Tooling | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
 | `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
 | `remux` | `r` | Tooling | Replace the video track of a file with a new one without re-encoding |
 | `vmaf` | `v` | Tooling | Compute VMAF between a reference and a distorted video |
+| `thresholds` | `t` | Tooling | Preview candidate thresholds and their scene distributions without encoding |
+| `cache` | — | Tooling | Inspect and clear persistent QP statistics cache |
 | `batchsearch` | `bs` | Advanced | Search for the scene threshold that yields the smallest passing file by encoding multiple candidates |
 
 ## Input Requirements
@@ -179,7 +181,7 @@ If you care more about tight quality control than file size, skip `batchsearch`.
 
 ### The `--min-segment-length` guardrail
 
-The `--min-segment-length` flag (default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbour.
+The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbour.
 
 It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
 
@@ -378,7 +380,7 @@ ffmpeg [...] -c:v 'libsvtav1' -pix_fmt 'yuv420p10le' -preset '6' -qp 'X' [...]
 
 **av1_nvenc**
 ```bash
-ffmpeg [...] -c:v 'av1_nvenc' -preset 'p4' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 [...]
+ffmpeg [...] -c:v 'av1_nvenc' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 [...]
 ```
 
 **av1_vaapi**
@@ -403,6 +405,7 @@ The output file contains the following metadata tags on the video stream:
 - `sptenc_vmaf_model` — VMAF model used
 - `sptenc_vmaf_conf_*` — all enabled VMAF threshold values
 - `sptenc_vmaf_result_*` — final VMAF scores (min, p1, p5, p10, p25, median, hmean, mean, max)
+- `sptenc_best_effort_segments` — number of segments that stopped at minimum QP without reaching the target VMAF profile (omitted if zero)
 
 ## Installation
 
