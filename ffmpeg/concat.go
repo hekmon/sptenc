@@ -42,9 +42,18 @@ func GenerateConcatList(dir string, files []string) (scriptPath ConcatListPath, 
 		return
 	}
 	// Write files' path
+	var absPath string
 	for _, file := range files {
-		escapedPath := strings.ReplaceAll(file, `\`, `\\`)
-		escapedPath = strings.ReplaceAll(escapedPath, `'`, `\'`)
+		// Relative paths are resolved by ffmpeg against the list file directory, not
+		// the current working directory: always write absolute paths.
+		if absPath, err = filepath.Abs(file); err != nil {
+			err = fmt.Errorf("failed to get the absolute path of %q: %w", file, err)
+			return
+		}
+		// Within single quotes ffmpeg takes everything literally (backslashes included):
+		// the only special character is the quote itself, which must be written by closing
+		// the quoting, adding an escaped quote and reopening the quoting.
+		escapedPath := strings.ReplaceAll(absPath, `'`, `'\''`)
 		if _, err = fmt.Fprintf(script, "file '%s'\n", escapedPath); err != nil {
 			err = fmt.Errorf("failed to write the file: %w", err)
 			return
