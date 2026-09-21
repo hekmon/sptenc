@@ -204,7 +204,7 @@ var cacheClearCommand = &cli.Command{
 		}
 
 		for _, e := range toDelete {
-			if err := os.Remove(e.filename); err != nil {
+			if err := core.RemoveCacheFile(e.filename); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to delete %s: %v\n", filepath.Base(e.filename), err)
 			} else {
 				fmt.Printf("Deleted %s\n", filepath.Base(e.filename))

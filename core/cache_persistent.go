@@ -117,7 +117,7 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error
 	// Cross-process lock: block until available so concurrent sptenc instances
 	// don't lose updates. If the OS/filesystem doesn't support locking, return
 	// the error so the user is informed the cache is unprotected.
-	fileLock := flock.New(sch.path + ".lock")
+	fileLock := flock.New(sch.path + cacheLockExtension)
 	if err = fileLock.Lock(); err != nil {
 		err = fmt.Errorf("failed to lock cache file: %w", err)
 		return
@@ -229,7 +229,50 @@ const (
 	cacheFileModelMarker   = ".model~"
 	cacheFileVMAFSeparator = "|"
 	CacheFileExtension     = ".json"
+	cacheLockExtension     = ".lock"
 )
+
+// ErrCacheFileBusy is returned by RemoveCacheFile when another process holds the cache file lock.
+var ErrCacheFileBusy = errors.New("cache file is currently locked by another sptenc process")
+
+// RemoveCacheFile deletes a cache file along with its companion lock file.
+//
+// # WHY NOT A PLAIN os.Remove
+//
+// A cache file comes with a lock file (see AddRun) that a plain removal leaves behind forever.
+// Removing the lock file as well is not enough: another sptenc may be inside AddRun right now,
+// holding that lock. Deleting the lock file under it breaks the mutual exclusion (the next
+// process creates a new lock file and both believe they own the cache), and deleting the cache
+// file under it is pointless as it is about to be written back. So the lock is taken first,
+// without waiting: a busy cache file is reported with ErrCacheFileBusy and left untouched.
+//
+// # WHY THE LOCK IS RELEASED BEFORE REMOVING THE LOCK FILE
+//
+// Windows refuses to delete a file we still hold a handle on. This leaves a tiny window where
+// another process can take the lock on a file about to be removed: the worst outcome is one
+// lost cache update, which is acceptable for statistics.
+func RemoveCacheFile(path string) (err error) {
+	lockPath := path + cacheLockExtension
+	fileLock := flock.New(lockPath)
+	locked, err := fileLock.TryLock()
+	if err != nil {
+		return fmt.Errorf("failed to lock cache file: %w", err)
+	}
+	if !locked {
+		return ErrCacheFileBusy
+	}
+	err = os.Remove(path)
+	if unlockErr := fileLock.Unlock(); unlockErr != nil && err == nil {
+		err = fmt.Errorf("failed to unlock cache file: %w", unlockErr)
+	}
+	if err != nil {
+		return
+	}
+	if err = os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to remove the lock file: %w", err)
+	}
+	return nil
+}
 
 // ParseCacheFilename parses a cache filename into its components.
 // It returns ok=false if the filename does not match the expected format.

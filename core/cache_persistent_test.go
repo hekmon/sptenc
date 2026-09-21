@@ -1,11 +1,14 @@
 package core
 
 import (
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/gofrs/flock"
 )
 
 // cacheMockEncoder provides the name and QP range used by StatsCacheHistory tests.
@@ -628,5 +631,53 @@ func TestStatsCacheHistory_AddRunSingleQP(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].Mean != 36 || runs[0].StdDev != 13 || runs[0].Weight != 1 {
 		t.Errorf("unexpected saved runs: %+v", runs)
+	}
+}
+
+// TestRemoveCacheFile ensures the cache file is removed along with its lock file,
+// and that a cache file locked by someone else is left untouched.
+func TestRemoveCacheFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
+	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatalf("failed to create profile: %v", err)
+	}
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	if err != nil {
+		t.Fatalf("NewStatsCacheHistory failed: %v", err)
+	}
+	if _, _, err = sch.AddRun([]int{10, 12, 14, 16}); err != nil {
+		t.Fatalf("AddRun failed: %v", err)
+	}
+	lockPath := sch.GetPath() + cacheLockExtension
+	if _, err = os.Stat(lockPath); err != nil {
+		t.Fatalf("expected a lock file after AddRun: %v", err)
+	}
+
+	// Locked by someone else: nothing must be removed
+	otherLock := flock.New(lockPath)
+	if locked, err := otherLock.TryLock(); err != nil || !locked {
+		t.Fatalf("failed to take the lock: locked=%t err=%v", locked, err)
+	}
+	if err = RemoveCacheFile(sch.GetPath()); !errors.Is(err, ErrCacheFileBusy) {
+		t.Errorf("expected ErrCacheFileBusy, got %v", err)
+	}
+	if _, err = os.Stat(sch.GetPath()); err != nil {
+		t.Errorf("cache file should still exist: %v", err)
+	}
+	if err = otherLock.Unlock(); err != nil {
+		t.Fatalf("failed to release the lock: %v", err)
+	}
+
+	// Free: both files must go
+	if err = RemoveCacheFile(sch.GetPath()); err != nil {
+		t.Fatalf("RemoveCacheFile failed: %v", err)
+	}
+	for _, path := range []string{sch.GetPath(), lockPath} {
+		if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s should have been removed (stat err: %v)", filepath.Base(path), err)
+		}
 	}
 }
