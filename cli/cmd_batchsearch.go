@@ -163,6 +163,14 @@ var batchsearchCommand = &cli.Command{
 				Value:    false,
 				OnlyOnce: true,
 			},
+			&cli.StringFlag{
+				Name:     cacheProfileFlagName,
+				Aliases:  []string{"c"},
+				Usage:    "Isolate QP history to a named profile",
+				Value:    "",
+				OnlyOnce: true,
+				Category: "Cache isolation",
+			},
 		}
 		flags = append(flags, thresholdSearchFlags()...)
 		flags = append(flags, segmentFilterFlag(thresholdCategoryName))
@@ -181,18 +189,10 @@ var batchsearchCommand = &cli.Command{
 				},
 				Category: "Threshold Search",
 			},
-			&cli.StringFlag{
-				Name:     cacheProfileFlagName,
-				Aliases:  []string{"c"},
-				Usage:    "Isolate QP history to a named profile",
-				Value:    "",
-				OnlyOnce: true,
-				Category: "Cache isolation",
-			},
 		)
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
-		flags = append(flags, newDirectoryFlags()...)
-		flags = append(flags, newVMAFFlags()...)
+		flags = append(flags, directoryFlags()...)
+		flags = append(flags, VMAFFlags()...)
 		return
 	}(),
 	Arguments: []cli.Argument{
@@ -371,12 +371,12 @@ var batchsearchCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
 		)
-		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
-		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
-		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
 		}
+		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
+		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
+		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\t• once the best threshold is found, a final encoding will be performed with %s\n", finalEncoder)
 		}

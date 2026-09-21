@@ -250,8 +250,8 @@ const (
 	directoriesCategoryName = "Directories"
 )
 
-// newDirectoryFlags returns the stats cache and temporary directory flags.
-func newDirectoryFlags() []cli.Flag {
+// directoryFlags returns the stats cache and temporary directory flags.
+func directoryFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:     statsCacheDirFlagName,
@@ -297,8 +297,8 @@ const (
 	vmafProfileCategoryName = "VMAF Profile"
 )
 
-// newVMAFFlags returns the VMAF quality metric flags.
-func newVMAFFlags() []cli.Flag {
+// VMAFFlags returns the VMAF quality metric flags.
+func VMAFFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.BoolFlag{
 			Name:     vmafNegFlagName,

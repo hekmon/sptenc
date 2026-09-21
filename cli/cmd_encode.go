@@ -119,8 +119,8 @@ var encodeCommand = &cli.Command{
 		}
 		flags = append(flags, segmentFilterFlag(""))
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
-		flags = append(flags, newDirectoryFlags()...)
-		flags = append(flags, newVMAFFlags()...)
+		flags = append(flags, directoryFlags()...)
+		flags = append(flags, VMAFFlags()...)
 		return
 	}(),
 	Arguments: []cli.Argument{

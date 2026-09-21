@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +34,7 @@ var (
 		Row: tw.CellConfig{
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{
-					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
+					tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
 				},
 			},
 		},
@@ -145,11 +146,11 @@ var thresholdsCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
 		)
-		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
-		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
 		}
+		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
+		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintln(bypass)
 		// Detect scenes
 		stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
@@ -230,7 +231,6 @@ var thresholdsCommand = &cli.Command{
 		var buff strings.Builder
 		cfg := thresholdsTableConfig
 		if filterActive {
-			// 6 columns when filter is active (no Merged: all merging happened upfront)
 			cfg = tablewriter.Config{
 				Header: tw.CellConfig{
 					Formatting: tw.CellFormatting{
@@ -240,7 +240,7 @@ var thresholdsCommand = &cli.Command{
 				Row: tw.CellConfig{
 					Alignment: tw.CellAlignment{
 						PerColumn: []tw.Align{
-							tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
+							tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
 						},
 					},
 				},
@@ -248,9 +248,9 @@ var thresholdsCommand = &cli.Command{
 		}
 		table := tablewriter.NewTable(&buff, tablewriter.WithConfig(cfg))
 		if filterActive {
-			table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest")
+			table.Header("Threshold", "Scenes", "Min", "P1", "P5", "P10", "P25", "Median", "P75", "P90", "Max")
 		} else {
-			table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest",
+			table.Header("Threshold", "Scenes", "Min", "P1", "P5", "P10", "P25", "Median", "P75", "P90", "Max",
 				fmt.Sprintf("≤%s", minSegmentLengthDefault), "≤1s", "≤0.5s")
 		}
 		for _, candidate := range candidates {
@@ -259,22 +259,32 @@ var thresholdsCommand = &cli.Command{
 				table.Append([]string{
 					strconv.FormatFloat(candidate, 'f', -1, 64),
 					strconv.Itoa(row.scenes),
-					row.longest.Round(time.Millisecond).String(),
-					row.stddev.Round(time.Millisecond).String(),
-					row.mean.Round(time.Millisecond).String(),
 					row.shortest.Round(time.Millisecond).String(),
+					row.p1.Round(time.Millisecond).String(),
+					row.p5.Round(time.Millisecond).String(),
+					row.p10.Round(time.Millisecond).String(),
+					row.p25.Round(time.Millisecond).String(),
+					row.median.Round(time.Millisecond).String(),
+					row.p75.Round(time.Millisecond).String(),
+					row.p90.Round(time.Millisecond).String(),
+					row.longest.Round(time.Millisecond).String(),
 				})
 			} else {
 				table.Append([]string{
 					strconv.FormatFloat(candidate, 'f', -1, 64),
 					strconv.Itoa(row.scenes),
-					row.longest.Round(time.Millisecond).String(),
-					row.stddev.Round(time.Millisecond).String(),
-					row.mean.Round(time.Millisecond).String(),
 					row.shortest.Round(time.Millisecond).String(),
-					strconv.Itoa(row.subDefault),
-					strconv.Itoa(row.short1s),
-					strconv.Itoa(row.shortHalf),
+					row.p1.Round(time.Millisecond).String(),
+					row.p5.Round(time.Millisecond).String(),
+					row.p10.Round(time.Millisecond).String(),
+					row.p25.Round(time.Millisecond).String(),
+					row.median.Round(time.Millisecond).String(),
+					row.p75.Round(time.Millisecond).String(),
+					row.p90.Round(time.Millisecond).String(),
+					row.longest.Round(time.Millisecond).String(),
+					fmt.Sprintf("%d%%", row.subDefaultPct),
+					fmt.Sprintf("%d%%", row.short1sPct),
+					fmt.Sprintf("%d%%", row.shortHalfPct),
 				})
 			}
 		}
@@ -285,16 +295,23 @@ var thresholdsCommand = &cli.Command{
 }
 
 type candidateStats struct {
-	scenes     int
-	mean       time.Duration
-	stddev     time.Duration
-	shortest   time.Duration
-	longest    time.Duration
-	shortHalf  int
-	short1s    int
-	short1sPct float64
-	merged     int // boundaries removed by filter (when active)
-	subDefault int // segments ≤ default min (when disabled)
+	scenes        int
+	shortest      time.Duration
+	p1            time.Duration
+	p5            time.Duration
+	p10           time.Duration
+	p25           time.Duration
+	median        time.Duration
+	p75           time.Duration
+	p90           time.Duration
+	longest       time.Duration
+	shortHalf     int
+	short1s       int
+	shortHalfPct  int
+	short1sPct    int
+	merged        int // boundaries removed by filter (when active)
+	subDefault    int // segments ≤ default min (when disabled)
+	subDefaultPct int
 }
 
 func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, threshold float64, minSegLen time.Duration) candidateStats {
@@ -361,17 +378,34 @@ func buildStats(durations []time.Duration, merged, shortHalf, short1s, subDefaul
 			maxDur = d
 		}
 	}
-	mean, stddev := stat.MeanStdDev(durationsFloat, nil)
+	_, stddev := stat.MeanStdDev(durationsFloat, nil)
+	_ = stddev // kept for future use; percentiles tell the distribution story better
+	sort.Float64s(durationsFloat)
+	median := stat.Quantile(0.5, stat.Empirical, durationsFloat, nil)
+	p1 := stat.Quantile(0.01, stat.Empirical, durationsFloat, nil)
+	p5 := stat.Quantile(0.05, stat.Empirical, durationsFloat, nil)
+	p10 := stat.Quantile(0.10, stat.Empirical, durationsFloat, nil)
+	p25 := stat.Quantile(0.25, stat.Empirical, durationsFloat, nil)
+	p75 := stat.Quantile(0.75, stat.Empirical, durationsFloat, nil)
+	p90 := stat.Quantile(0.90, stat.Empirical, durationsFloat, nil)
+	total := len(durations)
 	return candidateStats{
-		scenes:     len(durations),
-		mean:       time.Duration(mean),
-		stddev:     time.Duration(stddev),
-		shortest:   minDur,
-		longest:    maxDur,
-		shortHalf:  shortHalf,
-		short1s:    short1s,
-		short1sPct: float64(short1s) / float64(len(durations)) * 100,
-		merged:     merged,
-		subDefault: subDefault,
+		scenes:        total,
+		shortest:      minDur,
+		p1:            time.Duration(p1),
+		p5:            time.Duration(p5),
+		p10:           time.Duration(p10),
+		p25:           time.Duration(p25),
+		median:        time.Duration(median),
+		p75:           time.Duration(p75),
+		p90:           time.Duration(p90),
+		longest:       maxDur,
+		shortHalf:     shortHalf,
+		short1s:       short1s,
+		shortHalfPct:  int(float64(shortHalf) / float64(total) * 100),
+		short1sPct:    int(float64(short1s) / float64(total) * 100),
+		merged:        merged,
+		subDefault:    subDefault,
+		subDefaultPct: int(float64(subDefault) / float64(total) * 100),
 	}
 }
