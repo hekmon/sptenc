@@ -59,11 +59,16 @@ func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSe
 	// Encoding
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencSegmentsCountTagKey, segmentsCount))
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderTagKey, encoder))
+	// Preset: must list every encoder the pipeline runs with a preset (see pipeline.EncoderAdapter),
+	// with the very value it uses. VAAPI, D3D12VA and VideoToolbox encoders have no preset.
 	switch encoder {
 	case ffmpeg.HEVCEncoderLibx265:
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpeg.Libx265PresetSlow))
 	case ffmpeg.HEVCEncoderNVEnc, ffmpeg.AV1EncoderNVEnc:
 		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderPresetTagKey, ffmpeg.NVEncPresetP7))
+	case ffmpeg.AV1EncoderSVTAV1:
+		// SVT-AV1 presets are numbers, from 1 (slowest, best compression) to 13 (fastest)
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencEncoderPresetTagKey, ffmpeg.AV1SVTAV1PresetDefault))
 	}
 	// QP Stats
 	minQP, maxQP := statsQP.GetMinMaxQPs()
