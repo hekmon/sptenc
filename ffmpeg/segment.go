@@ -23,7 +23,7 @@ type SegmentConfig struct {
 	// Input
 	Input string
 	// Output
-	ScenesMarkers []time.Duration // if empty, will cut at each I frame
+	ScenesMarkers []time.Duration // if empty, the whole input becomes the first (and only) segment
 	OutputDir     string
 	// Reporting
 	Debug             func(msg string)
@@ -40,9 +40,6 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	if config.OutputDir == "" {
 		return errors.New("output directory cannot be empty")
 	}
-	if len(config.ScenesMarkers) == 0 {
-		return errors.New("no scene markers")
-	}
 	// Prepare command
 	args := []string{
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
@@ -50,10 +47,21 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 		"-i", config.Input,
 		"-map", "0:v:0",
 		"-c:v", "copy",
-		"-f", "segment",
-		"-segment_times", formatSliceMarkers(config.ScenesMarkers),
-		"-reset_timestamps", "1",
-		filepath.Join(config.OutputDir, SegmentOutputFormat),
+	}
+	if len(config.ScenesMarkers) == 0 {
+		// Single scene input (or every boundary has been filtered out): nothing to cut.
+		// The segment muxer can not be used without cut points (it would fall back to
+		// its default fixed segment time), so copy the video track as the only segment.
+		args = append(args,
+			filepath.Join(config.OutputDir, fmt.Sprintf(SegmentOutputFormat, 0)),
+		)
+	} else {
+		args = append(args,
+			"-f", "segment",
+			"-segment_times", formatSliceMarkers(config.ScenesMarkers),
+			"-reset_timestamps", "1",
+			filepath.Join(config.OutputDir, SegmentOutputFormat),
+		)
 	}
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Scene splitting with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
