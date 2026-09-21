@@ -42,7 +42,11 @@ type ProgressStats struct {
 }
 
 // Scene represents a detected scene boundary with its start time and detection score.
+// Frame is not used by core, which only reasons on durations and scores. It is carried along
+// because it is what the video is cut at in the end (see ffmpeg.Scene): it must come out of
+// the selection untouched.
 type Scene struct {
+	Frame int
 	Start time.Duration
 	Score float64
 }

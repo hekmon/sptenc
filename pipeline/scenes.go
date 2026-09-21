@@ -21,7 +21,7 @@ func FilterShortScenes(scenes []ffmpeg.Scene, totalDuration, minDuration time.Du
 func ToCoreScenes(scenes []ffmpeg.Scene) []core.Scene {
 	coreScenes := make([]core.Scene, len(scenes))
 	for i, s := range scenes {
-		coreScenes[i] = core.Scene{Start: s.Start, Score: s.Score}
+		coreScenes[i] = core.Scene{Frame: s.Frame, Start: s.Start, Score: s.Score}
 	}
 	return coreScenes
 }
@@ -30,7 +30,7 @@ func ToCoreScenes(scenes []ffmpeg.Scene) []core.Scene {
 func FromCoreScenes(coreScenes []core.Scene) []ffmpeg.Scene {
 	scenes := make([]ffmpeg.Scene, len(coreScenes))
 	for i, s := range coreScenes {
-		scenes[i] = ffmpeg.Scene{Start: s.Start, Score: s.Score}
+		scenes[i] = ffmpeg.Scene{Frame: s.Frame, Start: s.Start, Score: s.Score}
 	}
 	return scenes
 }

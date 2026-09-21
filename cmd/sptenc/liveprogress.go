@@ -194,18 +194,18 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 		currentStats = stats
 		bar.CurrentSet(uint64(stats.Time))
 	}
-	// extract timestamps
-	scenesMarkers := make([]time.Duration, len(scenes))
+	// extract the frames to cut at (frames, not times: see ffmpeg.Scene)
+	scenesFrames := make([]int, len(scenes))
 	for i, scene := range scenes {
-		scenesMarkers[i] = scene.Start
+		scenesFrames[i] = scene.Frame
 	}
 	// Execute segmentation
 	return ffmpeg.Segment(ctx, ffmpeg.SegmentConfig{
 		// Input
 		Input: path,
 		// Output
-		ScenesMarkers: scenesMarkers,
-		OutputDir:     outputDir,
+		ScenesFrames: scenesFrames,
+		OutputDir:    outputDir,
 		// Reporting
 		Debug: func(s string) {
 			if debug {

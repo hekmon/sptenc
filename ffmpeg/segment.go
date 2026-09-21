@@ -23,15 +23,20 @@ type SegmentConfig struct {
 	// Input
 	Input string
 	// Output
-	ScenesMarkers []time.Duration // if empty, the whole input becomes the first (and only) segment
-	OutputDir     string
+	// ScenesFrames holds, for each scene but the first, the index (from 0) of its first frame:
+	// see Scene for why cuts are frames and not times. Must be strictly increasing.
+	// If empty, the whole input becomes the first (and only) segment.
+	ScenesFrames []int
+	OutputDir    string
 	// Reporting
 	Debug             func(msg string)
 	RuntimeError      func(err error) // non fatal errors
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
-// Segment splits a video into segments at the provided scene markers using ffmpeg's segment muxer.
+// Segment splits a video into segments at the provided frames using ffmpeg's segment muxer.
+// A cut can only happen on a keyframe (the muxer waits for the next one otherwise): cuts are
+// exact on an all-intra master, where every frame is a keyframe.
 func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
@@ -39,6 +44,15 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	}
 	if config.OutputDir == "" {
 		return errors.New("output directory cannot be empty")
+	}
+	previous := 0
+	for _, frame := range config.ScenesFrames {
+		// A frame not above the previous one would make ffmpeg produce less segments than
+		// expected. It also catches scenes which did not get their frame index (0).
+		if frame <= previous {
+			return fmt.Errorf("scenes frames must be strictly increasing and above 0, got %d after %d", frame, previous)
+		}
+		previous = frame
 	}
 	// Prepare command
 	args := []string{
@@ -48,7 +62,7 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 		"-map", "0:v:0",
 		"-c:v", "copy",
 	}
-	if len(config.ScenesMarkers) == 0 {
+	if len(config.ScenesFrames) == 0 {
 		// Single scene input (or every boundary has been filtered out): nothing to cut.
 		// The segment muxer can not be used without cut points (it would fall back to
 		// its default fixed segment time), so copy the video track as the only segment.
@@ -58,7 +72,7 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	} else {
 		args = append(args,
 			"-f", "segment",
-			"-segment_times", formatSliceMarkers(config.ScenesMarkers),
+			"-segment_frames", formatScenesFrames(config.ScenesFrames),
 			"-reset_timestamps", "1",
 			filepath.Join(config.OutputDir, SegmentOutputFormat),
 		)
@@ -106,10 +120,10 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	return
 }
 
-func formatSliceMarkers(markers []time.Duration) (formatted string) {
-	strForm := make([]string, len(markers))
-	for i := range markers {
-		strForm[i] = strconv.FormatFloat(markers[i].Seconds(), 'f', -1, float64Precision)
+func formatScenesFrames(frames []int) (formatted string) {
+	strForm := make([]string, len(frames))
+	for i := range frames {
+		strForm[i] = strconv.Itoa(frames[i])
 	}
 	return strings.Join(strForm, ",")
 }

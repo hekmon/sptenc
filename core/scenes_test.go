@@ -373,6 +373,30 @@ func TestSelectScenes_ThresholdBeforeMerge(t *testing.T) {
 	}
 }
 
+// The frame index of a boundary is what the video is cut at in the end: whatever the selection
+// does (threshold, merges in any direction), the boundaries left must still hold their own.
+func TestSelectScenes_KeepsFrames(t *testing.T) {
+	scenes := []Scene{
+		{Frame: 24, Start: 1 * time.Second, Score: 50},    // first segment too short: merged to the right
+		{Frame: 240, Start: 10 * time.Second, Score: 40},  //
+		{Frame: 264, Start: 11 * time.Second, Score: 15},  // dropped by the threshold
+		{Frame: 480, Start: 20 * time.Second, Score: 30},  //
+		{Frame: 528, Start: 22 * time.Second, Score: 35},  // ends a 2s segment merged into its shorter neighbour, the right one: this boundary goes
+		{Frame: 720, Start: 30 * time.Second, Score: 60},  //
+		{Frame: 1416, Start: 59 * time.Second, Score: 45}, // last segment too short: merged to the left
+	}
+	got := SelectScenes(scenes, 20, 60*time.Second, 5*time.Second)
+	want := []Scene{scenes[1], scenes[3], scenes[5]}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("boundary %d: expected %+v, got %+v", i, want[i], got[i])
+		}
+	}
+}
+
 func TestGetCandidates(t *testing.T) {
 	total := 60 * time.Second
 	minDuration := 5 * time.Second
