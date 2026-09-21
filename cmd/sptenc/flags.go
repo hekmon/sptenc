@@ -246,7 +246,6 @@ func validateSceneThreshold(v float64) error {
 }
 
 const (
-	outputDirFlagName       = "output-dir"
 	statsCacheDirFlagName   = "stats-cache-dir"
 	tmpDirFlagName          = "tmp-dir"
 	directoriesCategoryName = "Directories"

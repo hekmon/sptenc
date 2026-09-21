@@ -44,7 +44,7 @@ var encodeCommand = &cli.Command{
 		"command to inspect candidate thresholds and their scene-distribution statistics (scenes count,\n" +
 		"longest segment, std dev, mean, shortest segment) so you can pick a single threshold to feed\n" +
 		"into encode, or batchsearch to search for the threshold that yields the smallest passing file\n" +
-		"automatically.\n" +
+		"automatically.\n\n" +
 		"VMAF METRICS\n" +
 		fmt.Sprintf("Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n", core.VMAFMinValue, core.VMAFMaxValue) +
 		fmt.Sprintf("below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n", core.VMAFOffValue) +
