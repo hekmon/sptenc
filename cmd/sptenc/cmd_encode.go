@@ -349,7 +349,8 @@ var encodeCommand = &cli.Command{
 			}
 			// create master
 			var masterFile string
-			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, workingDir, inputFileSize, cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
+			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"),
+				inputFileSize, cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// split

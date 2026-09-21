@@ -467,7 +467,8 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Step 2 - Create the master for encoding
-		masterFile, sourceTotalFrames, _, err := createMaster(ctx, inputPath, workingDir, inputInfos.Size(), cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
+		masterFile, sourceTotalFrames, _, err := createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"), inputInfos.Size(),
+			cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
 		if err != nil {
 			return fmt.Errorf("failed to create the master file: %w", err)
 		}
