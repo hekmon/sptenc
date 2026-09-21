@@ -224,6 +224,9 @@ func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *f
 //  6. last, candidates are thinned out by scene drop (counted on real scenes, once merged) to fit
 //     --max-candidates, without going below --min-drop
 //
+// Returned thresholds are not the raw scene scores: they are made reusable with encode -T
+// (see pipeline.ReusableThreshold).
+//
 // No candidates are returned if there is no scene within the range.
 func searchCandidates(out io.Writer, cmd *cli.Command, scenes []ffmpeg.Scene, totalDuration time.Duration) (
 	thresholds []float64, segmentations [][]ffmpeg.Scene) {
@@ -253,7 +256,9 @@ func searchCandidates(out io.Writer, cmd *cli.Command, scenes []ffmpeg.Scene, to
 	thresholds = make([]float64, len(candidates))
 	segmentations = make([][]ffmpeg.Scene, len(candidates))
 	for i, candidate := range candidates {
-		thresholds[i] = candidate.Threshold
+		// A candidate threshold is a scene score as printed by ffmpeg: it must be converted to be
+		// reusable with encode. Scenes are already computed, only the reported value changes.
+		thresholds[i] = pipeline.ReusableThreshold(candidate.Threshold, cmd.Float64(minThresholdFlagName))
 		segmentations[i] = pipeline.FromCoreScenes(candidate.Scenes)
 	}
 	return

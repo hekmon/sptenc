@@ -20,6 +20,10 @@ const (
 	SceneThresholdMin = 0
 	// SceneThresholdMax is the maximum valid value for the scene detection threshold.
 	SceneThresholdMax = 100
+	// SceneScoreResolution is the resolution of the scores reported by the scdet filter: they are
+	// read from its log lines, where ffmpeg prints them rounded to 3 decimals. The filter itself
+	// compares its threshold with the real (unrounded) score, see pipeline.ReusableThreshold.
+	SceneScoreResolution = 0.001
 )
 
 // Scene represents a detected scene boundary with its start time and detection score.
