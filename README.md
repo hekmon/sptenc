@@ -33,7 +33,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmaf-neg` for upscaled/denoised/sharpened sources (recommended)
 - 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
-- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`svtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
+- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`libsvtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
 - 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmaf-cuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
 - 🚀 **Optional concurrent segment encoding** - GPU encoders can search multiple segments in parallel via `--concurrent-segments` (`-C`), significantly reducing total runtime for threshold discovery and large batch jobs. CPU encoders are locked to sequential encoding to prevent cache thrashing.
 - 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
@@ -43,7 +43,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 ## How It Works
 
 1. **Scene detection** - FFmpeg `scdet` analyzes the video to find scene boundaries, producing semantically coherent segments. For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so splits can happen at any frame without quality loss or dropped frames.
-2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `svtav1`).
+2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `libsvtav1`).
 3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
 4. **Adaptive QP search** - Each segment starts from a smart QP estimate, brackets the valid range with stepped probes, then uses interpolation to converge on the highest valid QP (smallest file) in just a few attempts. Persistent stats from previous runs further accelerate this (see below).
 5. **Best effort** - If the encoder's minimum QP is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
@@ -141,19 +141,21 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 
 ### Search for the threshold that yields the smallest passing file
 ```bash
+# Fast search on GPU: the output is the best candidate, encoded by the GPU encoder
 ./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93
-# Once the best threshold is found, run a final CPU encode to shrink even further the file
+# Same search, but once the best threshold is found the file is re-encoded with the equivalent
+# CPU encoder to shrink it even further (one run: no need to run the search first)
 ./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93 --final-encode
 ```
 
 ### Manual pipeline (master → split → encode)
 ```bash
 ./sptenc master video.mkv master.mkv
-./sptenc split master.mkv ./segments/ --master --threshold 12
+./sptenc split master.mkv ./segments/ --master --min-threshold 12
 ./sptenc encode ./segments/ output.mkv --original-file video.mkv
 ```
 
-> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (1–100, default 14): higher values detect fewer scenes, lower values detect more.
+> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (0–100, default 14): higher values detect fewer scenes, lower values detect more.
 >
 > Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec` to speed up processing.
 
@@ -186,6 +188,14 @@ The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that
 It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
 
 Use the `thresholds` command to preview the segment distributions a threshold would produce before committing to an `encode` or a `batchsearch` run. It is fast and produces no files.
+
+### Reusing a threshold
+
+`encode`, `thresholds`, and `batchsearch` all build scenes the same way: the threshold picks the boundaries first, then `--min-segment-length` merges the short segments that remain. The scenes a threshold produces therefore depend only on that threshold and on `--min-segment-length` — not on the `--min-threshold`/`--max-threshold` range a search was run with.
+
+This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--min-segment-length`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season.
+
+Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scene scores rounded to 3 decimals but compares thresholds against the unrounded score, so sptenc reports half a step below the printed score to guarantee the boundary is kept. Use the value as printed.
 
 ## VMAF
 
@@ -272,21 +282,21 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `hevc_vaapi` | HEVC | VAAPI GPU | Linux |
 | `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
 | `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS (Apple Silicon) |
-| `svtav1` | AV1 | CPU | All |
+| `libsvtav1` | AV1 | CPU | All |
 | `av1_nvenc` | AV1 | NVIDIA GPU | All |
 | `av1_vaapi` | AV1 | VAAPI GPU | Linux |
 
-> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `svtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc check` to see which encoders your ffmpeg build supports.
+> **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `libsvtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc check` to see which encoders your ffmpeg build supports.
 
 ### Encoder selection vs file size
 
-| | CPU encoders (`libx265`, `svtav1`) | GPU encoders (`*_nvenc`, `*_vaapi`) |
+| | CPU encoders (`libx265`, `libsvtav1`) | GPU encoders (`*_nvenc`, `*_vaapi`) |
 |---|---|---|
 | Output file size | ✅ Optimal | ❌ ~1.5–2× larger |
 | Speed | Slower | ✅ Much faster |
 | Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search |
 
-> **CPU encoders are sequential by design.** A single `libx265` or `svtav1` session already saturates physical CPU cores. Hyperthreading/SMT does not double throughput for heavy encode workloads, so running multiple instances just thrashes cache and hurts total throughput. `--concurrent-segments` is hard-limited to `1` for CPU encoders; use a GPU encoder with `-C` if you need speed, or `batchsearch --final-encode` to discover thresholds quickly on GPU and automatically re-encode with the CPU equivalent for the smallest file.
+> **CPU encoders are sequential by design.** A single `libx265` or `libsvtav1` session already saturates physical CPU cores. Hyperthreading/SMT does not double throughput for heavy encode workloads, so running multiple instances just thrashes cache and hurts total throughput. `--concurrent-segments` is hard-limited to `1` for CPU encoders; use a GPU encoder with `-C` if you need speed, or `batchsearch --final-encode` to discover thresholds quickly on GPU and automatically re-encode with the CPU equivalent for the smallest file.
 
 ### GPU selection flags
 
@@ -373,9 +383,9 @@ ffmpeg [...] -c:v 'hevc_videotoolbox' -profile:v 'main10' -q:v 'X' [...]
 
 ### AV1
 
-**svtav1**
+**libsvtav1**
 ```bash
-ffmpeg [...] -c:v 'libsvtav1' -pix_fmt 'yuv420p10le' -preset '6' -qp 'X' [...]
+ffmpeg [...] -c:v 'libsvtav1' -pix_fmt 'yuv420p10le' -preset '3' -qp 'X' [...]
 ```
 
 **av1_nvenc**
@@ -421,6 +431,16 @@ go build -o sptenc ./cmd/sptenc/
 - `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128)) - can be used in WSL to get `libvmaf_cuda` support on Windows. A recent ffmpeg version is highly recommended.
 - `ffprobe` - bundled with ffmpeg build
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
+
+**Where the binaries are looked for:**
+
+| Binary | Linux / macOS | Windows | Override (global flag) |
+|---|---|---|---|
+| `ffmpeg` | `PATH` | `.\ffmpeg.exe` (current directory, not `PATH`) | `--ffmpeg-path` |
+| `ffprobe` | `PATH` | `.\ffprobe.exe` (current directory, not `PATH`) | `--ffprobe-path` |
+| `mkvpropedit` | `PATH` | `C:\Program Files\MKVToolNix\mkvpropedit.exe` | `--mkvpropedit-path` |
+
+Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc check` to verify everything is found and usable.
 
 ## License
 
