@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -508,9 +509,22 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\nCandidate %s done, weighting %s\n",
 				candidateStr, cunits.ImportInBytes(float64(encodedStats.Size())),
 			)
+			previousBestIndex := batch.bestCandidateIndex
 			batch.ComputeBest()
 			if batch.bestCandidateIndex != 0 && batch.bestCandidateIndex == batch.currentCandidateIndex {
 				fmt.Fprintf(bypass, "\tNew best found!\n")
+			}
+			// Only the merged file of the best candidate will ever be read again: every candidate
+			// tested leaves exactly one file without any use, its own if it lost, the one of the
+			// previous best if it won. Sizes are already stored for the final report.
+			if !cmd.Bool(debugFlagName) {
+				loserIndex := batch.currentCandidateIndex
+				if batch.bestCandidateIndex == batch.currentCandidateIndex {
+					loserIndex = previousBestIndex // same index for the very first candidate: nothing to remove
+				}
+				if loserIndex != batch.bestCandidateIndex {
+					removeMergedEncode(bypass, batch.encoded[loserIndex])
+				}
 			}
 			// Once the video concatened, delete all segments to free up some disk space for next candidate
 			//// ffv1 is the one taking the most space
@@ -552,6 +566,12 @@ var batchsearchCommand = &cli.Command{
 		}
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\n\nBest candidate is %s, running final encode with %s...\n", bestCandidateStr, finalEncoder)
+			// The file of the best candidate is about to be replaced by the final encode: its QPs
+			// and its size are all that is needed from now on. It is not a fallback either, a
+			// final encode failing fails the run. Make room before the final encode starts.
+			if !cmd.Bool(debugFlagName) {
+				removeMergedEncode(bypass, encodedSegmentsMerged)
+			}
 			finalWorkdir := filepath.Join(workingDir, "final-encode")
 			if err = os.Mkdir(finalWorkdir, 0750); err != nil {
 				return fmt.Errorf("failed to create workdir for final encode: %w", err)
@@ -775,6 +795,15 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\nBatch search ended in %s\n\n", time.Since(completeRunStart).Round(time.Second))
 		return nil
 	},
+}
+
+// removeMergedEncode deletes the merged encode of a candidate which will not be read anymore.
+// A failure is only a warning: the file will go with the temporary directory at the end, and
+// some disk space is not worth losing a search which can have been running for days.
+func removeMergedEncode(out io.Writer, path string) {
+	if err := os.Remove(path); err != nil {
+		fmt.Fprintf(out, "WARNING: failed to delete the merged encode of a discarded candidate %s: %s\n", shellescape.Quote(path), err)
+	}
 }
 
 type batchStatus struct {
