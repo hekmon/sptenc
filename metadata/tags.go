@@ -10,8 +10,6 @@ import (
 )
 
 const (
-	titleTagKey               = "title"
-	TitleTagValue             = "SptEncoded"
 	sptencURLTagKey           = "sptenc_url"
 	sptencVersionTagKey       = "sptenc_version"
 	sptencEncoderTagKey       = "sptenc_encoder"
@@ -46,12 +44,14 @@ const (
 	sptencBestEffortTagKey       = "sptenc_best_effort_segments"
 )
 
-func GenerateTags(format ffmpeg.FFProbeFormat, vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
+// GenerateTags builds the ffmpeg metadata flags documenting an encode. They are all set on the
+// video stream: container level metadata (the title in particular) belongs to the user and is
+// passed through from the source untouched.
+func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
 	flags = make(ffmpeg.FFMEGTags, 0, 58)
 	// Global
 	module, version := signature()
 	flags = append(flags,
-		"-metadata", fmt.Sprintf("%s=%s", titleTagKey, computeNewTitle(format.Tags)),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencURLTagKey, module),
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVersionTagKey, version),
 		"-metadata:s:v:0", "vendor_id=", // prevent ffmpeg from inserting VENDOR_ID : [0][0][0][0]
@@ -107,15 +107,6 @@ func GenerateTags(format ffmpeg.FFProbeFormat, vc core.VMAFChecker, encoder ffmp
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Maximum, 'f', -1, 64)),
 	)
 	return
-}
-
-func computeNewTitle(tags map[string]string) (newTitle string) {
-	if tags != nil {
-		if oldTitle, ok := tags[titleTagKey]; ok {
-			return oldTitle + " [" + TitleTagValue + "]"
-		}
-	}
-	return TitleTagValue
 }
 
 func signature() (module, version string) {

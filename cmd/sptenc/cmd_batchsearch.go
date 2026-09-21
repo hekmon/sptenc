@@ -670,7 +670,7 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		videoStream = sourceStats.VideoTrack()
-		tags := metadata.GenerateTags(*sourceStats.Format, vmafAuditor, usedEncoder,
+		tags := metadata.GenerateTags(vmafAuditor, usedEncoder,
 			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(results.EncodedSegmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, inputPath, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
