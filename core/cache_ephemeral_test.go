@@ -1,6 +1,7 @@
 package core
 
 import (
+	"math"
 	"sync"
 	"testing"
 )
@@ -112,5 +113,65 @@ func TestEphemeralStatsCache_ConcurrentAccess(t *testing.T) {
 
 	if len(e.qps) != 100 {
 		t.Errorf("expected 100 accumulated QPs, got %d", len(e.qps))
+	}
+}
+
+func TestEphemeralStatsCache_Snapshot(t *testing.T) {
+	base := &weightedMockStatsCache{mean: 10, stddev: 2, weight: 50}
+	e := newEphemeralStatsCache(base, 0, 51)
+
+	// Snapshot before adding QPs should reflect the base
+	mean, stddev, weight, ok := e.Snapshot()
+	if !ok {
+		t.Fatal("expected ok=true from Snapshot")
+	}
+	if weight != 50 {
+		t.Errorf("expected weight 50, got %d", weight)
+	}
+	if mean != 10.0 {
+		t.Errorf("expected mean 10.0, got %v", mean)
+	}
+	if stddev != 2.0 {
+		t.Errorf("expected stddev 2.0, got %v", stddev)
+	}
+
+	// Add QPs and verify Snapshot reflects combined data
+	e.addQP(12)
+	e.addQP(14)
+	mean, stddev, weight, ok = e.Snapshot()
+	if !ok {
+		t.Fatal("expected ok=true from Snapshot after addQP")
+	}
+	if weight != 52 {
+		t.Errorf("expected weight 52, got %d", weight)
+	}
+	// Weighted mean: (10*50 + 12 + 14) / 52 = 536/52 ≈ 10.3077
+	expectedMean := (10.0*50 + 12 + 14) / 52
+	if math.Abs(mean-expectedMean) > 1e-9 {
+		t.Errorf("expected mean %v, got %v", expectedMean, mean)
+	}
+}
+
+func TestEphemeralStatsCache_WrapsAnotherEphemeral(t *testing.T) {
+	// Simulate batchsearch pattern: an outer ephemeral wraps an inner ephemeral
+	// that has already accumulated QPs from previous candidates.
+	persistent := &weightedMockStatsCache{mean: 20, stddev: 5, weight: 10}
+	inner := newEphemeralStatsCache(persistent, 0, 51)
+	inner.addQP(22)
+	inner.addQP(24) // candidate 1 results
+
+	// Outer ephemeral seeds from inner — as FindAllSegmentsQP would do for candidate 2
+	outer := newEphemeralStatsCache(inner, 0, 51)
+	outer.addQP(23) // one segment from candidate 2
+
+	mean, stddev := outer.GetMeanStdDev()
+	// Total weight: 10 (persistent) + 2 (candidate1) + 1 (candidate2) = 13
+	// Weighted mean: (20*10 + 22 + 24 + 23) / 13 = 269/13 ≈ 20.69 → 21
+	if mean != 21 {
+		t.Errorf("expected mean 21, got %d", mean)
+	}
+	// Stddev should be positive
+	if stddev < 1 {
+		t.Errorf("expected stddev >= 1, got %d", stddev)
 	}
 }

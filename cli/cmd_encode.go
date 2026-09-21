@@ -432,6 +432,9 @@ var encodeCommand = &cli.Command{
 			err = fmt.Errorf("failed to encode segments: %w", err)
 			return
 		}
+		if _, _, err := statsCache.AddRun(results.QPs); err != nil {
+			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
+		}
 
 		// Step 3 - Prepare source for VMAF if necessary
 		var (
@@ -588,7 +591,7 @@ var encodeCommand = &cli.Command{
 
 // processSegments runs QP search on the given segments and concatenates the encoded results.
 func processSegments(ctx context.Context, segmentsPaths []string, workingDir string, totalDuration time.Duration,
-	vmafAuditor core.VMAFChecker, statsCache *core.StatsCacheHistory, encoder core.SegmentEncoder, concurrency int, debug bool) (
+	vmafAuditor core.VMAFChecker, statsCache core.StatsCache, encoder core.SegmentEncoder, concurrency int, debug bool) (
 	results core.QPSearchResults, encodedSegmentsMerged string, err error) {
 	bypass := liveprogress.Bypass()
 	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
@@ -633,11 +636,7 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 			)
 		}
 	}
-	segmentQPmean, segmentQPstddev, err := statsCache.AddRun(results.QPs)
-	if err != nil {
-		fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
-		err = nil
-	}
+	segmentQPmean, segmentQPstddev := results.GetMeanStdDev()
 	fmt.Fprintf(bypass, "\tSegment QP mean is %s with a standard deviation of %s.\n",
 		strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),
 	)

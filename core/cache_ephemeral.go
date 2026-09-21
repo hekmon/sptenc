@@ -47,40 +47,48 @@ func (e *ephemeralStatsCache) GetMeanStdDev() (mean, stddev int) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	totalWeight := e.baseWeight + len(e.qps)
+	meanf, stddevf, _ := e.compute()
+	mean = int(math.Round(meanf))
+	stddev = max(1, int(math.Round(stddevf)))
+	return
+}
+
+// Snapshot returns the combined historical aggregate as a single weighted run.
+func (e *ephemeralStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	mean, stddev, weight = e.compute()
+	return mean, stddev, weight, true
+}
+
+// compute returns the raw weighted mean, stddev, and total weight.
+// Caller must hold at least e.mu.RLock.
+func (e *ephemeralStatsCache) compute() (mean, stddev float64, weight int) {
+	weight = e.baseWeight + len(e.qps)
 
 	// Mean
 	sumQPs := 0
 	for _, qp := range e.qps {
 		sumQPs += qp
 	}
-	totalMean := (e.baseMean*float64(e.baseWeight) + float64(sumQPs)) / float64(totalWeight)
-	mean = int(math.Round(totalMean))
+	mean = (e.baseMean*float64(e.baseWeight) + float64(sumQPs)) / float64(weight)
 
 	// Stddev
-	var totalStddev float64
 	switch {
 	case len(e.qps) == 0:
-		totalStddev = e.baseStddev
+		stddev = e.baseStddev
 	case len(e.qps) == 1:
 		// One segment tells us the center shifted but gives no spread information;
 		// keep the base stddev to avoid premature tightening.
-		totalStddev = e.baseStddev
+		stddev = e.baseStddev
 	default:
 		qpf := make([]float64, len(e.qps))
 		for i, qp := range e.qps {
 			qpf[i] = float64(qp)
 		}
 		_, accStddev := stat.MeanStdDev(qpf, nil)
-		totalStddev = (e.baseStddev*float64(e.baseWeight) + accStddev*float64(len(e.qps))) / float64(totalWeight)
+		stddev = (e.baseStddev*float64(e.baseWeight) + accStddev*float64(len(e.qps))) / float64(weight)
 	}
 
-	stddev = max(1, int(math.Round(totalStddev)))
 	return
-}
-
-// Snapshot delegates to the base cache; the ephemeral cache itself does not
-// persist and is not snapshotted.
-func (e *ephemeralStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
-	return 0, 0, 0, false
 }

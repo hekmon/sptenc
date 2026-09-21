@@ -917,6 +917,34 @@ func TestQPSearchResults_GetMinMaxQPs(t *testing.T) {
 	}
 }
 
+func TestQPSearchResults_GetMeanStdDev(t *testing.T) {
+	tests := []struct {
+		name       string
+		qps        []int
+		wantMean   float64
+		wantStddev float64
+	}{
+		{"empty", []int{}, 0, 0},
+		{"single", []int{42}, 42, 0},
+		{"two", []int{10, 20}, 15, 7.0710678118654755},
+		{"three", []int{10, 20, 30}, 20, 10},
+		{"all same", []int{5, 5, 5}, 5, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := QPSearchResults{QPs: tt.qps}
+			mean, stddev := results.GetMeanStdDev()
+			if mean != tt.wantMean {
+				t.Errorf("GetMeanStdDev() mean = %v, want %v", mean, tt.wantMean)
+			}
+			if stddev != tt.wantStddev {
+				t.Errorf("GetMeanStdDev() stddev = %v, want %v", stddev, tt.wantStddev)
+			}
+		})
+	}
+}
+
 func TestFindAllSegmentsQP_CacheMeanOutOfRange(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

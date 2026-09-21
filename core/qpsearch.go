@@ -10,6 +10,7 @@ import (
 
 	"al.essio.dev/pkg/shellescape"
 	"golang.org/x/sync/errgroup"
+	"gonum.org/v1/gonum/stat"
 )
 
 const (
@@ -121,6 +122,21 @@ func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
 		}
 		return
 	}
+}
+
+// GetMeanStdDev returns the mean and standard deviation of the selected QPs.
+func (qpsr QPSearchResults) GetMeanStdDev() (mean, stddev float64) {
+	if len(qpsr.QPs) == 0 {
+		return 0, 0
+	}
+	if len(qpsr.QPs) == 1 {
+		return float64(qpsr.QPs[0]), 0
+	}
+	qpf := make([]float64, len(qpsr.QPs))
+	for i, q := range qpsr.QPs {
+		qpf[i] = float64(q)
+	}
+	return stat.MeanStdDev(qpf, nil)
 }
 
 type job struct {
