@@ -161,16 +161,20 @@ func validateOutputPath(outputPath string) error {
 	return nil
 }
 
-// AllAudioTracksPCM returns true if all audio streams in the given stats are PCM encoded.
+// AllAudioTracksPCM returns true if there is at least one audio stream in the given stats and
+// all of them are PCM encoded. A file without any audio is not "all PCM": there is nothing to
+// compress to FLAC, and saying otherwise to the user is misleading.
 func AllAudioTracksPCM(stats ffmpeg.FFProbeStats) bool {
+	var audioTracks int
 	for _, stream := range stats.Streams {
 		if stream.CodecType == "audio" {
 			if stream.CodecName != ffmpeg.CodecAudioPCM && stream.CodecName != ffmpeg.CodecAudioPCM24b {
 				return false
 			}
+			audioTracks++
 		}
 	}
-	return true
+	return audioTracks > 0
 }
 
 // formatPercent formats a float64 as a percentage string with up to 1 decimal
