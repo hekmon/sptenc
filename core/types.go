@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // VMAFStats is a user-friendly summary of VMAF results, including computed percentiles.
 type VMAFStats struct {
@@ -14,6 +17,16 @@ type VMAFStats struct {
 	HarmonicMean float64
 	Mean         float64
 	Maximum      float64
+}
+
+// String renders the VMAF statistics on a single line, for the debug logs of the QP search.
+// Without it, formatting the struct with %s prints each float as %!s(float64=...).
+// The table rendering lives with the ffmpeg type: core does not import ffmpeg.
+func (vs VMAFStats) String() string {
+	return fmt.Sprintf("min=%v p1=%v p5=%v p10=%v p25=%v median=%v hmean=%v mean=%v max=%v (libvmaf %s)",
+		vs.Minimum, vs.Percentile1, vs.Percentile5, vs.Percentile10, vs.Percentile25,
+		vs.Median, vs.HarmonicMean, vs.Mean, vs.Maximum, vs.Version,
+	)
 }
 
 // ProgressStats holds parsed progress information from an ffmpeg encode or extraction.

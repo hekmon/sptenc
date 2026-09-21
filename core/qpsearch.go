@@ -580,6 +580,6 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 		err = fmt.Errorf("failed to compute VMAF for segment: %w", vmafErr)
 		return
 	}
-	scb.Debug(workerID, "Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
+	scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s", segment, qp, vmafStats)
 	return
 }
