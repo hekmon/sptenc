@@ -175,7 +175,7 @@ var concatCommand = &cli.Command{
 			outputSizeStr = fmt.Sprintf(" (%s)", cunits.ImportInBytes(float64(outputSize)))
 		}
 		fmt.Fprintf(bypass, "\tConcatenated %d files into %s%s in %s\n",
-			len(segmentsPaths), shellescape.Quote(outputPath), duration.Round(time.Second), outputSizeStr,
+			len(segmentsPaths), shellescape.Quote(outputPath), outputSizeStr, duration.Round(time.Second),
 		)
 
 		return
