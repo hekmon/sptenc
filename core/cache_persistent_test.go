@@ -412,7 +412,7 @@ func TestParseCacheFilename_Roundtrip(t *testing.T) {
 		},
 		{
 			name:         "with profile",
-			encoder:      "svtav1",
+			encoder:      "libsvtav1",
 			mean:         95,
 			hmean:        93,
 			cacheProfile: "grainy_90s",
@@ -438,7 +438,7 @@ func TestParseCacheFilename_Roundtrip(t *testing.T) {
 		},
 		{
 			name:         "with model and profile",
-			encoder:      "svtav1",
+			encoder:      "libsvtav1",
 			model:        "vmaf_4k_v0.6.1",
 			mean:         95,
 			hmean:        93,
@@ -575,7 +575,7 @@ func TestParseCacheFilename_BackwardCompatibility(t *testing.T) {
 		cacheProfile string
 	}{
 		{"no profile", "libx265", ""},
-		{"with profile", "svtav1", "grainy_90s"},
+		{"with profile", "libsvtav1", "grainy_90s"},
 		{"encoder with underscore", "hevc_nvenc", ""},
 	}
 

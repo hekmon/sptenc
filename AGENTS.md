@@ -62,7 +62,7 @@ Not obvious enough to change the dial every encoder shares, so QP stays. Reopeni
 
 Segments are encoded **sequentially by default**, but **optional concurrency** is supported via `QPSearchConfig.NbConcurrentSegments` (CLI: `--concurrent-segments` / `-C`). The CLI rejects concurrency greater than 1 for CPU encoders.
 
-- **CPU encoders** (`libx265 slow`, `svtav1`) are limited to 1 concurrent segment. They already saturate physical cores on enthusiast hardware; concurrent instances thrash cache and memory bandwidth, reducing total throughput. The CLI enforces this limit with a hard error if a higher value is requested.
+- **CPU encoders** (`libx265`, `libsvtav1`) are limited to 1 concurrent segment. They already saturate physical cores on enthusiast hardware; concurrent instances thrash cache and memory bandwidth, reducing total throughput. The CLI enforces this limit with a hard error if a higher value is requested.
 - **GPU encoders** benefit from concurrency because they often support multiple parallel sessions (typically 1–3 on consumer cards, SKU-dependent). The `batchsearch` command encourages raising this value for GPU-based threshold discovery, followed by an optional sequential CPU final encode (`--final-encode`) for maximum compression efficiency.
 
 Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `core/qpsearch.go`, with worker-scoped callbacks so the UI can attribute progress to individual workers.
@@ -116,10 +116,10 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 `core/` is tested with table-driven unit tests that use a `mockEncoder` implementing `core.SegmentEncoder`. No real ffmpeg processes are invoked.
 
 **Key test helpers (defined in `core/qpsearch_test.go`):**
-- `mockEncoder` — returns pre-computed VMAF results from a `map[int]VMAFStats`. Creates dummy files on disk so `getFileSize` succeeds. Tracks all `Encode` and `ComputeVMAF` calls for call-count assertions.
+- `mockEncoder` — returns pre-computed VMAF results from a `map[int]VMAFStats` (one for all segments, or one per segment with `vmafBySegment`). Creates dummy files on disk so `getFileSize` succeeds. Tracks all `Encode` and `ComputeVMAF` calls for call-count assertions. Safe for concurrent use, and tracks how many encodes run at the same time (`maxActive`) for the tests using several workers.
 - `linearVMAF(qp)` — generates a monotonic VMAF curve (`mean = 100 - 1.5*qp`) for predictable convergence tests.
-- `extractQPFromPath` — parses QP from segment filenames (`seg_%06d_qp%03d.mkv`) so the mock can look up the right VMAF result.
-- `mockStatsCache` / `mockCallbacks` — no-op implementations for cache and progress injection.
+- `extractSegmentAndQP` — parses the segment index and the QP from encoded segment filenames (`seg_%06d_qp%03d.mkv`) so the mock can look up the right VMAF result.
+- `mockStatsCache` / `mockCallbacks` — no-op implementations for cache and progress injection. `recordingCallbacks` records worker IDs and reported totals, from any number of workers.
 
 **Critical test files:**
 - `core/qpsearch_test.go` — Convergence, best-effort fallback, cache guidance, multi-segment runs, error propagation from `Encode`/`ComputeVMAF`/`ProbeStream`, `KeepInvalidQP` behavior.

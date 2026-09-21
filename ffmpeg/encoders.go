@@ -63,7 +63,7 @@ func IsGPU(encoder Encoder) bool {
 
 // GetCPURelative returns whether the given encoder is a GPU encoder and its CPU equivalent.
 // For GPU encoders (e.g. hevc_nvenc, av1_nvenc), it returns true and the corresponding CPU
-// encoder in the same codec family (libx265 for HEVC, svtav1 for AV1). For CPU encoders,
+// encoder in the same codec family (libx265 for HEVC, libsvtav1 for AV1). For CPU encoders,
 // it returns false and the encoder itself. For unsupported encoders, it returns false and "".
 func GetCPURelative(encoder Encoder) (cpuRelative Encoder, alreadyCPU bool) {
 	switch encoder {
