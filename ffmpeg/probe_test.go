@@ -132,3 +132,19 @@ func TestIsConstantFrameRate(t *testing.T) {
 		})
 	}
 }
+
+func TestIsInterlaced(t *testing.T) {
+	for fieldOrder, expected := range map[string]bool{
+		"progressive": false,
+		"unknown":     false, // ffprobe could not tell
+		"":            false, // not a (probed) video stream
+		"tt":          true,
+		"bb":          true,
+		"tb":          true,
+		"bt":          true,
+	} {
+		if got := (&FFProbeBinaryStream{FieldOrder: fieldOrder}).IsInterlaced(); got != expected {
+			t.Errorf("field order %q: expected %t, got %t", fieldOrder, expected, got)
+		}
+	}
+}

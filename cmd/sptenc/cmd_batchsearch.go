@@ -394,6 +394,9 @@ var batchsearchCommand = &cli.Command{
 		if !videoStream.IsConstantFrameRate() {
 			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
 		}
+		if err = checkProgressive(videoStream); err != nil {
+			return err
+		}
 		totalDuration := sourceStats.Format.Duration
 
 		// Get the stats cache (after probing so we know the VMAF model)

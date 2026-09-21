@@ -43,6 +43,30 @@ func checkMKVPropEdit(ctx context.Context) error {
 	return nil
 }
 
+// checkProgressive rejects a video stream declared as interlaced.
+//
+// # WHY INTERLACED CONTENT IS REJECTED AND NOT DEINTERLACED
+//
+// Nothing in the pipeline knows about fields: frames are decoded with both fields woven
+// together, stored that way in the master and encoded as progressive pictures. It works, no
+// error, frame counts match and VMAF validates it (combed pictures compared with the same
+// combed pictures). But the result is a stream of progressive frames holding combed pictures,
+// with a container still declaring it interlaced (checked on the output of an interlaced H.264
+// source: field order kept by the container, every decoded frame flagged as progressive).
+// A deinterlacer trusting the frames will leave it alone: the combing is there to stay.
+//
+// Deinterlacing here is not an option either: which method to use (and whether to keep the
+// field rate, doubling the frame rate) is a choice on the content itself, to be made once
+// and before sptenc, not an encoding option.
+func checkProgressive(stream *ffmpeg.FFProbeBinaryStream) error {
+	if stream.IsInterlaced() {
+		return fmt.Errorf("interlaced content is not supported (field order: %s): it would be encoded as progressive frames with the combing baked in. "+
+			"Deinterlace it first (if the pictures are actually progressive within an interlaced stream, it must be encoded again as progressive as well)",
+			stream.FieldOrder)
+	}
+	return nil
+}
+
 // isASCII checks if a string contains only ASCII characters (code points 0-127)
 func isASCII(s string) bool {
 	for i := 0; i < len(s); i++ {

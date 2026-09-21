@@ -324,6 +324,9 @@ var encodeCommand = &cli.Command{
 				err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
 				return
 			}
+			if err = checkProgressive(videoStream); err != nil {
+				return
+			}
 			totalDuration = sourceStats.Format.Duration
 			// Detect scenes on the original file to take advantage of hw decoding
 			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
@@ -407,6 +410,9 @@ var encodeCommand = &cli.Command{
 		}
 		if !videoStream.IsConstantFrameRate() {
 			err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+			return
+		}
+		if err = checkProgressive(videoStream); err != nil {
 			return
 		}
 

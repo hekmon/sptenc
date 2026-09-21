@@ -400,9 +400,27 @@ func (ffpbs *FFProbeBinaryStream) UnmarshalJSON(data []byte) (err error) {
 	return
 }
 
-// IsInterlaced reports whether the stream uses interlaced frames.
+// IsInterlaced reports whether the stream is declared as interlaced: a field order which is
+// neither "progressive" nor "unknown". It reads what ffprobe reports for the stream, no frame
+// is analyzed: it has been checked against interlaced and progressive samples (H.264, MPEG-2
+// and FFV1 interlaced, top and bottom field first; H.264, HEVC, AV1, VP9, MPEG-2 and FFV1
+// progressive; Matroska, MP4, MPEG-TS and VOB), the stream value always matched the frames.
+//
+// # EDGE CASES
+//
+//   - "unknown" is not interlaced: ffprobe could not tell, and rejecting every file it can not
+//     tell anything about would reject valid progressive ones.
+//   - A missing value is not interlaced either: ffprobe always prints one for a video stream, so
+//     this is not a video stream (or not a probed one).
+//   - Progressive content stored in an interlaced stream (PsF) is reported as interlaced, as the
+//     stream says so: only analyzing the pictures could tell, this is not done here.
 func (s *FFProbeBinaryStream) IsInterlaced() bool {
-	return s.FieldOrder != "progressive" && s.FieldOrder != "unknown"
+	switch s.FieldOrder {
+	case "progressive", "unknown", "":
+		return false
+	default:
+		return true
+	}
 }
 
 // parseFrameRate converts an ffprobe frame-rate string into a float64.
