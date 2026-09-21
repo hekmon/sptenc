@@ -7,18 +7,20 @@ import (
 )
 
 // Real (shortened) ffprobe n9.0.2 report. The first frame comes with a side data list nobody
-// asked for, positions are not strictly increasing and one is not available.
+// asked for, positions are not strictly increasing and one frame has neither position nor time.
+// Times are the ones of a 24 fps Matroska file: rounded to the millisecond, 41 or 42 ms apart.
 const probeWithFramesReport = `{
     "frames": [
-        { "pkt_pos": "715",
+        { "pkt_pos": "715", "pts_time": "0.042000",
             "side_data_list": [
                 {  }
             ] },
-        { "pkt_pos": "8251" },
-        { "pkt_pos": "14418" },
-        { "pkt_pos": "11112" },
-        { "pkt_pos": "N/A" },
-        { "pkt_pos": "17334" }
+        { "pkt_pos": "8251", "pts_time": "0.083000" },
+        { "pkt_pos": "14418", "pts_time": "0.125000" },
+        { "pkt_pos": "11112", "pts_time": "0.167000" },
+        { "pkt_pos": "N/A", "pts_time": "N/A" },
+        { "pkt_pos": "17334", "pts_time": "0.250000" },
+        { "pkt_pos": "20256", "pts_time": "0.292000" }
     ],
     "programs": [
     ],
@@ -37,7 +39,7 @@ func TestParseProbeWithFrames(t *testing.T) {
 		t.Fatalf("parseProbeWithFrames failed: %v", err)
 	}
 	// Progress: only a new highest position counts, and the sum is the highest position
-	expectedReports := []int{715, 7536, 6167, 2916}
+	expectedReports := []int{715, 7536, 6167, 2916, 2922}
 	if len(reports) != len(expectedReports) {
 		t.Fatalf("expected reports %v, got %v", expectedReports, reports)
 	}
@@ -56,6 +58,15 @@ func TestParseProbeWithFrames(t *testing.T) {
 	}
 	if stats.Format == nil || stats.Format.Duration != 60059*time.Millisecond {
 		t.Errorf("unexpected format: %+v", stats.Format)
+	}
+	// Frame durations: 41, 42, 42 then 42 ms. The frame without a time breaks the chain: the
+	// 83 ms between the frames around it are not a duration.
+	if video.NbFrameDurations != 4 || video.ShortestFrameDuration != 41*time.Millisecond || video.LongestFrameDuration != 42*time.Millisecond {
+		t.Errorf("unexpected frame durations: %d measured, from %v to %v",
+			video.NbFrameDurations, video.ShortestFrameDuration, video.LongestFrameDuration)
+	}
+	if !video.IsConstantFrameRate() {
+		t.Error("a 24 fps Matroska stream must be seen as a constant frame rate one")
 	}
 	// No progress callback must not be an issue
 	if _, err = parseProbeWithFrames(strings.NewReader(probeWithFramesReport), nil); err != nil {
@@ -146,5 +157,36 @@ func TestIsInterlaced(t *testing.T) {
 		if got := (&FFProbeBinaryStream{FieldOrder: fieldOrder}).IsInterlaced(); got != expected {
 			t.Errorf("field order %q: expected %t, got %t", fieldOrder, expected, got)
 		}
+	}
+}
+
+// Measured frame durations must prevail over the declared frame rates, which can not be trusted
+// with every container (see IsConstantFrameRate).
+func TestIsConstantFrameRate_Measured(t *testing.T) {
+	ms := time.Millisecond
+	for name, tc := range map[string]struct {
+		r, avg            string
+		nb                int
+		shortest, longest time.Duration
+		expected          bool
+	}{
+		"exact durations (MP4, MPEG-TS)":             {"24000/1001", "24000/1001", 1438, 41708 * time.Microsecond, 41709 * time.Microsecond, true},
+		"rounded to the millisecond (Matroska)":      {"24000/1001", "24000/1001", 1438, 41 * ms, 42 * ms, true},
+		"120 fps rounded to the millisecond":         {"120/1", "120/1", 239, 8 * ms, 9 * ms, true},
+		"24 and 30 fps mix declared as 24 fps (MKV)": {"24/1", "24/1", 161, 33 * ms, 42 * ms, false},
+		"24 and 25 fps mix declared as 24 fps (MKV)": {"24/1", "24/1", 161, 40 * ms, 42 * ms, false},
+		"constant with a dropped frame":              {"24/1", "24/1", 94, 41 * ms, 83 * ms, false},
+		"same timestamp twice":                       {"24/1", "24/1", 94, 0, 42 * ms, false},
+		"constant but declared rates disagree (MP4)": {"120/1", "27/1", 161, 41708 * time.Microsecond, 41709 * time.Microsecond, true},
+		"nothing measured: declared rates, constant": {"24/1", "24/1", 0, 0, 0, true},
+		"nothing measured: declared rates, variable": {"120/1", "27/1", 0, 0, 0, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stream := &FFProbeBinaryStream{RFrameRate: tc.r, AvgFrameRate: tc.avg,
+				NbFrameDurations: tc.nb, ShortestFrameDuration: tc.shortest, LongestFrameDuration: tc.longest}
+			if got := stream.IsConstantFrameRate(); got != tc.expected {
+				t.Errorf("expected %t, got %t", tc.expected, got)
+			}
+		})
 	}
 }

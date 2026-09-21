@@ -24,6 +24,19 @@ import (
 
 func liveCountNbFrames(ctx context.Context, inputFilePath string, fileSize int64, debug bool) (
 	nbFrames int, codec string, duration time.Duration, err error) {
+	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, fileSize, debug)
+	if err != nil {
+		return
+	}
+	nbFrames = videoInfos.NbReadFrames
+	codec = string(videoInfos.CodecName)
+	return
+}
+
+// liveProbeVideoCF reads the whole file to return its video stream along with what can only be
+// known that way: its exact number of frames and how long they last.
+func liveProbeVideoCF(ctx context.Context, inputFilePath string, fileSize int64, debug bool) (
+	videoInfos *ffmpeg.FFProbeBinaryStream, duration time.Duration, err error) {
 	// prepare live progress
 	analyzeBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(fileSize)),
@@ -67,14 +80,9 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, fileSize int64
 		return
 	}
 	duration = mediaInfos.Format.Duration
-	// extract number of frames from results
-	videoInfos := mediaInfos.VideoTrack()
-	if videoInfos == nil {
+	if videoInfos = mediaInfos.VideoTrack(); videoInfos == nil {
 		err = errors.New("input file has no video stream")
-		return
 	}
-	nbFrames = videoInfos.NbReadFrames
-	codec = string(videoInfos.CodecName)
 	return
 }
 

@@ -101,7 +101,7 @@ func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (sta
 		"-loglevel", "error", "-print_format", "json=c=1",
 		"-show_format", "-show_streams", "-count_frames",
 		"-select_streams", "v:0",
-		"-show_entries", "frame=pkt_pos", // for progress, see parseProbeWithFrames
+		"-show_entries", "frame=pkt_pos,pts_time", // progress and frame durations, see parseProbeWithFrames
 		"-threads", "auto",
 		config.Path,
 	}
@@ -163,6 +163,12 @@ func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (sta
 // bytes gained since the last report. Positions do not strictly increase (streams are
 // interleaved, frames reordered): only a new highest position counts. Some formats do not
 // provide it: there is no progress then, the count itself is not affected.
+//
+// The time of each frame (pts_time) is used to measure how long frames last: the shortest and
+// the longest time between two consecutive frames are kept on the video stream, this is what
+// IsConstantFrameRate relies on. Frames come out of the decoder in presentation order. A frame
+// without a time (some formats do not provide it, AVI for example) breaks the chain: the next
+// duration measured is the one between the two frames following it.
 func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats FFProbeStats, err error) {
 	decoder := json.NewDecoder(report)
 	expectDelim := func(expected json.Delim) error {
@@ -178,7 +184,13 @@ func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats 
 	if err = expectDelim('{'); err != nil {
 		return
 	}
-	var highestPosition int64
+	var (
+		highestPosition   int64
+		previousTime      time.Duration
+		previousTimeKnown bool
+		shortest, longest time.Duration
+		nbDurations       int
+	)
 	for decoder.More() {
 		var key json.Token
 		if key, err = decoder.Token(); err != nil {
@@ -191,7 +203,8 @@ func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats 
 			}
 			for decoder.More() {
 				var frame struct {
-					PktPos string `json:"pkt_pos"`
+					PktPos  string `json:"pkt_pos"`
+					PtsTime string `json:"pts_time"`
 				}
 				if err = decoder.Decode(&frame); err != nil {
 					return
@@ -203,6 +216,25 @@ func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats 
 					}
 					highestPosition = position
 				}
+				// missing or "N/A" when the format does not provide it
+				seconds, parseErr := strconv.ParseFloat(frame.PtsTime, 64)
+				if parseErr != nil {
+					previousTimeKnown = false
+					continue
+				}
+				// ffprobe prints microseconds: get integers back to compare durations exactly
+				frameTime := time.Duration(math.Round(seconds*1e6)) * time.Microsecond
+				if previousTimeKnown {
+					duration := frameTime - previousTime
+					if nbDurations == 0 || duration < shortest {
+						shortest = duration
+					}
+					if nbDurations == 0 || duration > longest {
+						longest = duration
+					}
+					nbDurations++
+				}
+				previousTime, previousTimeKnown = frameTime, true
 			}
 			if err = expectDelim(']'); err != nil {
 				return
@@ -222,7 +254,12 @@ func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats 
 			}
 		}
 	}
-	err = expectDelim('}')
+	if err = expectDelim('}'); err != nil {
+		return
+	}
+	if video := stats.VideoTrack(); video != nil {
+		video.NbFrameDurations, video.ShortestFrameDuration, video.LongestFrameDuration = nbDurations, shortest, longest
+	}
 	return
 }
 
@@ -319,57 +356,61 @@ const (
 
 // FFProbeBinaryStream holds metadata for a single stream within a media file.
 type FFProbeBinaryStream struct {
-	Index              int                            `json:"index"`
-	CodecName          CodecName                      `json:"codec_name"`
-	CodecLongName      string                         `json:"codec_long_name"`
-	Profile            string                         `json:"profile,omitempty"`
-	CodecType          string                         `json:"codec_type"`
-	CodecTagString     string                         `json:"codec_tag_string"`
-	CodecTag           string                         `json:"codec_tag"`
-	Width              int                            `json:"width,omitempty"`
-	Height             int                            `json:"height,omitempty"`
-	CodedWidth         int                            `json:"coded_width,omitempty"`  // need -count_frames to be populated
-	CodedHeight        int                            `json:"coded_height,omitempty"` // need -count_frames to be populated
-	ClosedCaptions     int                            `json:"closed_captions,omitempty"`
-	FilmGrain          int                            `json:"film_grain,omitempty"`
-	HasBFrames         int                            `json:"has_b_frames,omitempty"`
-	SampleAspectRatio  string                         `json:"sample_aspect_ratio,omitempty"`
-	DisplayAspectRatio string                         `json:"display_aspect_ratio,omitempty"`
-	PixFmt             string                         `json:"pix_fmt,omitempty"`
-	Level              int                            `json:"level,omitempty"`
-	ColorRange         string                         `json:"color_range,omitempty"`
-	ColorSpace         string                         `json:"color_space,omitempty"`
-	ColorTransfer      string                         `json:"color_transfer,omitempty"`
-	ColorPrimaries     string                         `json:"color_primaries,omitempty"`
-	ChromaLocation     string                         `json:"chroma_location,omitempty"`
-	FieldOrder         string                         `json:"field_order,omitempty"`
-	Refs               int                            `json:"refs,omitempty"`
-	RFrameRate         string                         `json:"r_frame_rate"`
-	AvgFrameRate       string                         `json:"avg_frame_rate"`
-	TimeBase           string                         `json:"time_base"`
-	StartPts           int                            `json:"start_pts"`
-	StartTime          string                         `json:"start_time"`
-	BitRate            string                         `json:"bit_rate,omitempty"`
-	MaxBitRate         string                         `json:"max_bit_rate,omitempty"` // need -count_frames to appear (only on video stream)
-	NbFrames           int                            `json:"nb_frames"`
-	NbReadFrames       int                            `json:"-"` // need -count_frames to appear
-	ExtradataSize      int                            `json:"extradata_size,omitempty"`
-	Disposition        FFProbeBinaryStreamDisposition `json:"disposition"`
-	Tags               map[string]string              `json:"tags"`
-	SideDataList       []FFProbeBinaryDataType        `json:"side_data_list,omitempty"`
-	SampleFmt          string                         `json:"sample_fmt,omitempty"`
-	SampleRate         string                         `json:"sample_rate,omitempty"`
-	Channels           int                            `json:"channels,omitempty"`
-	ChannelLayout      string                         `json:"channel_layout,omitempty"`
-	BitsPerSample      int                            `json:"bits_per_sample,omitempty"`
-	DmixMode           string                         `json:"dmix_mode,omitempty"`
-	LtrtCmixlev        string                         `json:"ltrt_cmixlev,omitempty"`
-	LtrtSurmixlev      string                         `json:"ltrt_surmixlev,omitempty"`
-	LoroCmixlev        string                         `json:"loro_cmixlev,omitempty"`
-	LoroSurmixlev      string                         `json:"loro_surmixlev,omitempty"`
-	DurationTs         int                            `json:"duration_ts,omitempty"`
-	Duration           string                         `json:"duration,omitempty"`
-	InitialPadding     int                            `json:"initial_padding,omitempty"`
+	Index              int       `json:"index"`
+	CodecName          CodecName `json:"codec_name"`
+	CodecLongName      string    `json:"codec_long_name"`
+	Profile            string    `json:"profile,omitempty"`
+	CodecType          string    `json:"codec_type"`
+	CodecTagString     string    `json:"codec_tag_string"`
+	CodecTag           string    `json:"codec_tag"`
+	Width              int       `json:"width,omitempty"`
+	Height             int       `json:"height,omitempty"`
+	CodedWidth         int       `json:"coded_width,omitempty"`  // need -count_frames to be populated
+	CodedHeight        int       `json:"coded_height,omitempty"` // need -count_frames to be populated
+	ClosedCaptions     int       `json:"closed_captions,omitempty"`
+	FilmGrain          int       `json:"film_grain,omitempty"`
+	HasBFrames         int       `json:"has_b_frames,omitempty"`
+	SampleAspectRatio  string    `json:"sample_aspect_ratio,omitempty"`
+	DisplayAspectRatio string    `json:"display_aspect_ratio,omitempty"`
+	PixFmt             string    `json:"pix_fmt,omitempty"`
+	Level              int       `json:"level,omitempty"`
+	ColorRange         string    `json:"color_range,omitempty"`
+	ColorSpace         string    `json:"color_space,omitempty"`
+	ColorTransfer      string    `json:"color_transfer,omitempty"`
+	ColorPrimaries     string    `json:"color_primaries,omitempty"`
+	ChromaLocation     string    `json:"chroma_location,omitempty"`
+	FieldOrder         string    `json:"field_order,omitempty"`
+	Refs               int       `json:"refs,omitempty"`
+	RFrameRate         string    `json:"r_frame_rate"`
+	AvgFrameRate       string    `json:"avg_frame_rate"`
+	TimeBase           string    `json:"time_base"`
+	StartPts           int       `json:"start_pts"`
+	StartTime          string    `json:"start_time"`
+	BitRate            string    `json:"bit_rate,omitempty"`
+	MaxBitRate         string    `json:"max_bit_rate,omitempty"` // need -count_frames to appear (only on video stream)
+	NbFrames           int       `json:"nb_frames"`
+	NbReadFrames       int       `json:"-"` // need -count_frames to appear
+	// Measured by GetStreamsInfosCF only, see IsConstantFrameRate
+	NbFrameDurations      int                            `json:"-"` // number of durations measured (time between two consecutive frames)
+	ShortestFrameDuration time.Duration                  `json:"-"`
+	LongestFrameDuration  time.Duration                  `json:"-"`
+	ExtradataSize         int                            `json:"extradata_size,omitempty"`
+	Disposition           FFProbeBinaryStreamDisposition `json:"disposition"`
+	Tags                  map[string]string              `json:"tags"`
+	SideDataList          []FFProbeBinaryDataType        `json:"side_data_list,omitempty"`
+	SampleFmt             string                         `json:"sample_fmt,omitempty"`
+	SampleRate            string                         `json:"sample_rate,omitempty"`
+	Channels              int                            `json:"channels,omitempty"`
+	ChannelLayout         string                         `json:"channel_layout,omitempty"`
+	BitsPerSample         int                            `json:"bits_per_sample,omitempty"`
+	DmixMode              string                         `json:"dmix_mode,omitempty"`
+	LtrtCmixlev           string                         `json:"ltrt_cmixlev,omitempty"`
+	LtrtSurmixlev         string                         `json:"ltrt_surmixlev,omitempty"`
+	LoroCmixlev           string                         `json:"loro_cmixlev,omitempty"`
+	LoroSurmixlev         string                         `json:"loro_surmixlev,omitempty"`
+	DurationTs            int                            `json:"duration_ts,omitempty"`
+	Duration              string                         `json:"duration,omitempty"`
+	InitialPadding        int                            `json:"initial_padding,omitempty"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler to parse frame counts as integers.
@@ -455,21 +496,53 @@ func parseFrameRate(s string) (float64, error) {
 	return v, nil
 }
 
-// IsConstantFrameRate reports whether the stream appears to have a constant frame rate.
+// FrameDurationTolerance is how much the time between two consecutive frames can vary within a
+// constant frame rate stream, see IsConstantFrameRate.
+const FrameDurationTolerance = time.Millisecond
+
+// IsConstantFrameRate reports whether the stream has a constant frame rate. It relies on the
+// frame durations measured by GetStreamsInfosCF when they are available, on the frame rates
+// declared by the container otherwise (GetStreamsInfos: no frame is read).
 //
-// It compares r_frame_rate and avg_frame_rate from ffprobe. Both values are
-// metadata-level estimates (not ground-truth measurements), so the check is
-// intentionally conservative: unparseable or missing values are treated as VFR.
+// # WHY THE DECLARED FRAME RATES ARE NOT ENOUGH
 //
-// The old implementation used string equality, which produced false rejections
-// when the same rate was expressed differently (e.g. "24000/1001" vs "23.976024").
-// We now parse both fields as float64 and allow a small tolerance.
+// Comparing r_frame_rate with avg_frame_rate was the only check for a long time. It works
+// when the container computes its average rate out of the frames (MP4: a file with 3 seconds
+// at 24 fps then 3 seconds at 30 fps declares 120/1 and 27/1). Matroska does not: its average
+// rate comes from a header field, the very same file remuxed to Matroska declares 24/1 for
+// both and was accepted as constant. It is not harmless: the encode went fine, VMAF too (frames
+// are aligned by their index), but the output had its 30 fps part retimed to 24 fps and
+// duplicated timestamps, so a video not lasting what its audio does. Matroska is what sptenc is
+// given most of the time, and mixing 24 and 30 fps is a classic of anime DVD sources.
 //
-// Epsilon choice: the smallest gap between common *different* standard rates is
-// ~0.024 fps (24 vs 23.976). 1e-3 is 24× smaller than that gap, so it cannot
-// conflate two genuine standards, while being ~40 000× larger than the float
-// representation noise we are trying to absorb.
+// So frame durations are measured, while frames are being counted (no additional pass): a
+// stream is constant when its shortest and longest durations are within FrameDurationTolerance.
+//
+// # WHY ONE MILLISECOND
+//
+// Durations of a constant frame rate stream are not all equal: Matroska rounds timestamps to
+// the millisecond, 23.976 fps gives a mix of 41 and 42 ms. This rounding can not move a duration
+// by more than 1 ms, and it is the coarsest of the usual containers: on constant frame rate
+// samples (7 codecs, Matroska, MP4, MPEG-TS and VOB, from 23.976 to 120 fps, with B-frames,
+// interlaced ones included) the gap between the shortest and the longest duration was 1 ms at
+// most, against 9 ms for the 24/30 fps mix. A larger tolerance was rejected: at 2 ms, a mix of
+// 24 and 25 fps (41.67 and 40 ms) goes through.
+//
+// # EDGE CASES
+//
+//   - A constant frame rate stream with a hole (a frame dropped by a capture device: one
+//     duration twice as long as the others) is reported as variable. It is on purpose: nothing
+//     here knows how to keep that hole, every frame after it would be shifted.
+//   - Not enough durations measured (GetStreamsInfos, a single frame, a format without frame
+//     timestamps such as AVI): the declared frame rates are compared, as before. Both values
+//     are metadata-level estimates, so unparseable or missing ones are treated as variable.
+//     They are compared as numbers, the same rate being written in different ways ("24000/1001"
+//     and "23.976024"), with a tolerance 24 times smaller than the gap between the two closest
+//     standard rates (24 and 23.976 fps).
 func (s *FFProbeBinaryStream) IsConstantFrameRate() bool {
+	if s.NbFrameDurations > 0 {
+		return s.LongestFrameDuration-s.ShortestFrameDuration <= FrameDurationTolerance
+	}
 	r, err := parseFrameRate(s.RFrameRate)
 	if err != nil {
 		// Fail-safe: if we cannot parse the declared rate, assume VFR.

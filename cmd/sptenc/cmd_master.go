@@ -146,14 +146,23 @@ func createMaster(ctx context.Context, inputFilePath, outputFile string, inputFi
 	// count frames
 	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
 	start := time.Now()
-	totalFrames, codec, duration, err := liveCountNbFrames(ctx, inputFilePath, inputFileSize, debug)
+	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, inputFileSize, debug)
 	if err != nil {
 		err = fmt.Errorf("failed to count number of frames: %w", err)
 		return
 	}
+	totalFrames = videoInfos.NbReadFrames
 	fmt.Fprintf(liveprogress.Bypass(), "\tCounted %d %s frames in %s\n",
-		totalFrames, codec, time.Since(start).Round(time.Second),
+		totalFrames, videoInfos.CodecName, time.Since(start).Round(time.Second),
 	)
+	// The frame rates declared by the source have been checked already (checkSourceVideo), but
+	// they can not be trusted with every container: now that every frame has been read, check
+	// how long they really last (see FFProbeBinaryStream.IsConstantFrameRate).
+	if !videoInfos.IsConstantFrameRate() {
+		err = fmt.Errorf("variable frame rate (VFR) content is not supported: frames last from %s to %s while the source declares a constant frame rate (%s fps)",
+			videoInfos.ShortestFrameDuration, videoInfos.LongestFrameDuration, videoInfos.RFrameRate)
+		return
+	}
 	// ffv1 encode
 	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
 	start = time.Now()
