@@ -18,9 +18,9 @@ const (
 
 // Logger emits debug, warning, and error output during QP search.
 type Logger interface {
-	Debug(format string, a ...any)
-	Warning(format string, a ...any)
-	Error(err error)
+	Debug(workerID int, format string, a ...any)
+	Warning(workerID int, format string, a ...any)
+	Error(workerID int, err error)
 }
 
 // SegmentLifecycle marks the boundaries of a single segment's search.
@@ -123,31 +123,6 @@ func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
 	}
 }
 
-// workerLogWrapper delegates all QPSearchCallbacks methods to an inner implementation
-// but conditionally prefixes Debug and Error messages with the worker ID only when
-// there is more than one concurrent worker. This keeps single-worker logs clean.
-type workerLogWrapper struct {
-	QPSearchCallbacks
-	workerID     int
-	totalWorkers int
-}
-
-func (w workerLogWrapper) Debug(format string, a ...any) {
-	if w.totalWorkers > 1 {
-		w.QPSearchCallbacks.Debug("[worker %d] "+format, append([]any{w.workerID}, a...)...)
-	} else {
-		w.QPSearchCallbacks.Debug(format, a...)
-	}
-}
-
-func (w workerLogWrapper) Error(err error) {
-	if w.totalWorkers > 1 {
-		w.QPSearchCallbacks.Error(fmt.Errorf("[worker %d] %w", w.workerID, err))
-	} else {
-		w.QPSearchCallbacks.Error(err)
-	}
-}
-
 type job struct {
 	segment int
 	path    string
@@ -195,13 +170,12 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 				segmentNbAttempts int
 				bestEffort        bool
 			)
-			wcb := workerLogWrapper{QPSearchCallbacks: scb, workerID: wID, totalWorkers: config.NbConcurrentSegments}
 			return func() (err error) {
 				for job := range jobs {
-					wcb.OnSegmentStart(wID, job.segment, job.path)
+					scb.OnSegmentStart(wID, job.segment, job.path)
 					// Find this segment QP
 					if segmentQP, segmentFrames, segmentNbAttempts, bestEffort, segmentDuration, err =
-						findSegmentQP(workerCtx, wcb, config, wID, job.segment, job.path); err != nil {
+						findSegmentQP(workerCtx, scb, config, wID, job.segment, job.path); err != nil {
 						err = fmt.Errorf("failed to find the right encoding QP for segment %d: %w", job.segment, err)
 						return
 					}
@@ -264,7 +238,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, segment int, segmentPath string) (
 	finalQP, segmentFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
-	scb.Debug("Segment %d: Search for the right QP", segment)
+	scb.Debug(workerID, "Segment %d: Search for the right QP", segment)
 	// Prepare
 	videoTrack, err := getStreamsInfosCF(ctx, scb, config, workerID, segmentPath)
 	if err != nil {
@@ -298,7 +272,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 			err = fmt.Errorf("final segment has %d frames instead of %d", segmentFrames, totalFrames)
 			return
 		}
-		scb.Debug("Final segment has %d frames, as original GOP.", segmentFrames)
+		scb.Debug(workerID, "Final segment has %d frames, as original GOP.", segmentFrames)
 	}()
 	// Search
 	var testedQPs []int
@@ -311,7 +285,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 				}
 				invalidQPPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, testedQP))
 				if err := os.Remove(invalidQPPath); err != nil {
-					scb.Error(fmt.Errorf("Failed to remove %s: %s", shellescape.Quote(invalidQPPath), err))
+					scb.Error(workerID, fmt.Errorf("Failed to remove %s: %s", shellescape.Quote(invalidQPPath), err))
 				}
 			}
 		}()
@@ -321,7 +295,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		return
 	}
 	if bestEffort {
-		scb.Warning("Segment %d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment+1)
+		scb.Warning(workerID, "Segment %d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment+1)
 	}
 	return
 }
@@ -341,8 +315,10 @@ func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	return config.Encoder.ProbeStream(ctx, filePath, func(bytesRead int64) {
 		scb.OnSegmentAnalysisProgress(workerID, bytesRead)
 	}, func(s string) {
-		scb.Debug(s)
-	}, scb.Error)
+		scb.Debug(workerID, s)
+	}, func(err error) {
+		scb.Error(workerID, err)
+	})
 }
 
 // searchSegmentQP finds the highest valid QP (smallest file) for a segment.
@@ -366,7 +342,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 	testedQPs = make([]int, 0, qpMax-qpMin+1) // ordered
 	results := make(map[int]VMAFStats, qpMax-qpMin+1)
 	defer func() {
-		scb.Debug("QPs tested: %+v", testedQPs)
+		scb.Debug(workerID, "QPs tested: %+v", testedQPs)
 	}()
 	// Search loop
 	var (
@@ -389,7 +365,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			// If stats are out of the encoder range, the encode fails fast. Rotten data is
 			// caught cheaply - no need to defensively clamp.
 			candidateQP = mean
-			scb.Debug("Searching for QP in range [%d, %d] with %d as first candidate", bestValid, firstInvalid, candidateQP)
+			scb.Debug(workerID, "Searching for QP in range [%d, %d] with %d as first candidate", bestValid, firstInvalid, candidateQP)
 		} else if !(bestValidTested && firstInvalidTested) {
 			// Step 2: close the range. A valid result raises bestValid; an invalid one lowers firstInvalid.
 			// This leaves one bound at its original extreme, signaling which direction to search.
@@ -426,7 +402,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 			// A valid QP is not optimal until the next higher QP is confirmed invalid.
 			// The boundary must be found, not just any valid point.
 			if vmafStats, found = results[candidateQP]; found {
-				scb.Debug("Predicted candidate %d already computed (valid: %t)", candidateQP, config.Auditor.Validate(vmafStats))
+				scb.Debug(workerID, "Predicted candidate %d already computed (valid: %t)", candidateQP, config.Auditor.Validate(vmafStats))
 				// We already computed this candidate, let's think this thru
 				if config.Auditor.Validate(vmafStats) {
 					if candidateQP == qpMax {
@@ -449,7 +425,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 								return
 							}
 							// else continue to go up
-							scb.Debug("Looking up: candidate %d already computed (valid: %t)", i, true)
+							scb.Debug(workerID, "Looking up: candidate %d already computed (valid: %t)", i, true)
 						} else {
 							// we found a candidate for smaller size that we did not compute yet
 							candidateQP = i
@@ -480,7 +456,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 								return
 							}
 							// else continue to go down
-							scb.Debug("Looking down: candidate %d already computed (valid: %t)", i, false)
+							scb.Debug(workerID, "Looking down: candidate %d already computed (valid: %t)", i, false)
 						} else {
 							// we found a candidate for better quality that we did not compute yet
 							candidateQP = i
@@ -489,7 +465,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 					}
 				}
 			} else {
-				scb.Debug("Predicted candidate %d selected for computation", candidateQP)
+				scb.Debug(workerID, "Predicted candidate %d selected for computation", candidateQP)
 			}
 		}
 		// Test candidate and narrow the search
@@ -512,7 +488,9 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]VMAFStats) (
 	candidateQP int, err error) {
-	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, scb.Debug)
+	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, func(format string, a ...any) {
+		scb.Debug(workerID, format, a...)
+	})
 	if err != nil {
 		err = fmt.Errorf("failed to create predicator: %w", err)
 		return
@@ -536,7 +514,7 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 		}
 	}
 	// Nothing in the bracket validated, fall back to the known-good bestValid.
-	scb.Debug("No candidate found in range %d-%d, returning %d", bestValid, firstInvalid, candidateQP)
+	scb.Debug(workerID, "No candidate found in range %d-%d, returning %d", bestValid, firstInvalid, candidateQP)
 	return
 }
 
@@ -549,8 +527,10 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 	encodeErr := config.Encoder.Encode(ctx, input, output, qp, videoTrack, func(stats ProgressStats) {
 		scb.OnSegmentEncodeProgress(workerID, stats)
 	}, func(msg string) {
-		scb.Debug(msg)
-	}, scb.Error)
+		scb.Debug(workerID, msg)
+	}, func(err error) {
+		scb.Error(workerID, err)
+	})
 	scb.OnSegmentEncodeStop(workerID)
 	if encodeErr != nil {
 		err = fmt.Errorf("failed to encode segment: %w", encodeErr)
@@ -561,13 +541,15 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 	vmafStats, vmafErr := config.Encoder.ComputeVMAF(ctx, input, output, videoTrack, func(stats ProgressStats) {
 		scb.OnSegmentVMAFProgress(workerID, stats)
 	}, func(msg string) {
-		scb.Debug(msg)
-	}, scb.Error)
+		scb.Debug(workerID, msg)
+	}, func(err error) {
+		scb.Error(workerID, err)
+	})
 	scb.OnSegmentVMAFStop(workerID)
 	if vmafErr != nil {
 		err = fmt.Errorf("failed to compute VMAF for segment: %w", vmafErr)
 		return
 	}
-	scb.Debug("Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
+	scb.Debug(workerID, "Segment %d: QP %d: VMAF results:\n%s", segment, qp, vmafStats)
 	return
 }

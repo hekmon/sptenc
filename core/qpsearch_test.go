@@ -158,9 +158,9 @@ func (m *mockStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) 
 // mockCallbacks satisfies QPSearchCallbacks for tests.
 type mockCallbacks struct{}
 
-func (m *mockCallbacks) Debug(format string, a ...any)                                 {}
-func (m *mockCallbacks) Warning(format string, a ...any)                               {}
-func (m *mockCallbacks) Error(err error)                                               {}
+func (m *mockCallbacks) Debug(workerID int, format string, a ...any)                   {}
+func (m *mockCallbacks) Warning(workerID int, format string, a ...any)                 {}
+func (m *mockCallbacks) Error(workerID int, err error)                                 {}
 func (m *mockCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {}
 func (m *mockCallbacks) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
 }

@@ -424,18 +424,31 @@ func (to *LiveQPSearch) Stop() {
 // Debug, Warning and Error are safe for concurrent use: liveprogress.Bypass()
 // serializes writes internally with a mutex, so interleaved output is not possible.
 
-func (to *LiveQPSearch) Debug(format string, a ...any) {
-	if to.PrintDebug {
+func (to *LiveQPSearch) Debug(workerID int, format string, a ...any) {
+	if !to.PrintDebug {
+		return
+	}
+	if to.Concurrency > 1 {
+		fmt.Fprintln(liveprogress.Bypass(), fmt.Sprintf("[worker %d] DEBUG: ", workerID)+fmt.Sprintf(format, a...))
+	} else {
 		fmt.Fprintln(liveprogress.Bypass(), "DEBUG: "+fmt.Sprintf(format, a...))
 	}
 }
 
-func (to *LiveQPSearch) Warning(format string, a ...any) {
-	fmt.Fprintln(liveprogress.Bypass(), "WARNING: "+fmt.Sprintf(format, a...))
+func (to *LiveQPSearch) Warning(workerID int, format string, a ...any) {
+	if to.Concurrency > 1 {
+		fmt.Fprintln(liveprogress.Bypass(), fmt.Sprintf("[worker %d] WARNING: ", workerID)+fmt.Sprintf(format, a...))
+	} else {
+		fmt.Fprintln(liveprogress.Bypass(), "WARNING: "+fmt.Sprintf(format, a...))
+	}
 }
 
-func (to *LiveQPSearch) Error(err error) {
-	fmt.Fprintln(liveprogress.Bypass(), "ERROR: "+err.Error())
+func (to *LiveQPSearch) Error(workerID int, err error) {
+	if to.Concurrency > 1 {
+		fmt.Fprintln(liveprogress.Bypass(), fmt.Sprintf("[worker %d] ERROR: ", workerID)+err.Error())
+	} else {
+		fmt.Fprintln(liveprogress.Bypass(), "ERROR: "+err.Error())
+	}
 }
 
 func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {
