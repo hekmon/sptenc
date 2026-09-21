@@ -26,6 +26,7 @@ type cacheEntry struct {
 	runs     int
 	segments int
 	meanQP   float64
+	stddevQP float64
 	size     int64
 	modified time.Time
 }
@@ -88,8 +89,7 @@ var cacheListCommand = &cli.Command{
 				},
 			}),
 		)
-		t.Header("Encoder", "Model", "Profile", "VMAF Thresholds", "Runs", "Segments", "Mean QP", "Size", "Modified")
-
+		t.Header("Encoder", "Model", "Profile", "VMAF Thresholds", "Runs", "Segments", "Mean QP", "Stddev QP", "Size", "Modified")
 		for _, e := range entries {
 			profile := e.identity.CacheProfile
 			if profile == "" {
@@ -101,8 +101,10 @@ var cacheListCommand = &cli.Command{
 			}
 			thresholdStr := formatThresholdsCompact(e.identity.Profile)
 			meanQPStr := "-"
+			stddevQPStr := "-"
 			if e.runs > 0 {
 				meanQPStr = strconv.FormatFloat(e.meanQP, 'f', 1, 64)
+				stddevQPStr = strconv.FormatFloat(e.stddevQP, 'f', 1, 64)
 			}
 			t.Append([]string{
 				e.identity.Encoder,
@@ -112,11 +114,13 @@ var cacheListCommand = &cli.Command{
 				strconv.Itoa(e.runs),
 				strconv.Itoa(e.segments),
 				meanQPStr,
+				stddevQPStr,
 				fmt.Sprint(cunits.ImportInBytes(float64(e.size))),
 				humanTime(e.modified),
 			})
 		}
 		t.Render()
+		fmt.Println()
 		fmt.Println(buf.String())
 		return nil
 	},
@@ -219,7 +223,6 @@ func loadCacheEntries(dir string) ([]cacheEntry, error) {
 		}
 		return nil, fmt.Errorf("failed to read cache directory: %w", err)
 	}
-
 	var result []cacheEntry
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -229,50 +232,52 @@ func loadCacheEntries(dir string) ([]cacheEntry, error) {
 		if !strings.HasPrefix(name, core.CacheFilePrefix) || !strings.HasSuffix(name, core.CacheFileExtension) {
 			continue
 		}
-
 		identity, ok := core.ParseCacheFilename(name)
 		if !ok {
 			continue
 		}
 		fullPath := filepath.Join(dir, name)
-
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-
 		e := cacheEntry{
 			identity: identity,
 			filename: fullPath,
 			size:     info.Size(),
 			modified: info.ModTime(),
 		}
-
 		// Read JSON contents
-		_ = readCacheStats(fullPath, &e)
-
+		if err := readCacheStats(fullPath, &e); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read cache %s: %v\n", name, err)
+			continue
+		}
 		result = append(result, e)
 	}
 	return result, nil
 }
 
-// readCacheStats populates runs, segments and meanQP from the JSON file.
+// readCacheStats populates runs, segments, meanQP and stddevQP from the JSON file.
 func readCacheStats(path string, e *cacheEntry) error {
 	runs, err := core.LoadRunStats(path)
 	if err != nil {
 		return err
 	}
-
 	e.runs = len(runs)
-	var totalWeight int
-	var weightedMean float64
+	var (
+		totalWeight    int
+		weightedMean   float64
+		weightedStdDev float64
+	)
 	for _, r := range runs {
 		totalWeight += r.Weight
 		weightedMean += r.Mean * float64(r.Weight)
+		weightedStdDev += r.StdDev * float64(r.Weight)
 	}
 	e.segments = totalWeight
 	if totalWeight > 0 {
 		e.meanQP = weightedMean / float64(totalWeight)
+		e.stddevQP = weightedStdDev / float64(totalWeight)
 	}
 	return nil
 }
