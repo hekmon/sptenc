@@ -629,11 +629,15 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 	minQP, maxQP := results.GetMinMaxQPs()
 	fmt.Fprintf(bypass, "\t***\n\tSegments QP range: [%d,%d]\n", minQP, maxQP)
 	if results.NbBestEfforts > 0 {
+		// Best effort stops at the lowest QP of the encoder, which is not 0 for all of them
+		qpMin, _, _ := encoder.QPRange()
 		if results.NbBestEfforts == 1 {
-			fmt.Fprintln(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.")
+			fmt.Fprintf(bypass, "WARNING: 1 segment was encoded with best effort, stopping at QP %d but not validating VMAF config. Please check the logs.\n",
+				qpMin,
+			)
 		} else {
-			fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP 0 but not validating VMAF config. Please check the logs.\n",
-				results.NbBestEfforts,
+			fmt.Fprintf(bypass, "WARNING: %d segments were encoded with best effort, stopping at QP %d but not validating VMAF config. Please check the logs.\n",
+				results.NbBestEfforts, qpMin,
 			)
 		}
 	}
