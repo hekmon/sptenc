@@ -174,6 +174,10 @@ var splitCommand = &cli.Command{
 		}); err != nil {
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
+		// reject what encode would reject later, before spending the time and the disk space
+		if _, err = checkSourceVideo(stats); err != nil {
+			return
+		}
 		duration := stats.Format.Duration
 		fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
 			shellescape.Quote(filepath.Base(inputFilePath)),

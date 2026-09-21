@@ -105,6 +105,14 @@ var masterCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to access input file: %w", err)
 		}
+		// reject what encode would reject later, before spending the time and the disk space
+		sourceStats, err := getStreamsInfos(ctx, inputFilePath, cmd.Bool(debugFlagName))
+		if err != nil {
+			return fmt.Errorf("failed to probe input file: %w", err)
+		}
+		if _, err = checkSourceVideo(sourceStats); err != nil {
+			return
+		}
 		fmt.Printf("Creating a master of %s (%s)\n",
 			shellescape.Quote(filepath.Base(inputFilePath)),
 			cunits.ImportInBytes(float64(fileInfos.Size())),

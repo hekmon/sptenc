@@ -316,16 +316,7 @@ var encodeCommand = &cli.Command{
 			if sourceStats, err = getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err != nil {
 				return fmt.Errorf("failed to probe input file: %w", err)
 			}
-			videoStream = sourceStats.VideoTrack()
-			if videoStream == nil {
-				err = errors.New("no video stream found in source")
-				return
-			}
-			if !videoStream.IsConstantFrameRate() {
-				err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
-				return
-			}
-			if err = checkProgressive(videoStream); err != nil {
+			if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 				return
 			}
 			totalDuration = sourceStats.Format.Duration
@@ -403,17 +394,9 @@ var encodeCommand = &cli.Command{
 			}
 			fmt.Fprintf(bypass, "\tTotal duration of segments: %s\n", totalDuration)
 		}
-		// Validate video stream presence and reject VFR content
-		videoStream = sourceStats.VideoTrack()
-		if videoStream == nil {
-			err = errors.New("no video stream found in source")
-			return
-		}
-		if !videoStream.IsConstantFrameRate() {
-			err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
-			return
-		}
-		if err = checkProgressive(videoStream); err != nil {
+		// Validate the video stream (both kinds of input end up here: the first segment stands
+		// for the others with a directory)
+		if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 			return
 		}
 

@@ -420,14 +420,8 @@ var batchsearchCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get source stream info: %w", err)
 		}
-		videoStream := sourceStats.VideoTrack()
-		if videoStream == nil {
-			return errors.New("no video stream found in source")
-		}
-		if !videoStream.IsConstantFrameRate() {
-			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
-		}
-		if err = checkProgressive(videoStream); err != nil {
+		videoStream, err := checkSourceVideo(sourceStats)
+		if err != nil {
 			return err
 		}
 		totalDuration := sourceStats.Format.Duration

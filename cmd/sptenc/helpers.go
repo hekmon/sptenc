@@ -43,6 +43,30 @@ func checkMKVPropEdit(ctx context.Context) error {
 	return nil
 }
 
+// checkSourceVideo returns the video stream sptenc is going to work on, or the reason why it
+// can not: no video stream at all, a variable frame rate or interlaced content.
+//
+// # WHY EVERY COMMAND READING A SOURCE GOES THROUGH IT, NOT ONLY THE ENCODING ONES
+//
+// master and split do not compute any VMAF nor encode anything, and did not check anything:
+// they produce what encode takes as input. A master or a set of segments made out of an
+// unsupported source was only rejected once given to encode, after the time and the disk space
+// (a lossless master is large) had been spent. The master keeps the properties of its source
+// (checked: an interlaced source gives a master declared as interlaced), so the verdict is the
+// same at both ends: better to give it first.
+func checkSourceVideo(stats ffmpeg.FFProbeStats) (videoStream *ffmpeg.FFProbeBinaryStream, err error) {
+	if videoStream = stats.VideoTrack(); videoStream == nil {
+		return nil, errors.New("no video stream found in source")
+	}
+	if !videoStream.IsConstantFrameRate() {
+		return nil, errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+	}
+	if err = checkProgressive(videoStream); err != nil {
+		return nil, err
+	}
+	return
+}
+
 // checkProgressive rejects a video stream declared as interlaced.
 //
 // # WHY INTERLACED CONTENT IS REJECTED AND NOT DEINTERLACED
