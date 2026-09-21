@@ -29,8 +29,18 @@ import (
 // Flag names and defaults for batchsearch-specific flags.
 const (
 	finalEncodeFlagName = "final-encode"
-	strikesFlagName     = "strikes"
-	strikesMinimum      = 3
+	// finalConcurrentSegmentsFlagName is the --concurrent-segments of the final encode.
+	//
+	// # WHY A FLAG OF ITS OWN
+	//
+	// The search and the final encode do not run on the same hardware: --concurrent-segments is
+	// chosen for the search encoder, the number of sessions a GPU accepts most of the time. It
+	// says nothing about how many encodes the CPU can take. Reusing it for the final encode, as
+	// is or through some rule (half of it, the number of cores...), would be a guess on a
+	// machine we know nothing about, with no way for the user to fix it.
+	finalConcurrentSegmentsFlagName = "final-concurrent-segments"
+	strikesFlagName                 = "strikes"
+	strikesMinimum                  = 3
 )
 
 var (
@@ -137,7 +147,8 @@ var batchsearchCommand = &cli.Command{
 		"    a many-core CPU fully busy. On a 16 cores / 32 threads CPU, libx265 at 1080p encoded 26% more\n" +
 		"    frames per second with 2 concurrent segments, and up to 46% more with 3 and --" + vmafCUDAFlagName + ".\n" +
 		"    Expect less with fewer cores or bigger pictures, and mind the memory with 4K content.\n" +
-		"This flag only applies to the search: the final encode (--" + finalEncodeFlagName + ") runs one segment at a time.\n\n" +
+		"This flag only applies to the search: the final encode (--" + finalEncodeFlagName + ") has its own,\n" +
+		"--" + finalConcurrentSegmentsFlagName + ", as they do not run on the same hardware.\n\n" +
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
 		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
@@ -147,6 +158,10 @@ var batchsearchCommand = &cli.Command{
 		"though it may not be exactly optimal.\n\n" +
 		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op: the search\n" +
 		"result already comes from the encoder of the final file.\n\n" +
+		"The final encode searches one segment at a time by default. --" + finalConcurrentSegmentsFlagName + " raises\n" +
+		"it, the same way --" + concurrentSegmentsFlagName + " does for the search (see CONCURRENT ENCODING for what\n" +
+		"to expect from a CPU encoder). Being the longest encode of the whole process, it is the one\n" +
+		"gaining the most from it.\n\n" +
 		"CACHE ISOLATION\n" +
 		"By default all encodes for the same encoder + VMAF profile combo share a single QP history cache.\n" +
 		"If you encode content with wildly different visual characteristics (e.g. grainy film vs. clean CGI),\n" +
@@ -169,6 +184,13 @@ var batchsearchCommand = &cli.Command{
 				Usage:    "Run a final CPU encode after GPU search (no-op if search encoder is already CPU).",
 				Value:    false,
 				OnlyOnce: true,
+			},
+			&cli.IntFlag{
+				Name:      finalConcurrentSegmentsFlagName,
+				Usage:     "Number of segments to search and encode in parallel during the final encode",
+				Value:     1,
+				OnlyOnce:  true,
+				Validator: validateConcurrentSegments,
 			},
 			&cli.StringFlag{
 				Name:     cacheProfileFlagName,
@@ -231,6 +253,17 @@ var batchsearchCommand = &cli.Command{
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
+		}
+		// A final encode concurrency without any final encode to come is a mistake: better
+		// to say so now than to let the user believe it has been taken into account
+		if cmd.IsSet(finalConcurrentSegmentsFlagName) {
+			if !cmd.Bool(finalEncodeFlagName) {
+				return ctx, fmt.Errorf("--%s has no effect without --%s", finalConcurrentSegmentsFlagName, finalEncodeFlagName)
+			}
+			if _, alreadyCPU := ffmpeg.GetCPURelative(ffmpeg.Encoder(requestedEncoder)); alreadyCPU {
+				return ctx, fmt.Errorf("--%s has no effect: %s is already a CPU encoder, there will be no final encode. Use --%s",
+					finalConcurrentSegmentsFlagName, requestedEncoder, concurrentSegmentsFlagName)
+			}
 		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
@@ -372,7 +405,8 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
 		if finalEncoder != "" {
-			fmt.Fprintf(bypass, "\t• once the best threshold is found, a final encoding will be performed with %s\n", finalEncoder)
+			fmt.Fprintf(bypass, "\t• once the best threshold is found, a final encoding will be performed with %s (%d concurrent segments)\n",
+				finalEncoder, cmd.Int(finalConcurrentSegmentsFlagName))
 		}
 		fmt.Fprintf(bypass, "\nEach segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 
@@ -614,11 +648,9 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Run QP search with final encoder
-			// The final encode runs one segment at a time: --concurrent-segments has been chosen
-			// for the search encoder (a GPU one most of the time), it says nothing about what
-			// the CPU can take.
+			// Not --concurrent-segments: see finalConcurrentSegmentsFlagName
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
-				vmafAuditor, finalStatsCache, finalEncoderAdapter, 1, cmd.Bool(debugFlagName))
+				vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Int(finalConcurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}
