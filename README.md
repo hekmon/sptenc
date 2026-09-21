@@ -27,7 +27,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 
 ## Key Features
 
-- 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level, not just a CRF or bitrate target
+- 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level as measured by VMAF, not just a CRF or bitrate target (see [what VMAF does not see](#what-vmaf-does-not-see))
 - 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
 - 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
 - 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmaf-neg` for upscaled/denoised/sharpened sources (recommended)
@@ -210,7 +210,7 @@ Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scen
 
 The model is **automatically selected** based on input resolution. Use `--vmaf-neg` when the source has been upscaled, sharpened, or denoised: NEG models are designed so that enhancement-based processing (sharpening, upscaling filters) does not inflate the score, whereas standard models can over-score such content.
 
-> **Note:** NEG stands for **No Enhancement Gain**. The standard `vmaf_v0.6.1` model predicts the viewing condition of a **1080p HDTV at 3 picture heights**, and `vmaf_4k_v0.6.1` that of a **4K TV at 1.5 picture heights** — keep this in mind when interpreting scores for other display formats. See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models.md#disabling-enhancement-gain-neg-mode) for details.
+> **Note:** NEG stands for **No Enhancement Gain**. The standard `vmaf_v0.6.1` model predicts the viewing condition of a **1080p HDTV at 3 picture heights**, and `vmaf_4k_v0.6.1` that of a **4K TV at 1.5 picture heights** — keep this in mind when interpreting scores for other display formats. See the [VMAF documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models_v0.md#disabling-enhancement-gain-neg-mode) for details.
 
 ### Quality Score Reference
 
@@ -226,6 +226,17 @@ VMAF scores are relative to the viewing conditions the models were trained on (1
 See [StreamingLearningCenter — Optimal encoding ladder with VMAF](https://streaminglearningcenter.com/encoding/optimal_encoding_ladder_vmaf.html) and [Netflix via StreamingLearningCenter — Just Noticeable Difference](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html).
 
 Intermediate bands commonly cited elsewhere (e.g. "80–90 = good quality with minor artifacts", "70–80 = medium quality") are editorial interpolations between these anchors, not verbatim quotes from a verifiable source — we intentionally do not print them here.
+
+### What VMAF does not see
+
+Every guarantee sptenc makes is a guarantee on a VMAF score: it is worth what the metric is worth. VMAF is a good predictor of perceived quality for what it was built for, compression and scaling artifacts on the picture structure, but it is blind to some defects. The first two are easy to reproduce with the `vmaf` command:
+
+- **Color.** Only the luma plane is measured. A fully desaturated (grayscale) copy of a colorful video gets exactly the score of the video compared with itself, with the standard model and the NEG one alike. So does a copy with shifted hues, or with heavily blurred chroma. A defect only affecting the chroma planes can not fail a segment. In practice encoders quantize luma and chroma together, so a segment passing on luma is not expected to be damaged on chroma: this is an expectation, not something sptenc verifies.
+- **Banding.** A smooth dark gradient reduced to 5 luma levels across the whole picture, as posterized as it gets, scores 100 with the standard model (more than the untouched gradient compared with itself: the added edges count as an enhancement) and still 92.5 with the NEG model. Banding has its own detector in libvmaf ([CAMBI](https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md)), which sptenc does not use. The mandatory 10-bit output is there to avoid creating banding in the first place, not to detect it.
+- **What happens between frames.** Frames are scored one by one, then the scores are pooled. A quality changing from a frame to the next (flicker, keyframe pulsing) is not judged as such, only the score of each frame is. The [VMAF FAQ](https://github.com/Netflix/vmaf/blob/master/resource/doc/faq.md) itself points out that viewers weigh the worst frames more than an arithmetic mean does: this is why the default gate is the harmonic mean, and why percentiles and minimum gates exist.
+- **HDR.** The [models documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/models_v0.md) only describes SDR viewing conditions. sptenc computes VMAF on HDR sources as on any other, without any tone mapping: take these scores as an indication, not as a validated measure.
+
+If your content is exposed to one of these (dark gradients, saturated animation, HDR), have a look at a few segments yourself before trusting the numbers and deleting a source.
 
 ### sptenc thresholds
 
