@@ -1,6 +1,81 @@
 package ffmpeg
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+// Real (shortened) ffprobe n9.0.2 report. The first frame comes with a side data list nobody
+// asked for, positions are not strictly increasing and one is not available.
+const probeWithFramesReport = `{
+    "frames": [
+        { "pkt_pos": "715",
+            "side_data_list": [
+                {  }
+            ] },
+        { "pkt_pos": "8251" },
+        { "pkt_pos": "14418" },
+        { "pkt_pos": "11112" },
+        { "pkt_pos": "N/A" },
+        { "pkt_pos": "17334" }
+    ],
+    "programs": [
+    ],
+    "streams": [
+        { "index": 0, "codec_name": "h264", "codec_type": "video", "width": 160, "height": 90, "r_frame_rate": "24000/1001", "avg_frame_rate": "24000/1001", "nb_frames": "1439", "nb_read_frames": "1439", "disposition": { "default": 1 } }
+    ],
+    "format": { "filename": "src.mp4", "nb_streams": 2, "format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "60.059000", "size": "4645425" }
+}`
+
+func TestParseProbeWithFrames(t *testing.T) {
+	var reports []int
+	stats, err := parseProbeWithFrames(strings.NewReader(probeWithFramesReport), func(n int) {
+		reports = append(reports, n)
+	})
+	if err != nil {
+		t.Fatalf("parseProbeWithFrames failed: %v", err)
+	}
+	// Progress: only a new highest position counts, and the sum is the highest position
+	expectedReports := []int{715, 7536, 6167, 2916}
+	if len(reports) != len(expectedReports) {
+		t.Fatalf("expected reports %v, got %v", expectedReports, reports)
+	}
+	for i := range expectedReports {
+		if reports[i] != expectedReports[i] {
+			t.Errorf("report %d: expected %d, got %d", i, expectedReports[i], reports[i])
+		}
+	}
+	// The usual sections must be parsed as they are without the frames
+	video := stats.VideoTrack()
+	if video == nil {
+		t.Fatal("expected a video track")
+	}
+	if video.NbReadFrames != 1439 || video.CodecName != CodecVideoAVC || video.RFrameRate != "24000/1001" {
+		t.Errorf("unexpected video track: %+v", video)
+	}
+	if stats.Format == nil || stats.Format.Duration != 60059*time.Millisecond {
+		t.Errorf("unexpected format: %+v", stats.Format)
+	}
+	// No progress callback must not be an issue
+	if _, err = parseProbeWithFrames(strings.NewReader(probeWithFramesReport), nil); err != nil {
+		t.Errorf("parseProbeWithFrames failed without progress callback: %v", err)
+	}
+}
+
+func TestParseProbeWithFrames_Invalid(t *testing.T) {
+	for name, report := range map[string]string{
+		"empty":     ``,
+		"truncated": `{ "frames": [ { "pkt_pos": "715" }, `,
+		"not json":  `[mov,mp4 @ 0x55] stream 1, offset 0x30: partial file`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseProbeWithFrames(strings.NewReader(report), nil); err == nil {
+				t.Error("expected an error, got nil")
+			}
+		})
+	}
+}
 
 // TestIsConstantFrameRate verifies the numeric CFR heuristic.
 //

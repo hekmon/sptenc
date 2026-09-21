@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -69,8 +68,28 @@ type GetStreamsInfosCFConfig struct {
 	ReadBytesReport func(n int)
 }
 
-// GetStreamsInfosCF runs ffprobe with -count_frames to extract complete stream metadata,
-// including per-frame counts, reading the file through the provided path.
+// GetStreamsInfosCF runs ffprobe with -count_frames to get the exact number of frames of the
+// first video stream: it is decoded entirely, which can be long. Only that stream is returned
+// (along with the format): it is the one the master is made of, and the only one callers need.
+//
+// # WHY FFPROBE IS GIVEN THE PATH AND NOT THE FILE CONTENT ON ITS STANDARD INPUT
+//
+// The file used to be opened here and sent to ffprobe through its standard input, as counting
+// the bytes going through was a cheap way to report progress. But a pipe can not be seeked, and
+// some files can not be read without seeking: a MP4 file with its index at the end, which is what
+// ffmpeg and most cameras write by default, is one of them. ffprobe then complains on its
+// standard error output but still exits with a success and no frames count at all. It was read
+// as a count of 0, nothing noticed until the frames count verification before the final VMAF,
+// once everything had been encoded. Given the path, ffprobe reads the file the way ffmpeg will.
+//
+// Progress now comes from ffprobe itself: it is asked for the position in the file of each
+// frame it decodes, and prints them as it goes. The report stays expressed in bytes read.
+//
+// # WHY A COUNT OF 0 IS AN ERROR
+//
+// No caller can do anything with a video stream without frames, and this is how a file ffprobe
+// can not read properly looks like. Every reason for it can not be known in advance: better to
+// stop here, before any encoding, whatever the reason is.
 func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (stats FFProbeStats, err error) {
 	// Validate inputs
 	if config.Path == "" {
@@ -79,35 +98,24 @@ func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (sta
 	}
 	// Build up args
 	args := []string{
-		"-loglevel", "error", "-print_format", "json",
+		"-loglevel", "error", "-print_format", "json=c=1",
 		"-show_format", "-show_streams", "-count_frames",
+		"-select_streams", "v:0",
+		"-show_entries", "frame=pkt_pos", // for progress, see parseProbeWithFrames
 		"-threads", "auto",
-		"-", // stdin
+		config.Path,
 	}
 	// Prepare command
 	if config.Debug != nil {
-		// lets print a usable command line
-		usableCMDLine := make([]string, len(args))
-		copy(usableCMDLine, args)
-		usableCMDLine[len(usableCMDLine)-1] = config.Path
-		config.Debug(fmt.Sprintf("Extract input file complete metadata: %s", getPrintableCMDLine(FFProbeBinary, usableCMDLine)))
+		config.Debug(fmt.Sprintf("Extract input file complete metadata: %s", getPrintableCMDLine(FFProbeBinary, args)))
 	}
-	// Open file ourself to keep track of bytes read to generate progress
-	file, err := os.Open(config.Path)
+	cmd := exec.CommandContext(ctx, FFProbeBinary, args...)
+	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		err = fmt.Errorf("Failed to open %q: %w", config.Path, err)
+		err = fmt.Errorf("error setting up stdout pipe: %w", err)
 		return
 	}
-	defer file.Close()
-	readerWrapper := &readerCounter{
-		wrapped: file,
-		updater: config.ReadBytesReport,
-	}
-	// Exec FFProbeBinary
-	cmd := exec.CommandContext(ctx, FFProbeBinary, args...)
-	cmd.Stdin = readerWrapper
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	// Exec program
 	if err = cmd.Start(); err != nil {
@@ -117,32 +125,104 @@ func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (sta
 	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFProbeBinary, err))
 	}
+	// Read the report as it comes (must be done before waiting for the program to end)
+	stats, parseErr := parseProbeWithFrames(stdoutPipe, config.ReadBytesReport)
+	if parseErr != nil {
+		// do not let ffprobe blocked on a standard output nobody reads anymore
+		_, _ = io.Copy(io.Discard, stdoutPipe)
+	}
 	if err = cmd.Wait(); err != nil {
-		err = fmt.Errorf("error during %s execution: %w\n%s\n%s\n%s", FFProbeBinary, err, stdout.String(), stderr.String(), getPrintableCMDLine(FFProbeBinary, args))
+		err = fmt.Errorf("error during %s execution: %w\n%s\n%s", FFProbeBinary, err, stderr.String(), getPrintableCMDLine(FFProbeBinary, args))
 		return
 	}
-	// Extract video infos
-	if err = json.Unmarshal(stdout.Bytes(), &stats); err != nil {
-		err = fmt.Errorf("error parsing %s output: %w", FFProbeBinary, err)
+	// With this log level, anything ffprobe wrote is an error, even if it ended with a success
+	if config.RuntimeError != nil {
+		for line := range strings.SplitSeq(strings.TrimSpace(stderr.String()), "\n") {
+			if line != "" {
+				config.RuntimeError(fmt.Errorf("%s: %s", FFProbeBinary, line))
+			}
+		}
+	}
+	if parseErr != nil {
+		err = fmt.Errorf("error parsing %s output: %w", FFProbeBinary, parseErr)
+		return
+	}
+	if video := stats.VideoTrack(); video != nil && video.NbReadFrames <= 0 {
+		err = fmt.Errorf("%s did not count any frame in the video stream: the file can not be read properly\n%s",
+			FFProbeBinary, getPrintableCMDLine(FFProbeBinary, args))
 		return
 	}
 	return
 }
 
-type readerCounter struct {
-	wrapped io.Reader
-	updater func(bytesRead int)
-}
-
-func (rc *readerCounter) Read(p []byte) (n int, err error) {
-	if rc.wrapped == nil {
-		err = io.EOF
+// parseProbeWithFrames reads a ffprobe JSON report holding a frames section on top of the usual
+// streams and format ones. Frames come first and are printed while the file is decoded: they are
+// consumed one by one to report progress, not stored (there is one entry per frame of the video).
+//
+// Progress is the position of the frame within the file (pkt_pos), reported as the number of
+// bytes gained since the last report. Positions do not strictly increase (streams are
+// interleaved, frames reordered): only a new highest position counts. Some formats do not
+// provide it: there is no progress then, the count itself is not affected.
+func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats FFProbeStats, err error) {
+	decoder := json.NewDecoder(report)
+	expectDelim := func(expected json.Delim) error {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if delim, ok := token.(json.Delim); !ok || delim != expected {
+			return fmt.Errorf("unexpected token %v, expected %v", token, expected)
+		}
+		return nil
+	}
+	if err = expectDelim('{'); err != nil {
 		return
 	}
-	n, err = rc.wrapped.Read(p)
-	if rc.updater != nil {
-		rc.updater(n)
+	var highestPosition int64
+	for decoder.More() {
+		var key json.Token
+		if key, err = decoder.Token(); err != nil {
+			return
+		}
+		switch key {
+		case "frames":
+			if err = expectDelim('['); err != nil {
+				return
+			}
+			for decoder.More() {
+				var frame struct {
+					PktPos string `json:"pkt_pos"`
+				}
+				if err = decoder.Decode(&frame); err != nil {
+					return
+				}
+				// missing or "N/A" when the format does not provide it
+				if position, parseErr := strconv.ParseInt(frame.PktPos, 10, 64); parseErr == nil && position > highestPosition {
+					if readBytesReport != nil {
+						readBytesReport(int(position - highestPosition))
+					}
+					highestPosition = position
+				}
+			}
+			if err = expectDelim(']'); err != nil {
+				return
+			}
+		case "streams":
+			if err = decoder.Decode(&stats.Streams); err != nil {
+				return
+			}
+		case "format":
+			if err = decoder.Decode(&stats.Format); err != nil {
+				return
+			}
+		default:
+			var ignored json.RawMessage
+			if err = decoder.Decode(&ignored); err != nil {
+				return
+			}
+		}
 	}
+	err = expectDelim('}')
 	return
 }
 
