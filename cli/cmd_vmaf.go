@@ -31,15 +31,8 @@ var vmafCommand = &cli.Command{
 		"(requires libvmaf_cuda, not available in standard ffmpeg builds). When this is enabled,\n" +
 		"NVDEC decoding is automatically used for compatible input codecs; --" + nvdecFlagName + " is implied.",
 	Flags: func() (flags []cli.Flag) {
-		flags = append(flags, hwDecodeFlags(true)...)
+		flags = append(flags, hardwareAccelFlags(hwAccelScopeVMAF)...)
 		flags = append(flags,
-			&cli.BoolFlag{
-				Name:     vmafCUDAFlagName,
-				Usage:    "Use CUDA acceleration for VMAF computation",
-				Value:    false,
-				OnlyOnce: true,
-				Category: "VMAF",
-			},
 			&cli.BoolFlag{
 				Name:     vmafNegFlagName,
 				Usage:    "Use VMAF NEG models",

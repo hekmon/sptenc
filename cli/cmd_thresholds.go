@@ -62,7 +62,7 @@ var thresholdsCommand = &cli.Command{
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{}
 		flags = append(flags, thresholdSearchFlags()...)
-		flags = append(flags, hwDecodeFlags(false)...)
+		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
 	}(),
 	Arguments: []cli.Argument{

@@ -152,14 +152,6 @@ var batchsearchCommand = &cli.Command{
 				Value:    false,
 				OnlyOnce: true,
 			},
-			&cli.IntFlag{
-				Name:      concurrentSegmentsFlagName,
-				Aliases:   []string{"C"},
-				Usage:     "Number of segments to encode in parallel. Not recommended for CPU encoders, see description.",
-				Value:     1,
-				OnlyOnce:  true,
-				Validator: validateConcurrentSegments,
-			},
 		}
 		flags = append(flags, thresholdSearchFlags()...)
 		flags = append(flags,
@@ -186,7 +178,7 @@ var batchsearchCommand = &cli.Command{
 				Category: "Cache isolation",
 			},
 		)
-		flags = append(flags, newGPUSelectionFlags()...)
+		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
 		flags = append(flags, newDirectoryFlags(false)...)
 		flags = append(flags, newVMAFFlags()...)
 		return

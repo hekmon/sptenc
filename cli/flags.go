@@ -10,7 +10,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// Hardware decode flag names.
+// Hardware acceleration flag names.
 const (
 	nvdecFlagName           = "nvdec"
 	vaapiDecFlagName        = "vaapi-dec"
@@ -18,67 +18,108 @@ const (
 	videoToolboxDecFlagName = "videotoolbox-dec"
 )
 
-// hwDecodeFlags returns the standard hardware-accelerated decoding flags.
-// When forVMAF is true, the NVIDIA GPU index flag also references --vmaf-cuda
-// since in the vmaf command that same index drives both NVDEC and CUDA VMAF.
-func hwDecodeFlags(forVMAF bool) []cli.Flag {
-	nvdecUsage := "Use NVDEC hardware-accelerated decoding (NVIDIA GPU required)"
-	nvidiaGPUUsage := "GPU to use with --" + nvdecFlagName
-	if forVMAF {
-		nvdecUsage = "Use NVDEC hardware-accelerated decoding for compatible codecs (NVIDIA GPU required)"
-		nvidiaGPUUsage = "GPU to use with --" + nvdecFlagName + " or --" + vmafCUDAFlagName
-	}
-	return []cli.Flag{
-		&cli.BoolFlag{
-			Name:     nvdecFlagName,
-			Usage:    nvdecUsage,
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     vaapiDecFlagName,
-			Usage:    "Use VA-API hardware-accelerated decoding (Intel/AMD GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     d3d12DecFlagName,
-			Usage:    "Use D3D12VA hardware-accelerated decoding (Windows, GPU required)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
-		&cli.BoolFlag{
-			Name:     videoToolboxDecFlagName,
-			Usage:    "Use VideoToolbox hardware-accelerated decoding (macOS, Apple Silicon)",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
-		},
+const (
+	nvidiaGPUIndexFlagName    = "nvidia-gpu-index"
+	vaapiRendererPathFlagName = "vaapi-renderer-path"
+	d3d12vaGPUIndexFlagName   = "d3d12va-gpu-index"
+)
+
+const (
+	concurrentSegmentsFlagName = "concurrent-segments"
+	vmafCUDAFlagName           = "vmaf-cuda"
+)
+
+// hwAccelScope controls which hardware acceleration flags are emitted.
+type hwAccelScope int
+
+const (
+	hwAccelScopeDecode hwAccelScope = iota // decode-only commands (master, split, thresholds)
+	hwAccelScopeVMAF                       // vmaf command (decode toggles + cuda)
+	hwAccelScopeEncode                     // encode commands (device selectors + cuda + concurrency)
+)
+
+// hardwareAccelFlags returns hardware acceleration flags under a single category.
+func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
+	flags = []cli.Flag{
 		&cli.IntFlag{
 			Name:     nvidiaGPUIndexFlagName,
-			Usage:    nvidiaGPUUsage,
+			Usage:    "NVIDIA GPU device index for hardware acceleration",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
+			Category: "Hardware acceleration",
 		},
 		&cli.StringFlag{
 			Name:     vaapiRendererPathFlagName,
-			Usage:    "Direct Rendering Manager render node to use with --" + vaapiDecFlagName,
+			Usage:    "DRM render node for VA-API hardware acceleration",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
+			Category: "Hardware acceleration",
 		},
 		&cli.IntFlag{
 			Name:     d3d12vaGPUIndexFlagName,
-			Usage:    "GPU to use with --" + d3d12DecFlagName,
+			Usage:    "GPU device index for D3D12VA hardware acceleration",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
-			Category: "Hardware accelerated decoding",
+			Category: "Hardware acceleration",
 		},
 	}
+	if scope == hwAccelScopeDecode || scope == hwAccelScopeVMAF {
+		flags = append(flags,
+			&cli.BoolFlag{
+				Name:     nvdecFlagName,
+				Usage:    "Use NVDEC hardware decoding",
+				Value:    false,
+				OnlyOnce: true,
+				Category: "Hardware acceleration",
+			},
+			&cli.BoolFlag{
+				Name:     vaapiDecFlagName,
+				Usage:    "Use VA-API hardware decoding",
+				Value:    false,
+				OnlyOnce: true,
+				Category: "Hardware acceleration",
+			},
+			&cli.BoolFlag{
+				Name:     d3d12DecFlagName,
+				Usage:    "Use D3D12VA hardware decoding",
+				Value:    false,
+				OnlyOnce: true,
+				Category: "Hardware acceleration",
+			},
+			&cli.BoolFlag{
+				Name:     videoToolboxDecFlagName,
+				Usage:    "Use VideoToolbox hardware decoding",
+				Value:    false,
+				OnlyOnce: true,
+				Category: "Hardware acceleration",
+			},
+		)
+	}
+	if scope == hwAccelScopeVMAF || scope == hwAccelScopeEncode {
+		flags = append(flags,
+			&cli.BoolFlag{
+				Name:     vmafCUDAFlagName,
+				Usage:    "Use CUDA for VMAF computation",
+				Value:    false,
+				OnlyOnce: true,
+				Category: "Hardware acceleration",
+			},
+		)
+	}
+	if scope == hwAccelScopeEncode {
+		flags = append(flags,
+			&cli.IntFlag{
+				Name:      concurrentSegmentsFlagName,
+				Aliases:   []string{"C"},
+				Usage:     "Number of segments to encode in parallel (GPU encoders only)",
+				Value:     1,
+				OnlyOnce:  true,
+				Validator: validateConcurrentSegments,
+				Category:  "Hardware acceleration",
+			},
+		)
+	}
+	return
 }
 
 // Threshold search flag names and defaults.
@@ -150,39 +191,6 @@ func thresholdSearchFlags() []cli.Flag {
 }
 
 const (
-	nvidiaGPUIndexFlagName    = "nvidia-gpu-index"
-	vaapiRendererPathFlagName = "vaapi-renderer-path"
-	d3d12vaGPUIndexFlagName   = "d3d12va-gpu-index"
-)
-
-// newGPUSelectionFlags returns the GPU encoder flags.
-func newGPUSelectionFlags() []cli.Flag {
-	return []cli.Flag{
-		&cli.IntFlag{
-			Name:     nvidiaGPUIndexFlagName,
-			Usage:    fmt.Sprintf("GPU to use when --%s is an NVIDIA NVENC encoder", encoderFlagName),
-			Value:    ffmpeg.CUDADefaultDevice,
-			OnlyOnce: true,
-			Category: "GPU Selection",
-		},
-		&cli.StringFlag{
-			Name:     vaapiRendererPathFlagName,
-			Usage:    fmt.Sprintf("Direct Rendering Manager render node to use when --%s is a VA-API encoder", encoderFlagName),
-			Value:    ffmpeg.VAAPIDefaultDevice,
-			OnlyOnce: true,
-			Category: "GPU Selection",
-		},
-		&cli.IntFlag{
-			Name:     d3d12vaGPUIndexFlagName,
-			Usage:    fmt.Sprintf("GPU to use when --%s is a D3D12VA encoder", encoderFlagName),
-			Value:    ffmpeg.D3D12VADefaultDevice,
-			OnlyOnce: true,
-			Category: "GPU Selection",
-		},
-	}
-}
-
-const (
 	outputDirFlagName     = "output-dir"
 	statsCacheDirFlagName = "stats-cache-dir"
 	tmpDirFlagName        = "tmp-dir"
@@ -227,7 +235,6 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 }
 
 const (
-	vmafCUDAFlagName   = "vmaf-cuda"
 	vmafNegFlagName    = "vmaf-neg"
 	vmafMinFlagName    = "vmaf-min"
 	vmafP1FlagName     = "vmaf-p1"
@@ -242,13 +249,6 @@ const (
 // newVMAFFlags returns the VMAF quality metric flags.
 func newVMAFFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.BoolFlag{
-			Name:     vmafCUDAFlagName,
-			Usage:    "Use CUDA acceleration for VMAF computation",
-			Value:    false,
-			OnlyOnce: true,
-			Category: "VMAF",
-		},
 		&cli.BoolFlag{
 			Name:     vmafNegFlagName,
 			Usage:    "Use VMAF NEG models",

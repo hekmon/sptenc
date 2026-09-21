@@ -23,10 +23,9 @@ import (
 
 // Flag names for encode-specific flags and shared helpers defined in this file.
 const (
-	encoderFlagName            = "encoder"
-	concurrentSegmentsFlagName = "concurrent-segments"
-	cacheProfileFlagName       = "cache-profile"
-	originalFileFlagName       = "original-file"
+	encoderFlagName      = "encoder"
+	cacheProfileFlagName = "cache-profile"
+	originalFileFlagName = "original-file"
 )
 
 var encodeCommand = &cli.Command{
@@ -80,14 +79,6 @@ var encodeCommand = &cli.Command{
 				Validator:        encoderValidator,
 				ValidateDefaults: true,
 			},
-			&cli.IntFlag{
-				Name:      concurrentSegmentsFlagName,
-				Aliases:   []string{"C"},
-				Usage:     "Number of segments to encode in parallel. Not recommended for CPU encoders, see description.",
-				Value:     1,
-				OnlyOnce:  true,
-				Validator: validateConcurrentSegments,
-			},
 			&cli.Float64Flag{
 				Name:    minThresholdFlagName,
 				Aliases: []string{"T"},
@@ -116,7 +107,7 @@ var encodeCommand = &cli.Command{
 				Category: "Cache isolation",
 			},
 		}
-		flags = append(flags, newGPUSelectionFlags()...)
+		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
 		flags = append(flags, newDirectoryFlags(true)...)
 		flags = append(flags, newVMAFFlags()...)
 		return

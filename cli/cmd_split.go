@@ -73,7 +73,7 @@ var splitCommand = &cli.Command{
 			},
 		}
 		// HW dec
-		flags = append(flags, hwDecodeFlags(false)...)
+		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
 	}(),
 	Arguments: []cli.Argument{
