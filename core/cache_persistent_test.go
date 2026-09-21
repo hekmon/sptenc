@@ -177,6 +177,70 @@ func TestStatsCacheHistory_GetMeanStdDev_Weighted(t *testing.T) {
 	}
 }
 
+func TestStatsCacheHistory_Snapshot_Empty(t *testing.T) {
+	tmpDir := t.TempDir()
+	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
+	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatalf("failed to create profile: %v", err)
+	}
+
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	if err != nil {
+		t.Fatalf("NewStatsCacheHistory failed: %v", err)
+	}
+
+	mean, stddev, weight, ok := sch.Snapshot()
+	if ok {
+		t.Error("expected Snapshot to return ok=false for empty cache")
+	}
+	if mean != 0 || stddev != 0 || weight != 0 {
+		t.Errorf("expected zero values for empty snapshot, got %v %v %v", mean, stddev, weight)
+	}
+}
+
+func TestStatsCacheHistory_Snapshot_Weighted(t *testing.T) {
+	tmpDir := t.TempDir()
+	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
+	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatalf("failed to create profile: %v", err)
+	}
+
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	if err != nil {
+		t.Fatalf("NewStatsCacheHistory failed: %v", err)
+	}
+
+	// Run 1: [10, 10, 20] → weight 3, mean 40/3 ≈ 13.333
+	_, _, err = sch.AddRun([]int{10, 10, 20})
+	if err != nil {
+		t.Fatalf("AddRun 1 failed: %v", err)
+	}
+	// Run 2: [20, 20] → weight 2, mean 20
+	_, _, err = sch.AddRun([]int{20, 20})
+	if err != nil {
+		t.Fatalf("AddRun 2 failed: %v", err)
+	}
+
+	mean, stddev, weight, ok := sch.Snapshot()
+	if !ok {
+		t.Fatal("expected Snapshot to return ok=true")
+	}
+	// Weighted mean of means: (13.333*3 + 20*2) / 5 = 16
+	if math.Round(mean) != 16 {
+		t.Errorf("expected snapshot mean ~16, got %v", mean)
+	}
+	if weight != 5 {
+		t.Errorf("expected total weight 5, got %d", weight)
+	}
+	if stddev < 0 {
+		t.Errorf("expected non-negative stddev, got %v", stddev)
+	}
+}
+
 func TestStatsCacheHistory_SaveLoadRoundtrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}

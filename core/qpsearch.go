@@ -79,6 +79,10 @@ type QPSearchConfig struct {
 	// saturate physical cores in most cases. Only increase this if you know how many parallel encodes
 	// your specific hardware can sustain.
 	NbConcurrentSegments int
+
+	// ephemeral holds the in-memory stats accumulator for this encode.
+	// It is set internally by FindAllSegmentsQP and discarded after the search.
+	ephemeral *ephemeralStatsCache
 }
 
 // QPSearchResults holds the outcome of a QP search across all segments.
@@ -173,9 +177,14 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	if config.NbConcurrentSegments < 1 {
 		config.NbConcurrentSegments = 1
 	}
-	workers, workersCtx := errgroup.WithContext(ctx)
-	jobsChan := make(chan job)
+	// Wrap the persistent cache with an ephemeral one that learns from each
+	// segment within this encode. It is discarded after the search.
+	qpMin, qpMax, _ := config.Encoder.QPRange()
+	config.ephemeral = newEphemeralStatsCache(config.StatsCache, qpMin, qpMax)
+	config.StatsCache = config.ephemeral
 	// Launch Workers
+	jobsChan := make(chan job)
+	workers, workersCtx := errgroup.WithContext(ctx)
 	for workerID := range config.NbConcurrentSegments {
 		workers.Go(func(workerCtx context.Context, wID int, jobs <-chan job) func() error {
 			var (
@@ -214,6 +223,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 					doneDuration += segmentDuration
 					allSegmentSize += segmentSize
 					segmentWeights += segmentQP * segmentFrames
+					config.ephemeral.addQP(segmentQP)
 					resultsAccess.Unlock()
 					// Done
 					scb.OnSegmentDone(wID, segmentQP, segmentFrames, segmentNbAttempts, doneDuration, allSegmentSize)

@@ -20,6 +20,9 @@ import (
 // StatsCache provides statistical guidance for the QP search start point.
 type StatsCache interface {
 	GetMeanStdDev() (mean, stddev int)
+	// Snapshot returns the historical aggregate as a single weighted run.
+	// ok=false when no history exists (empty persistent cache).
+	Snapshot() (mean, stddev float64, weight int, ok bool)
 }
 
 // NewStatsCacheHistory initializes a stats cache for the given encoder name, QP range, VMAF model,
@@ -64,7 +67,28 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 		stddev = mean / 2
 		return
 	}
-	// Extract data
+	meanf, stddevf, _, _ := sch.computeWeightedAggregate()
+	// Round to nearest integers - trust the statistics
+	mean = int(math.Round(meanf))
+	stddev = max(1, int(math.Round(stddevf)))
+	return
+}
+
+// Snapshot returns the historical aggregate as a single weighted run.
+// ok=false when no history exists.
+func (sch *StatsCacheHistory) Snapshot() (mean, stddev float64, weight int, ok bool) {
+	sch.access.RLock()
+	defer sch.access.RUnlock()
+	if len(sch.stats) == 0 {
+		return 0, 0, 0, false
+	}
+	mean, stddev, weight, _ = sch.computeWeightedAggregate()
+	return mean, stddev, weight, true
+}
+
+// computeWeightedAggregate computes the weighted mean and stddev of all recorded runs
+// and returns the total weight. Caller must hold sch.access.RLock.
+func (sch *StatsCacheHistory) computeWeightedAggregate() (mean, stddev float64, weight int, totalWeight float64) {
 	means := make([]float64, len(sch.stats))
 	stddevs := make([]float64, len(sch.stats))
 	weights := make([]float64, len(sch.stats))
@@ -72,13 +96,11 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 		means[index] = rs.Mean
 		stddevs[index] = rs.StdDev
 		weights[index] = float64(rs.Weight)
+		weight += rs.Weight
 	}
-	// Compute averages
-	meanf := stat.Mean(means, weights)
-	stddevf := stat.Mean(stddevs, weights)
-	// Round to nearest integers - trust the statistics
-	mean = int(math.Round(meanf))
-	stddev = max(1, int(math.Round(stddevf)))
+	mean = stat.Mean(means, weights)
+	stddev = stat.Mean(stddevs, weights)
+	totalWeight = float64(weight)
 	return
 }
 

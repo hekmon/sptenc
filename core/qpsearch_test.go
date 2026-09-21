@@ -151,6 +151,10 @@ func (m *mockStatsCache) GetMeanStdDev() (mean, stddev int) {
 	return m.mean, m.stddev
 }
 
+func (m *mockStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
+	return float64(m.mean), float64(m.stddev), 1, true
+}
+
 // mockCallbacks satisfies QPSearchCallbacks for tests.
 type mockCallbacks struct{}
 
@@ -1244,5 +1248,223 @@ func TestFindAllSegmentsQP_StatError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to stat") {
 		t.Errorf("expected stat error, got %v", err)
+	}
+}
+
+func TestFindAllSegmentsQP_EphemeralConvergence(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+	}
+
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 70)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	segments := []string{
+		filepath.Join(tmpDir, "seg_000000.mkv"),
+		filepath.Join(tmpDir, "seg_000001.mkv"),
+		filepath.Join(tmpDir, "seg_000002.mkv"),
+	}
+	for _, seg := range segments {
+		if err := os.WriteFile(seg, []byte("dummy"), 0644); err != nil {
+			t.Fatalf("failed to create segment file: %v", err)
+		}
+	}
+
+	// Empty cache fallback: mean=26, stddev=13
+	statsCache := &mockStatsCache{mean: 26, stddev: 13}
+
+	config := QPSearchConfig{
+		SegmentsPaths: segments,
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    statsCache,
+		Encoder:       encoder,
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if len(results.QPs) != 3 {
+		t.Fatalf("expected 3 QPs, got %d", len(results.QPs))
+	}
+	for i, qp := range results.QPs {
+		if qp != 20 {
+			t.Errorf("expected segment %d at QP 20, got %d", i, qp)
+		}
+	}
+
+	// Count attempts per segment.
+	segAttempts := make([]int, 3)
+	for _, call := range encoder.encodeCalls {
+		seg, _, _ := extractSegmentAndQP(call.output)
+		if seg >= 0 && seg < 3 {
+			segAttempts[seg]++
+		}
+	}
+
+	// The ephemeral cache should help later segments converge in fewer or equal attempts.
+	// Segment 2 should not need more attempts than segment 0.
+	if segAttempts[2] > segAttempts[0] {
+		t.Errorf("expected segment 2 to have <= attempts than segment 0 due to ephemeral cache, got %d vs %d", segAttempts[2], segAttempts[0])
+	}
+}
+
+func TestFindAllSegmentsQP_EphemeralWithSeededBase(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+	}
+
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 70)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	segments := []string{
+		filepath.Join(tmpDir, "seg_000000.mkv"),
+		filepath.Join(tmpDir, "seg_000001.mkv"),
+	}
+	for _, seg := range segments {
+		if err := os.WriteFile(seg, []byte("dummy"), 0644); err != nil {
+			t.Fatalf("failed to create segment file: %v", err)
+		}
+	}
+
+	// Persistent cache seeded low; segments converge at QP 20, pulling mean up.
+	statsCache := &mockStatsCache{mean: 10, stddev: 2}
+
+	config := QPSearchConfig{
+		SegmentsPaths: segments,
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    statsCache,
+		Encoder:       encoder,
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if len(results.QPs) != 2 {
+		t.Fatalf("expected 2 QPs, got %d", len(results.QPs))
+	}
+	if results.QPs[0] != 20 || results.QPs[1] != 20 {
+		t.Errorf("expected both QPs=20, got %v", results.QPs)
+	}
+
+	// Segment 1 should need fewer attempts because ephemeral cache shifted mean toward 20.
+	seg0Attempts := 0
+	seg1Attempts := 0
+	for _, call := range encoder.encodeCalls {
+		seg, _, _ := extractSegmentAndQP(call.output)
+		if seg == 0 {
+			seg0Attempts++
+		} else if seg == 1 {
+			seg1Attempts++
+		}
+	}
+	if seg1Attempts >= seg0Attempts {
+		t.Errorf("expected segment 1 to have fewer attempts than segment 0, got %d vs %d", seg1Attempts, seg0Attempts)
+	}
+}
+
+func TestFindAllSegmentsQP_EphemeralBestEffort(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Even at QP 0 the mean is only 70, which matches threshold 70 exactly.
+	// linearVMAF(qp+30): QP 0 → mean 70, QP 1 → mean 68.5, etc.
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp + 30)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+	}
+
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 70)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	segments := []string{
+		filepath.Join(tmpDir, "seg_000000.mkv"),
+		filepath.Join(tmpDir, "seg_000001.mkv"),
+	}
+	for _, seg := range segments {
+		if err := os.WriteFile(seg, []byte("dummy"), 0644); err != nil {
+			t.Fatalf("failed to create segment file: %v", err)
+		}
+	}
+
+	statsCache := &mockStatsCache{mean: 26, stddev: 13}
+
+	config := QPSearchConfig{
+		SegmentsPaths: segments,
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    statsCache,
+		Encoder:       encoder,
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if results.NbBestEfforts != 2 {
+		t.Errorf("expected 2 best-effort segments, got %d", results.NbBestEfforts)
+	}
+	if results.QPs[0] != 0 || results.QPs[1] != 0 {
+		t.Errorf("expected both QPs=0 (best effort), got %v", results.QPs)
+	}
+
+	// Ephemeral cache should have learned that QP 0 is the norm.
+	seg0Attempts := 0
+	seg1Attempts := 0
+	for _, call := range encoder.encodeCalls {
+		seg, _, _ := extractSegmentAndQP(call.output)
+		if seg == 0 {
+			seg0Attempts++
+		} else if seg == 1 {
+			seg1Attempts++
+		}
+	}
+	// Segment 1 should start lower (closer to 0) and converge faster.
+	if seg1Attempts >= seg0Attempts {
+		t.Errorf("expected segment 1 to have fewer attempts than segment 0, got %d vs %d", seg1Attempts, seg0Attempts)
 	}
 }
