@@ -123,6 +123,7 @@ func main() {
 			thresholdsCommand,
 			splitCommand,
 			concatCommand,
+			remuxCommand,
 			vmafCommand,
 			cacheCommand,
 			// advanced
