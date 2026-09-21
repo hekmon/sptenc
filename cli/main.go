@@ -62,9 +62,12 @@ func main() {
 			"This guarantees the target perceptual quality at the smallest possible file size,\n" +
 			"but encoding takes significantly longer than a standard single-pass encode\n" +
 			"because multiple QP candidates are tested per segment.\n\n" +
-			"PIPELINE\n" +
-			"The encode command can handle the entire pipeline in one step, or you can use\n" +
-			"the master and split commands to produce intermediate artifacts for finer control.",
+			"This is not the same as a single CRF pass followed by a whole-file VMAF check.\n" +
+			"That approach only validates an average: one complex scene in an otherwise steady movie\n" +
+			"can be destroyed while the overall result still looks acceptable. sptenc\n" +
+			"enforces its quality floor on every single scene — no segment is accepted until\n" +
+			"it passes all thresholds independently.\n\n" +
+			"Use 'sptenc <command> --help' for detailed usage of any command.",
 		Version: version(),
 		Flags: []cli.Flag{
 			&cli.BoolFlag{

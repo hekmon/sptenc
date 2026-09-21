@@ -8,7 +8,7 @@ A final, complete VMAF comparison between the encoded output and original source
 
 This approach produces the smallest possible file without compromising the target quality defined by the VMAF profile.
 
-> **Trade-off:** Achieving both smaller file size AND guaranteed quality comes at a cost: encoding time will be significantly longer than standard single-pass encoding, as multiple QP values are tested on each segment until all VMAF thresholds are met.
+> **Trade-off:** Achieving both smaller file size AND guaranteed quality comes at a cost: encoding time will be significantly longer than standard single-pass encoding, as multiple QP values are tested on each segment until all VMAF thresholds are met. This is not the same as a single CRF pass with a whole-file VMAF check — that approach only validates an average, so one complex scene in an otherwise steady movie can be destroyed while the overall result still looks acceptable. sptenc enforces its quality floor on every single scene independently.
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding, and the VMAF perceptual quality models that power it. This project is built for power users encoding on their own hardware, not for streaming-scale infrastructure.
 
