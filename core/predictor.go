@@ -6,10 +6,10 @@ import (
 	"gonum.org/v1/gonum/interp"
 )
 
-// NewPredicator builds an interpolator from known QP→VMAF data points.
+// NewPredictor builds an interpolator from known QP→VMAF data points.
 // It validates inputs before calling gonum because FritschButland.Fit panics
 // on insufficient points, mismatched lengths, or non-strictly-increasing x values.
-func NewPredicator(existingResults map[int]VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predicator, err error) {
+func NewPredictor(existingResults map[int]VMAFStats, qpMin, qpMax int, debug func(format string, a ...any)) (p Predictor, err error) {
 	if len(existingResults) < 2 {
 		return p, fmt.Errorf("need at least 2 data points for interpolation, got %d", len(existingResults))
 	}
@@ -57,7 +57,7 @@ func NewPredicator(existingResults map[int]VMAFStats, qpMin, qpMax int, debug fu
 	}
 	p.debug = debug
 	if p.debug != nil {
-		p.debug("Initializing FritschButland predicator with %d points: %+v",
+		p.debug("Initializing FritschButland predictor with %d points: %+v",
 			len(p.qps), p.qps)
 	}
 	_ = p.minInterpolator.Fit(p.qps, p.mins)
@@ -71,7 +71,7 @@ func NewPredicator(existingResults map[int]VMAFStats, qpMin, qpMax int, debug fu
 	return
 }
 
-type Predicator struct {
+type Predictor struct {
 	qps                 []float64
 	mins                []float64
 	minInterpolator     interp.FittablePredictor
@@ -95,7 +95,7 @@ type Predicator struct {
 // Predict estimates VMAF stats for a given QP using the fitted interpolators.
 // It does not return an error because gonum's Predict handles out-of-range
 // values gracefully via extrapolation; clamping and adaptation follow.
-func (p *Predicator) Predict(qp int) (stats VMAFStats) {
+func (p *Predictor) Predict(qp int) (stats VMAFStats) {
 	qpf := float64(qp)
 	stats.Minimum = p.minInterpolator.Predict(qpf)
 	stats.Percentile1 = p.p1Interpolator.Predict(qpf)
@@ -118,7 +118,7 @@ func (p *Predicator) Predict(qp int) (stats VMAFStats) {
 	return
 }
 
-func (p *Predicator) adapt(qp int, stats VMAFStats) (adapted VMAFStats) {
+func (p *Predictor) adapt(qp int, stats VMAFStats) (adapted VMAFStats) {
 	adapted = stats
 	var preIndex, postIndex int
 	// Find known values indexes sourrounding qp
@@ -149,16 +149,16 @@ func (p *Predicator) adapt(qp int, stats VMAFStats) (adapted VMAFStats) {
 	return
 }
 
-func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int, predicatedValue float64, ys []float64) (adaptedValue float64) {
+func (p *Predictor) adaptCeilingValues(preIndex, postIndex, predictedForQP int, predictedValue float64, ys []float64) (adaptedValue float64) {
 	if predictedForQP <= int(p.qps[preIndex]) || predictedForQP >= int(p.qps[postIndex]) {
 		// safety
-		return predicatedValue
+		return predictedValue
 	}
 	if ys[preIndex] == VMAFMaxValue && ys[postIndex] < VMAFMaxValue {
 		// Interpolation will decrease value as expected, but as VMAF 100 is a ceilling value, it could stay at 100 for a few more QP values.
 		// But if user is expecting a 100 value for its auditor, lowering value right after pre, will force him to check qp incrementally one
 		// by one defeating the purpose of interpolation. The idea here is to lower the value only after the second half between pre and post
-		// to force the QP search using the predicator to have a quick search like search and make him compute the middle value between pre
+		// to force the QP search using the predictor to have a quick search like search and make him compute the middle value between pre
 		// and post by hoping the actual computed value won't be 100 for the next interpolation and avoid a one by one search.
 		middleQP := int(p.qps[preIndex]) + (int(p.qps[postIndex])-int(p.qps[preIndex]))/2
 		if predictedForQP <= middleQP {
@@ -166,7 +166,7 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 			adaptedValue = ys[preIndex]
 			if p.debug != nil {
 				p.debug("Adapting predicted value for first half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
-					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex],
+					int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predictedValue, adaptedValue, ys[postIndex],
 				)
 			}
 			return
@@ -192,20 +192,20 @@ func (p *Predicator) adaptCeilingValues(preIndex, postIndex, predictedForQP int,
 				newValues = append(newValues, y)
 			}
 		}
-		predicator := new(interp.FritschButland)
-		if err := predicator.Fit(newqps, newValues); err != nil {
+		predictor := new(interp.FritschButland)
+		if err := predictor.Fit(newqps, newValues); err != nil {
 			// Fallback to the raw predicted value if the secondary interpolation fails.
-			return predicatedValue
+			return predictedValue
 		}
-		adaptedValue = predicator.Predict(float64(predictedForQP))
+		adaptedValue = predictor.Predict(float64(predictedForQP))
 		if p.debug != nil {
 			p.debug("Adapting predicted value for second half. pre: %d, predicted: %d, post: %d, preValue: %f, predictedValue: %f, adaptedValue: %f, postValue: %f",
-				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predicatedValue, adaptedValue, ys[postIndex],
+				int(p.qps[preIndex]), predictedForQP, int(p.qps[postIndex]), ys[preIndex], predictedValue, adaptedValue, ys[postIndex],
 			)
 		}
 		return
 	}
-	return predicatedValue
+	return predictedValue
 }
 
 // clamp restricts a value to the VAMF value range

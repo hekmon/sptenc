@@ -530,11 +530,11 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, bestValid, firstInvalid, encoderQPMin, encoderQPMax int, existingResults map[int]VMAFStats) (
 	candidateQP int, err error) {
-	predicator, err := NewPredicator(existingResults, encoderQPMin, encoderQPMax, func(format string, a ...any) {
+	predictor, err := NewPredictor(existingResults, encoderQPMin, encoderQPMax, func(format string, a ...any) {
 		scb.Debug(workerID, format, a...)
 	})
 	if err != nil {
-		err = fmt.Errorf("failed to create predicator: %w", err)
+		err = fmt.Errorf("failed to create predictor: %w", err)
 		return
 	}
 	// Walk the bracket from the invalid side down to the valid side.
@@ -546,7 +546,7 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	)
 	for candidateQP = firstInvalid; candidateQP > bestValid; candidateQP-- {
 		if candidateResults, exists = existingResults[candidateQP]; !exists {
-			candidateResults = predicator.Predict(candidateQP)
+			candidateResults = predictor.Predict(candidateQP)
 			// Predicted result will be validated below
 		}
 		if config.Auditor.Validate(candidateResults) {

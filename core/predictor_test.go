@@ -5,16 +5,16 @@ import (
 	"testing"
 )
 
-func TestPredicator_Convergence(t *testing.T) {
+func TestPredictor_Convergence(t *testing.T) {
 	// Build a monotonic QP→VMAF map.
 	results := make(map[int]VMAFStats)
 	for qp := 10; qp <= 40; qp += 10 {
 		results[qp] = linearVMAF(qp)
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	// Predicted value at QP 15 should lie between QP 10 and QP 20.
@@ -26,15 +26,15 @@ func TestPredicator_Convergence(t *testing.T) {
 	}
 }
 
-func TestPredicator_ExtrapolationClamped(t *testing.T) {
+func TestPredictor_ExtrapolationClamped(t *testing.T) {
 	results := map[int]VMAFStats{
 		20: {Mean: 80, Minimum: 70, Median: 80},
 		30: {Mean: 60, Minimum: 50, Median: 60},
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	// Extrapolate above known range; clamping should keep it valid.
@@ -44,7 +44,7 @@ func TestPredicator_ExtrapolationClamped(t *testing.T) {
 	}
 }
 
-func TestPredicator_AdaptCeiling(t *testing.T) {
+func TestPredictor_AdaptCeiling(t *testing.T) {
 	// When both neighbours are at VMAFMaxValue, the interpolator would keep
 	// predicting 100 for interior points. The adapter should only lower the
 	// value after the midpoint to avoid a one-by-one search.
@@ -54,9 +54,9 @@ func TestPredicator_AdaptCeiling(t *testing.T) {
 		30: {Mean: 90, Minimum: 85, Median: 90},
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	// QP 15 is in the first half between 10 and 20; should stay at 100.
@@ -78,27 +78,27 @@ func TestPredicator_AdaptCeiling(t *testing.T) {
 	}
 }
 
-func TestPredicator_InsufficientPoints(t *testing.T) {
-	_, err := NewPredicator(map[int]VMAFStats{}, 0, 51, nil)
+func TestPredictor_InsufficientPoints(t *testing.T) {
+	_, err := NewPredictor(map[int]VMAFStats{}, 0, 51, nil)
 	if err == nil {
 		t.Fatal("expected error for insufficient points, got nil")
 	}
 
-	_, err = NewPredicator(map[int]VMAFStats{10: {Mean: 80}}, 0, 51, nil)
+	_, err = NewPredictor(map[int]VMAFStats{10: {Mean: 80}}, 0, 51, nil)
 	if err == nil {
 		t.Fatal("expected error for single point, got nil")
 	}
 }
 
-func TestPrediator_Monotonicity(t *testing.T) {
+func TestPredictor_Monotonicity(t *testing.T) {
 	results := make(map[int]VMAFStats)
 	for qp := 0; qp <= 50; qp += 5 {
 		results[qp] = linearVMAF(qp)
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	var lastMean float64 = math.MaxFloat64
@@ -111,16 +111,16 @@ func TestPrediator_Monotonicity(t *testing.T) {
 	}
 }
 
-func TestPredicator_ExactKnownQP(t *testing.T) {
+func TestPredictor_ExactKnownQP(t *testing.T) {
 	results := map[int]VMAFStats{
 		10: {Mean: 90, Minimum: 85, Median: 90},
 		20: {Mean: 80, Minimum: 75, Median: 80},
 		30: {Mean: 70, Minimum: 65, Median: 70},
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	// Predicting at an exact known QP should return the exact stored values.
@@ -136,15 +136,15 @@ func TestPredicator_ExactKnownQP(t *testing.T) {
 	}
 }
 
-func TestPredicator_GapInQPData(t *testing.T) {
+func TestPredictor_GapInQPData(t *testing.T) {
 	results := map[int]VMAFStats{
 		10: {Mean: 90, Minimum: 85},
 		30: {Mean: 70, Minimum: 65},
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	// Predict at QP 20, halfway between known points.
@@ -157,17 +157,17 @@ func TestPredicator_GapInQPData(t *testing.T) {
 	}
 }
 
-func TestPredicator_ReverseCeiling(t *testing.T) {
+func TestPredictor_ReverseCeiling(t *testing.T) {
 	// Reverse ceiling: pre < 100, post == 100. There is no special handling for this case,
-	// so the predicator should return the raw interpolated value without panic.
+	// so the predictor should return the raw interpolated value without panic.
 	results := map[int]VMAFStats{
 		10: {Mean: 90, Minimum: 85, Median: 90},
 		20: {Mean: 100, Minimum: 100, Median: 100},
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	predicted := p.Predict(15)
@@ -179,7 +179,7 @@ func TestPredicator_ReverseCeiling(t *testing.T) {
 	}
 }
 
-func TestPredicator_SecondaryInterpolationSecondHalf(t *testing.T) {
+func TestPredictor_SecondaryInterpolationSecondHalf(t *testing.T) {
 	// This test verifies the second-half interpolation path in adaptCeilingValues.
 	results := map[int]VMAFStats{
 		10: {Mean: 100, Minimum: 100, Median: 100},
@@ -187,9 +187,9 @@ func TestPredicator_SecondaryInterpolationSecondHalf(t *testing.T) {
 		30: {Mean: 90, Minimum: 85, Median: 90},
 	}
 
-	p, err := NewPredicator(results, 0, 51, nil)
+	p, err := NewPredictor(results, 0, 51, nil)
 	if err != nil {
-		t.Fatalf("NewPredicator failed: %v", err)
+		t.Fatalf("NewPredictor failed: %v", err)
 	}
 
 	// QP 26 is in the second half between 20 and 30. The ceiling adaptation
@@ -222,7 +222,7 @@ func TestClampVMAF_Boundaries(t *testing.T) {
 	}
 }
 
-// TestPredicator_NonMonotonicQP is intentionally omitted. NewPredicator builds p.qps
+// TestPredictor_NonMonotonicQP is intentionally omitted. NewPredictor builds p.qps
 // by iterating qpMin..qpMax in ascending order, so non-monotonic input is impossible
-// through the public API. The defensive check inside NewPredicator is dead code under
+// through the public API. The defensive check inside NewPredictor is dead code under
 // current construction rules and can only be reached if the construction logic changes.
