@@ -1496,3 +1496,114 @@ func TestFindAllSegmentsQP_EphemeralBestEffort(t *testing.T) {
 		t.Errorf("expected segment 1 to have fewer attempts than segment 0, got %d vs %d", seg1Attempts, seg0Attempts)
 	}
 }
+
+// TestFindAllSegmentsQP_MeanAtQPMinInvalid covers the case where the very first
+// candidate is qpMin and it does not validate: there is nothing lower to try, so
+// the search must end in best effort with a single attempt instead of erroring.
+func TestFindAllSegmentsQP_MeanAtQPMinInvalid(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+		validateQP:  true,
+	}
+
+	// Even the highest quality (QP 0) stays below the mean threshold of 100.
+	vmafResults[0] = linearVMAF(1)
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 100)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	config := QPSearchConfig{
+		SegmentsPaths: []string{filepath.Join(tmpDir, "segment.mkv")},
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    &mockStatsCache{mean: 0, stddev: 1},
+		Encoder:       encoder,
+	}
+
+	if err := os.WriteFile(config.SegmentsPaths[0], []byte("source"), 0644); err != nil {
+		t.Fatalf("failed to create source segment: %v", err)
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if len(results.QPs) != 1 || results.QPs[0] != 0 {
+		t.Errorf("expected best effort QP 0, got %v", results.QPs)
+	}
+	if results.NbBestEfforts != 1 {
+		t.Errorf("expected 1 best-effort, got %d", results.NbBestEfforts)
+	}
+	if results.TotalNbAttempts != 1 {
+		t.Errorf("expected a single attempt, got %d", results.TotalNbAttempts)
+	}
+}
+
+// TestFindAllSegmentsQP_MeanAtQPMaxValid covers the case where the very first
+// candidate is qpMax and it validates: there is nothing higher to try, so the
+// search must end right away with qpMax instead of erroring.
+func TestFindAllSegmentsQP_MeanAtQPMaxValid(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	vmafResults := make(map[int]VMAFStats, 52)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+		validateQP:  true,
+	}
+
+	// With threshold 10, every QP is valid. The optimal QP is qpMax=51.
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 10)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	config := QPSearchConfig{
+		SegmentsPaths: []string{filepath.Join(tmpDir, "segment.mkv")},
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    &mockStatsCache{mean: 51, stddev: 1},
+		Encoder:       encoder,
+	}
+
+	if err := os.WriteFile(config.SegmentsPaths[0], []byte("source"), 0644); err != nil {
+		t.Fatalf("failed to create source segment: %v", err)
+	}
+
+	results, err := FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+
+	if len(results.QPs) != 1 || results.QPs[0] != 51 {
+		t.Errorf("expected QP 51, got %v", results.QPs)
+	}
+	if results.NbBestEfforts != 0 {
+		t.Errorf("expected 0 best-efforts, got %d", results.NbBestEfforts)
+	}
+	if results.TotalNbAttempts != 1 {
+		t.Errorf("expected a single attempt, got %d", results.TotalNbAttempts)
+	}
+}

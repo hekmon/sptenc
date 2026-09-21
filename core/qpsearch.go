@@ -492,12 +492,26 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		}
 		nbAttempts++
 		results[candidateQP] = vmafStats
+		testedQPs = append(testedQPs, candidateQP)
 		if config.Auditor.Validate(vmafStats) {
 			bestValid = candidateQP
+			if candidateQP == qpMax {
+				// Can not go higher: this is the optimal QP. Concluding here also covers
+				// the case where qpMax is the very first candidate (a single result can
+				// not feed the interpolation).
+				finalQP = candidateQP
+				return
+			}
 		} else {
 			firstInvalid = candidateQP
+			if candidateQP == qpMin {
+				// Can not go lower, and it does not validate: we are done (best effort).
+				// Same as above for qpMin being the very first candidate.
+				finalQP = candidateQP
+				bestEffort = true
+				return
+			}
 		}
-		testedQPs = append(testedQPs, candidateQP)
 	}
 }
 
