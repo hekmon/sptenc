@@ -556,6 +556,10 @@ var batchsearchCommand = &cli.Command{
 				}
 			}
 		}
+		// Batch search phase is over: remove its UI before starting final encode.
+		// Stop() is idempotent (nil guard), so the deferred cleanup on normal
+		// return is a no-op; the defer still catches early error returns.
+		batch.Stop()
 
 		// Step 4 - final encode ? (CPU)
 		bestIndex := batch.bestCandidateIndex
@@ -706,7 +710,6 @@ var batchsearchCommand = &cli.Command{
 				)
 			}
 		}
-
 		// Regenerate MKV statistics tags
 		fmt.Fprintln(bypass, "Regenerating MKV statistics tags...")
 		start = time.Now()
@@ -716,7 +719,6 @@ var batchsearchCommand = &cli.Command{
 		}
 		duration = time.Since(start)
 		fmt.Fprintf(bypass, "\tMKV statistics tags regenerated in %s\n", duration.Round(time.Second))
-
 		// Verify container-level color metadata
 		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
 
@@ -745,6 +747,19 @@ var batchsearchCommand = &cli.Command{
 		}
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
+		if finalEncoder != "" {
+			finalSize := encodedFileInfo.Size()
+			gpuBestSize := batch.sizes[bestIndex]
+			if finalSize < gpuBestSize {
+				saved := gpuBestSize - finalSize
+				fmt.Fprintf(bypass, "Final encode with %s: %s (saved %s, %s smaller than GPU search result).\n",
+					finalEncoder,
+					cunits.ImportInBytes(float64(finalSize)),
+					cunits.ImportInBytes(float64(saved)),
+					formatPercent(float64(saved)/float64(gpuBestSize)*100),
+				)
+			}
+		}
 		plateauToBest := computePlateauToBest(batch.sizes, bestIndex)
 		sufficientStrikes := plateauToBest
 		if bestIndex > 0 {
@@ -850,9 +865,15 @@ func (bs *batchStatus) ComputeBest() {
 }
 
 func (bs *batchStatus) Stop() {
+	if bs.candidatesLine == nil {
+		return
+	}
 	liveprogress.RemoveCustomLine(bs.separatorLine)
 	liveprogress.RemoveBar(bs.progressBar)
 	liveprogress.RemoveCustomLine(bs.candidatesLine)
+	bs.candidatesLine = nil
+	bs.progressBar = nil
+	bs.separatorLine = nil
 }
 
 func (bs *batchStatus) line() string {
