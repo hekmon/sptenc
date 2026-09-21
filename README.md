@@ -1,12 +1,12 @@
 # Split Encoder
 
-`sptenc` (Split Encoder) is a scene-aware, [VMAF](https://github.com/Netflix/vmaf)-driven video transcoder for enthusiasts who want perceptually transparent encodes at the smallest possible file size, and are willing to trade encoding speed for guaranteed quality.
+`sptenc` (Split Encoder) is a scene-aware, [VMAF](https://github.com/Netflix/vmaf)-driven video transcoder for enthusiasts who want every scene of their encodes to meet a measured quality target, at the smallest size that still meets it, and are willing to trade encoding speed for that.
 
 It splits the input into scene-aligned segments, encodes each one independently, and validates the result against configurable VMAF thresholds before accepting it.
 Failed segments are automatically re-encoded at a lower QP until all thresholds are met.
 A final, complete VMAF comparison between the encoded output and original source is performed at the end, and its results are embedded into the output file's metadata tags.
 
-This approach produces the smallest possible file without compromising the target quality defined by the VMAF profile.
+This approach gives each scene the highest QP, so the smallest size, that still passes the quality target defined by the VMAF profile.
 
 > **Trade-off:** Achieving both smaller file size AND guaranteed quality comes at a cost: encoding time will be significantly longer than standard single-pass encoding, as multiple QP values are tested on each segment until all VMAF thresholds are met. This is not the same as a single CRF pass with a whole-file VMAF check — that approach only validates an average, so one complex scene in an otherwise steady movie can be destroyed while the overall result still looks acceptable. sptenc enforces its quality floor on every single scene independently.
 
@@ -16,11 +16,11 @@ This approach produces the smallest possible file without compromising the targe
 
 You probably don't need sptenc if you just want to shrink a video for your phone. Standard tools like HandBrake or ffmpeg with CRF are faster and perfectly fine for that.
 
-sptenc is built for workflows where you want the **smallest file size that still meets a provable quality floor**:
+sptenc is built for workflows where you want the **smallest file size that still meets a VMAF floor you can prove**:
 
-- **Archival & preservation** — You have a high-bitrate source or lossless master (or an expensive AI-upscaled restoration) and want to compress it without ever dropping below a perceptual quality floor you can prove.
-- **Quality-per-bit optimization** — You target specific visual fidelity at the smallest possible size and currently do manual CRF sweeps, screenshot comparisons, or test encodes to find the right settings. sptenc automates that search and produces a VMAF report proving the result.
-- **Large collection processing** — You process many files against a single, carefully tuned quality profile. sptenc treats that profile as a contract: every segment is encoded, measured, and corrected until it passes, with no manual verification required.
+- **Archival & preservation** — You have a high-bitrate source or lossless master (or an expensive AI-upscaled restoration) and want to compress it without ever dropping below a VMAF floor you can prove.
+- **Quality-per-bit optimization** — You target a specific visual fidelity at the smallest size and currently do manual CRF sweeps, screenshot comparisons, or test encodes to find the right settings. sptenc automates that search and produces a VMAF report documenting the result.
+- **Large collection processing** — You process many files against a single, carefully tuned quality profile. sptenc treats that profile as a contract: every segment is encoded, measured, and corrected until it passes, without you checking scores by hand.
 - **NAS / media server optimization** — You maintain a personal library of high-bitrate remuxes and need to balance quality against storage costs. sptenc replaces manual CRF trial-and-error with a measurable guarantee, so you keep the quality that matters and reclaim the space that doesn't.
 
 If you already know why CRF averages can hide bad frames, sptenc closes the loop: encode, measure, correct, converge.
@@ -364,7 +364,7 @@ Because a given VMAF target can require very different QP distributions dependin
 
 These are the opinionated defaults sptenc passes to ffmpeg. They are intentionally not configurable: the goal is to let you tune **VMAF thresholds** and **scene detection**, not encoder minutiae. If you need full control over every ffmpeg flag, ffmpeg itself is the right tool.
 
-The defaults are selected for a single goal: **guaranteed perceptual quality at the smallest possible file size**. Every option is chosen with that trade-off in mind.
+The defaults are selected for a single goal: **a VMAF target met by every segment, at the smallest file size**. Every option is chosen with that trade-off in mind.
 
 > **10-bit output is mandatory.** All encoders target `yuv420p10le` (`main10` for HEVC, `main` for AV1 which includes 10-bit). 10-bit greatly reduces banding and improves compression efficiency at low bitrates — it is the modern baseline for quality encoding.
 >

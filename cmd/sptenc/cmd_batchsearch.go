@@ -142,8 +142,8 @@ var batchsearchCommand = &cli.Command{
 		"quality compared to GPU encoders, which are optimized for speed rather than compression efficiency.\n" +
 		"The GPU-found threshold is usually close enough for the CPU pass to be worth the speedup,\n" +
 		"though it may not be exactly optimal.\n\n" +
-		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op because the search\n" +
-		"result is already the most precise result possible.\n\n" +
+		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op: the search\n" +
+		"result already comes from the encoder of the final file.\n\n" +
 		"CACHE ISOLATION\n" +
 		"By default all encodes for the same encoder + VMAF profile combo share a single QP history cache.\n" +
 		"If you encode content with wildly different visual characteristics (e.g. grainy film vs. clean CGI),\n" +

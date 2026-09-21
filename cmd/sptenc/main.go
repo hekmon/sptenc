@@ -59,7 +59,7 @@ func main() {
 			"  4. Merges all validated segments into the final output file.\n" +
 			"  5. Embeds the final VMAF results as metadata tags.\n\n" +
 			"TRADE-OFF\n" +
-			"This guarantees the target perceptual quality at the smallest possible file size,\n" +
+			"Every segment meets the target VMAF profile at the highest QP (smallest size) that passes,\n" +
 			"but encoding takes significantly longer than a standard single-pass encode\n" +
 			"because multiple QP candidates are tested per segment.\n\n" +
 			"This is not the same as a single CRF pass followed by a whole-file VMAF check.\n" +
