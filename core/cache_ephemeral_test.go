@@ -153,19 +153,24 @@ func TestEphemeralStatsCache_Snapshot(t *testing.T) {
 }
 
 func TestEphemeralStatsCache_WrapsAnotherEphemeral(t *testing.T) {
-	// Simulate batchsearch pattern: an outer ephemeral wraps an inner ephemeral
-	// that has already accumulated QPs from previous candidates.
+	// An ephemeral cache is a StatsCache like any other: it can seed another one, which then
+	// starts from everything the first one knows (its own base and the QPs it accumulated).
+	// Nothing does it today: FindAllSegmentsQP wraps the cache it is given for the duration of
+	// one search, and batchsearch gives the same persistent cache to every candidate, so each
+	// one starts from the history only, not from what the previous candidates found. This test
+	// keeps the wrapping valid for a caller willing to carry that knowledge from a search to
+	// the next.
 	persistent := &weightedMockStatsCache{mean: 20, stddev: 5, weight: 10}
 	inner := newEphemeralStatsCache(persistent, 0, 51)
 	inner.addQP(22)
-	inner.addQP(24) // candidate 1 results
+	inner.addQP(24) // what a first search found
 
-	// Outer ephemeral seeds from inner — as FindAllSegmentsQP would do for candidate 2
+	// Outer ephemeral seeds from inner, as FindAllSegmentsQP would if it was given inner
 	outer := newEphemeralStatsCache(inner, 0, 51)
-	outer.addQP(23) // one segment from candidate 2
+	outer.addQP(23) // one segment of a second search
 
 	mean, stddev := outer.GetMeanStdDev()
-	// Total weight: 10 (persistent) + 2 (candidate1) + 1 (candidate2) = 13
+	// Total weight: 10 (persistent) + 2 (first search) + 1 (second search) = 13
 	// Weighted mean: (20*10 + 22 + 24 + 23) / 13 = 269/13 ≈ 20.69 → 21
 	if mean != 21 {
 		t.Errorf("expected mean 21, got %d", mean)
