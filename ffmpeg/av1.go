@@ -429,7 +429,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 		"-tune", "hq",
 		"-rc", "constqp",
 		"-qp", strconv.Itoa(config.Quantization),
-		// Same best-effort rationale as HEVC NVENC: believed inert under constqp, no cost if ignored.
+		// Same as HEVC NVENC: honored under constqp, identical for every tested QP (see hevc.go).
 		"-spatial-aq", strconv.Itoa(nvEncSpatialAQ),
 		"-temporal-aq", strconv.Itoa(nvEncTemporalAQ),
 	)

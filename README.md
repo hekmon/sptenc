@@ -56,7 +56,7 @@ sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant 
 - **CQP** applies the same base quantization to every frame. The encoder does not second-guess the quality target — QP 22 means QP 22, period. This makes the relationship between the dial and VMAF **stable and predictable**, which is what allows the interpolation search to converge in 3–5 attempts instead of testing every value.
 - **CRF** (Constant Rate Factor) tells the encoder to vary QP frame-by-frame internally to hit a perceptual quality target. The same CRF value can produce different effective quantizations depending on scene complexity, which turns the search space into a moving target. Interpolating across CRF values is noisy and unreliable.
 
-The encoder still applies local optimizations (adaptive quantization, lookahead), but since these are held **constant across every tested QP**, the comparison between candidates remains stable.
+What happens around that base QP depends on the encoder. `libx265` turns adaptive quantization and cu-tree off by itself in constant QP mode, whatever is asked: the QP requested is the QP applied, frame type offsets aside. NVENC encoders keep their spatial and temporal adaptive quantization (and their lookahead) active under `constqp`: the QP requested is a base the driver modulates per block. Either way these settings are **identical for every tested QP**, only the base QP moves, so the comparison between candidates remains stable.
 
 The trade-off is familiar: CRF produces smaller files for a given *average* quality, but it delegates quality control to the encoder. sptenc takes the opposite approach — it fixes quantization and lets the scene splitter decide where quality should vary. This is slower, but it makes the VMAF guarantee enforceable segment by segment.
 
@@ -358,7 +358,7 @@ Under the hood, here are the base options used by sptenc. `X` is the QP value be
 
 **libx265**
 ```bash
-ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset 'slow' -qp 'X' -x265-params 'aq-mode=3' [...]
+ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset 'slow' -qp 'X' [...]
 ```
 
 **hevc_nvenc**

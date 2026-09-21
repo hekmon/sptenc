@@ -57,11 +57,6 @@ const (
 	HEVCLibx265QPMin = 0
 	// HEVCLibx265QPMax is the maximum Quantization Parameter (QP) value for HEVC encoders.
 	HEVCLibx265QPMax = 51
-
-	libx265AQMode = 3 // AQ enabled with auto-variance and bias to dark scenes - https://x265.readthedocs.io/en/latest/cli.html#cmdoption-aq-mode
-	// AQ is held constant across all tested QPs, so relative comparisons remain stable.
-	// What would break the search is the encoder changing its own target between runs (CRF),
-	// not local bit redistribution that is applied the same way at every tested point.
 )
 
 // HEVCLibx265EncodeQPConfig holds the configuration for HEVC encoding using libx265.
@@ -122,9 +117,16 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 			"-x265-params", "lossless=1",
 		)
 	} else {
+		// No aq-mode here, on purpose: it used to be set to 3 (auto-variance with a bias to dark
+		// scenes), x265 turns adaptive quantization and cu-tree off by itself in constant QP mode,
+		// whatever is asked: -qp with aq-mode=0 and with aq-mode=3 give the very same stream, bit
+		// for bit (they differ with -crf). With -qp, the QP asked is really the QP applied
+		// (frame type offsets aside), and an aq-mode parameter in the command line only claims
+		// something that does not happen. This is the opposite of NVENC, which keeps its AQ active
+		// under constqp (see below).
 		args = append(args,
 			"-qp", strconv.Itoa(config.Quantization),
-			"-x265-params", fmt.Sprintf("log-level=error:aq-mode=%d", libx265AQMode),
+			"-x265-params", "log-level=error",
 		)
 	}
 	//// end with output
@@ -283,11 +285,13 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 			"-tune", "hq",
 			"-rc", "constqp",
 			"-qp", strconv.Itoa(config.Quantization),
-			// AQ flags are believed inert under constqp: NVIDIA documents constqp as
-			// "the entire frame is encoded using QP specified in constQP", leaving no
-			// room for per-block QP modulation (unlike x265, where AQ is an offset layer
-			// on the base QP and stays active in CQP). FFmpeg forwards the flags without
-			// warning. Kept as best-effort: no cost if ignored, gain if the driver honors them.
+			// AQ flags are honored under constqp, despite NVIDIA documenting constqp as "the
+			// entire frame is encoded using QP specified in constQP". Measured: the encoder
+			// is deterministic (same command, same stream) and toggling -spatial-aq or
+			// -temporal-aq changes the stream. So -qp is a base QP the driver modulates per
+			// block, unlike libx265 which turns its AQ off by itself in constant QP mode.
+			// This does not harm the search: the flags are the same for every tested QP,
+			// only the base QP moves between two candidates.
 			"-spatial-aq", strconv.Itoa(nvEncSpatialAQ),
 			"-temporal-aq", strconv.Itoa(nvEncTemporalAQ),
 		)

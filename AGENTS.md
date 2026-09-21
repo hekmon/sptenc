@@ -66,8 +66,8 @@ Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `c
 `pipeline/encoder.go` contains a long, explicit `switch` that maps each encoder to its concrete ffmpeg invocation. This is intentional.
 
 Each encoder uses **distinct ffmpeg semantics**:
-- `libx265`: `-qp X -x265-params 'aq-mode=3'`
-- NVENC: `-rc constqp -qp X -rc-lookahead 32`
+- `libx265`: `-qp X` (no `aq-mode`: x265 disables AQ by itself in constant QP mode)
+- NVENC: `-rc constqp -qp X -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1` (AQ is honored under `constqp`)
 - VAAPI: `-rc_mode CQP -qp X`
 - VideoToolbox: `-q:v X` (note: `-q:v`, not `-qp`)
 
