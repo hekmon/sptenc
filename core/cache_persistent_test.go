@@ -129,8 +129,8 @@ func TestStatsCacheHistory_GetMeanStdDev_Empty(t *testing.T) {
 	}
 
 	mean, stddev := sch.GetMeanStdDev()
-	expectedMean := (51 - 0 + 1) / 2   // 26
-	expectedStddev := expectedMean / 2 // 13
+	expectedMean := 26   // middle of [0,51] is 25.5, rounded
+	expectedStddev := 13 // a quarter of the 52 QPs
 	if mean != expectedMean {
 		t.Errorf("expected mean %d for empty cache, got %d", expectedMean, mean)
 	}
@@ -376,8 +376,8 @@ func TestStatsCacheHistory_QPRangeBoundary(t *testing.T) {
 	}
 
 	mean, stddev := sch.GetMeanStdDev()
-	expectedMean := (30 - 10 + 1) / 2  // 10
-	expectedStddev := expectedMean / 2 // 5
+	expectedMean := 20  // middle of [10,30]: the range offset must be taken into account
+	expectedStddev := 5 // a quarter of the 21 QPs, rounded
 	if mean != expectedMean {
 		t.Errorf("expected mean %d for QP range [10,30], got %d", expectedMean, mean)
 	}

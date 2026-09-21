@@ -305,7 +305,7 @@ When using a GPU encoder, you can target a specific device:
 sptenc's per-segment QP search uses a 3-step algorithm that converges on the highest valid QP (smallest file) efficiently, even on the first run:
 
 1. **Smart start** — The first candidate is the weighted mean QP from previous runs. On a cold start, it falls back to the midpoint of the encoder's QP range (e.g. QP 26 for libx265's 0–51 range).
-2. **Bracketing** — Steps from the starting point in increment-sized steps to find one valid QP (passes VMAF) and one invalid QP (fails VMAF), closing the search range around the boundary. With cached stats the step size is the observed standard deviation; on a cold start it falls back to half the QP range midpoint.
+2. **Bracketing** — Steps from the starting point in increment-sized steps to find one valid QP (passes VMAF) and one invalid QP (fails VMAF), closing the search range around the boundary. With cached stats the step size is the observed standard deviation; on a cold start it falls back to a quarter of the QP range (e.g. 13 for libx265's 0–51 range).
 3. **Interpolation** — Once bracketed, **Fritsch-Butland monotone cubic interpolation** predicts the optimal candidate within the range, walking toward the highest valid QP without blind probing.
 
 This typically requires only 3–5 encode attempts per segment, compared to a brute-force search that could probe dozens of QP values.

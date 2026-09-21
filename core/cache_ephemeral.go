@@ -27,8 +27,7 @@ func newEphemeralStatsCache(base StatsCache, qpMin, qpMax int) *ephemeralStatsCa
 		e.baseStddev = stddev
 		e.baseWeight = weight
 	} else {
-		e.baseMean = float64(qpMax-qpMin+1) / 2
-		e.baseStddev = e.baseMean / 2
+		e.baseMean, e.baseStddev = coldStartStats(qpMin, qpMax)
 		e.baseWeight = 1
 	}
 	return e

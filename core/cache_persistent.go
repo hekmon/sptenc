@@ -64,9 +64,8 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 	defer sch.access.RUnlock()
 	// If we do not have stats yet, set data like a quick sort/search
 	if len(sch.stats) == 0 {
-		mean = (sch.qpMax - sch.qpMin + 1) / 2
-		stddev = mean / 2
-		return
+		meanf, stddevf := coldStartStats(sch.qpMin, sch.qpMax)
+		return int(math.Round(meanf)), max(1, int(math.Round(stddevf)))
 	}
 	meanf, stddevf, _, _ := sch.computeWeightedAggregate()
 	// Round to nearest integers - trust the statistics
@@ -138,10 +137,10 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error
 	if len(qpf) == 1 {
 		// The sample standard deviation of a single value is NaN, which can not be serialized
 		// to JSON. A single segment tells where the center is but nothing about the spread:
-		// record the same step a cold start would use (a quarter of the QP range). Recording 0
-		// would make the next search crawl one QP at a time if this run is alone in the cache.
+		// record the same step a cold start would use (see coldStartStats). Recording 0 would
+		// make the next search crawl one QP at a time if this run is alone in the cache.
 		mean = qpf[0]
-		stddev = float64(sch.qpMax-sch.qpMin+1) / 4
+		_, stddev = coldStartStats(sch.qpMin, sch.qpMax)
 	} else {
 		mean, stddev = stat.MeanStdDev(qpf, nil)
 	}
