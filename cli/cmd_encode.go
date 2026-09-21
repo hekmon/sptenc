@@ -290,7 +290,6 @@ var encodeCommand = &cli.Command{
 		/*
 		 * Execute process
 		 */
-
 		globalStart := time.Now()
 
 		// Step 1 - Segments and media infos
@@ -575,13 +574,15 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 	results core.QPSearchResults, encodedSegmentsMerged string, err error) {
 	bypass := liveprogress.Bypass()
 	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
-	lqps := &LiveQPSearch{
+	mean, stddev := statsCache.GetMeanStdDev()
+	fmt.Fprintf(bypass, "\tUsing search parameters mean %d and stddev %d\n", mean, stddev)
+	lqps := LiveQPSearch{
 		PrintDebug:  debug,
 		Concurrency: concurrency,
 	}
 	lqps.Start(len(segmentsPaths), totalDuration)
 	start := time.Now()
-	results, err = core.FindAllSegmentsQP(ctx, lqps,
+	results, err = core.FindAllSegmentsQP(ctx, &lqps,
 		core.QPSearchConfig{
 			SegmentsPaths:        segmentsPaths,
 			Auditor:              vmafAuditor,
@@ -629,7 +630,6 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 	fmt.Fprintf(bypass, "\tAttempts ratio: x%s\n", strconv.FormatFloat(float64(results.TotalNbAttempts)/float64(len(segmentsPaths)), 'f', -1, 64))
 	fmt.Fprintf(bypass, "\tEncoded frames ratio: x%s\n", strconv.FormatFloat(float64(results.TotalEncodedFrames)/float64(results.TotalSegmentsFrames), 'f', -1, 64))
 	fmt.Fprintf(bypass, "\tSegments encoding QP search done in %s.\n", duration.Round(time.Second))
-
 	// Merge encoded segments
 	fmt.Fprintln(bypass, "Merging segments...")
 	encodedSegmentsMerged = filepath.Join(workingDir, "encoded_segments_merged.mkv")
