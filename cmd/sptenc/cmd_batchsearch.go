@@ -127,14 +127,17 @@ var batchsearchCommand = &cli.Command{
 		"quality validation.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
-		"each candidate encode. On consumer hardware (even high-end) CPU encoders already saturate physical\n" +
-		"cores with a single segment. With hyperthreading/SMT enabled, 50% of total threads is the effective\n" +
-		"ceiling; exceeding it thrashes cache and memory bandwidth without improving throughput.\n" +
-		"This option is intended for GPU encoders, which often support multiple parallel sessions.\n" +
-		"Hard session limits vary by generation and SKU (typically 1-3 on consumer cards), so verify\n" +
-		"your specific GPU's capabilities first. Once confirmed, raising this value is highly encouraged\n" +
-		"for GPU-based searches — it can significantly reduce total runtime for a process that is already\n" +
-		"long by nature.\n\n" +
+		"each candidate encode (default: 1). The output is the same whatever the value, only the time it\n" +
+		"takes changes.\n" +
+		"  * GPU encoders often support multiple parallel sessions. Hard session limits vary by generation\n" +
+		"    and SKU (typically 1-3 on consumer cards), so verify your specific GPU's capabilities first.\n" +
+		"    Once confirmed, raising this value is highly encouraged for GPU-based searches: it can\n" +
+		"    significantly reduce total runtime for a process that is already long by nature.\n" +
+		"  * CPU encoders use every thread of the machine on their own, but a single encode does not keep\n" +
+		"    a many-core CPU fully busy. On a 16 cores / 32 threads CPU, libx265 at 1080p encoded 26% more\n" +
+		"    frames per second with 2 concurrent segments, and up to 46% more with 3 and --" + vmafCUDAFlagName + ".\n" +
+		"    Expect less with fewer cores or bigger pictures, and mind the memory with 4K content.\n" +
+		"This flag only applies to the search: the final encode (--" + finalEncodeFlagName + ") runs one segment at a time.\n\n" +
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
 		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
@@ -228,11 +231,6 @@ var batchsearchCommand = &cli.Command{
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
-		}
-		// Reject concurrent segments with CPU encoders
-		if cmd.Int(concurrentSegmentsFlagName) > 1 && !ffmpeg.IsGPU(ffmpeg.Encoder(requestedEncoder)) {
-			return ctx, fmt.Errorf("--%s is only supported with GPU encoders; %s is a CPU encoder. Use a GPU encoder for the search loop with --%s for a CPU final pass",
-				concurrentSegmentsFlagName, requestedEncoder, finalEncodeFlagName)
 		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
@@ -616,7 +614,9 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Run QP search with final encoder
-			// Final encode always uses a CPU encoder, so concurrency must be 1.
+			// The final encode runs one segment at a time: --concurrent-segments has been chosen
+			// for the search encoder (a GPU one most of the time), it says nothing about what
+			// the CPU can take.
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
 				vmafAuditor, finalStatsCache, finalEncoderAdapter, 1, cmd.Bool(debugFlagName))
 			if err != nil {

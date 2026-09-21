@@ -78,9 +78,10 @@ type QPSearchConfig struct {
 	Encoder SegmentEncoder
 	// NbConcurrentSegments sets the number of segments that will be searched (and encoded) in parallel.
 	// Can be omitted: 0 or negative values will be set to 1.
-	// USE WITH CAUTION: GPU encoders have hard session limits, and CPU encoders already
-	// saturate physical cores in most cases. Only increase this if you know how many parallel encodes
-	// your specific hardware can sustain.
+	// The results are the same whatever the value, only the time taken changes. GPU encoders have
+	// hard session limits which must not be exceeded. CPU encoders do gain from a few concurrent
+	// encodes on many-core machines (a single encode does not keep them fully busy), at the
+	// cost of memory.
 	NbConcurrentSegments int
 
 	// ephemeral holds the in-memory stats accumulator for this encode.

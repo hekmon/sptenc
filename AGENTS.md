@@ -60,14 +60,14 @@ Not obvious enough to change the dial every encoder shares, so QP stays. Reopeni
 
 ### Segment encoding concurrency
 
-Segments are encoded **sequentially by default**, but **optional concurrency** is supported via `QPSearchConfig.NbConcurrentSegments` (CLI: `--concurrent-segments` / `-C`). The CLI rejects concurrency greater than 1 for CPU encoders.
+Segments are encoded **sequentially by default**, but **optional concurrency** is supported via `QPSearchConfig.NbConcurrentSegments` (CLI: `--concurrent-segments` / `-C`), with every encoder. Results are the same whatever the value (checked down to the video stream checksum), only the time taken changes.
 
-- **CPU encoders** (`libx265`, `libsvtav1`) are limited to 1 concurrent segment. They already saturate physical cores on enthusiast hardware; concurrent instances thrash cache and memory bandwidth, reducing total throughput. The CLI enforces this limit with a hard error if a higher value is requested.
-- **GPU encoders** benefit from concurrency because they often support multiple parallel sessions (typically 1–3 on consumer cards, SKU-dependent). The `batchsearch` command encourages raising this value for GPU-based threshold discovery, followed by an optional sequential CPU final encode (`--final-encode`) for maximum compression efficiency.
+- **CPU encoders** (`libx265`, `libsvtav1`) used to be limited to 1 concurrent segment with a hard error, on the belief that a single encode saturates the CPU and that concurrent ones thrash cache and memory bandwidth. It was measured and it is wrong: x265 does create one thread per logical CPU, but a single encode does not keep a many-core CPU busy. On a 16 cores / 32 threads machine, the real pipeline with `libx265` at 1080p encoded 26% to 31% more frames per second with 2 and 3 concurrent segments (VMAF on CPU), 36% to 46% with VMAF on CUDA. Raw encodes: +45% to +60% at 1080p, +21% at 2160p with x265, +34% to +58% with SVT-AV1. Forcing the encoder to the physical cores count was measured too: same output, 10% slower, do not do it.
+- **GPU encoders** benefit from concurrency because they often support multiple parallel sessions (typically 1–3 on consumer cards, SKU-dependent). The `batchsearch` command encourages raising this value for GPU-based threshold discovery, followed by an optional CPU final encode (`--final-encode`) for maximum compression efficiency.
 
 Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `core/qpsearch.go`, with worker-scoped callbacks so the UI can attribute progress to individual workers.
 
-**Implication:** The default remains sequential for safety. Only raise concurrency when you know your hardware can sustain it. Naive goroutine-per-segment approaches would hurt performance or fail on hardware limits.
+**Implication:** The default remains sequential: the right value depends on the hardware (GPU session limits, CPU cores, memory) and is the user's to pick. Naive goroutine-per-segment approaches would fail on hardware limits. Segments searched together can not learn from each other through the ephemeral cache: the first ones of a run need a few more attempts, a fixed cost.
 
 ### Explicit per-encoder switches
 

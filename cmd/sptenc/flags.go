@@ -111,7 +111,7 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 			&cli.IntFlag{
 				Name:      concurrentSegmentsFlagName,
 				Aliases:   []string{"C"},
-				Usage:     "Number of segments to encode in parallel (GPU encoders only)",
+				Usage:     "Number of segments to search and encode in parallel",
 				Value:     1,
 				OnlyOnce:  true,
 				Validator: validateConcurrentSegments,
