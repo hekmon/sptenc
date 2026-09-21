@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
@@ -277,6 +278,12 @@ func AV1SVTAV1EncodeQP(ctx context.Context, config AV1SVTAV1EncodeQPConfig) (err
 		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	// The SVT-AV1 library writes its own logs straight to stderr, ignoring ffmpeg's -loglevel:
+	// its information banner (about 20 lines) would be reported as errors for every single
+	// encode. Unlike libx265 (log-level within -x265-params) there is no encoder parameter for
+	// this, only an environment variable read by the library itself.
+	// SVT_LOG levels: 0 fatal, 1 error, 2 warning, 3 info (default), 4 debug.
+	cmd.Env = append(os.Environ(), "SVT_LOG=1")
 	// Prepare output handling
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
