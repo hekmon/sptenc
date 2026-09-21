@@ -54,14 +54,6 @@ var splitCommand = &cli.Command{
 			},
 			// Directories
 			&cli.StringFlag{
-				Name:     outputDirFlagName,
-				Aliases:  []string{"o"},
-				Usage:    "Output directory for split scenes",
-				Value:    "",
-				OnlyOnce: true,
-				Category: "Directories",
-			},
-			&cli.StringFlag{
 				Name:             tmpDirFlagName,
 				Aliases:          []string{"t"},
 				Usage:            "Directory for temporary working files",
@@ -81,6 +73,10 @@ var splitCommand = &cli.Command{
 			Name:      "inputfile",
 			UsageText: "<input file>",
 		},
+		&cli.StringArg{
+			Name:      "outputdir",
+			UsageText: "<output directory>",
+		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		// Check required tools
@@ -90,25 +86,31 @@ var splitCommand = &cli.Command{
 		if err := checkFFProbe(ctx); err != nil {
 			return ctx, err
 		}
-		// Input file arg
-		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("only one input file is required")
+		// Check arguments
+		if cmd.Args().Len() != 2 {
+			return ctx, errors.New("exactly two arguments are required: input file and output directory")
 		}
-		fileInfos, err := os.Stat(cmd.Args().First()) // args are not parsed yet, can not use cmd.StringArg("inputfile")
+		inputFilePath := cmd.Args().First()
+		outputDir := cmd.Args().Get(1)
+		fileInfos, err := os.Stat(inputFilePath) // args are not parsed yet, can not use cmd.StringArg("inputfile")
 		if err != nil {
 			return ctx, fmt.Errorf("failed to access input file: %w", err)
 		}
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input file must be a regular file")
 		}
-		// Check output directory if explicitly provided
-		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
-			if fileInfos, err = os.Stat(outputDir); err != nil {
-				return ctx, fmt.Errorf("failed to access output directory: %w", err)
-			}
+		// Validate or create output directory
+		fileInfos, err = os.Stat(outputDir)
+		if err == nil {
 			if !fileInfos.IsDir() {
-				return ctx, errors.New("output directory path must be a directory")
+				return ctx, fmt.Errorf("output path exists and is not a directory: %s", shellescape.Quote(outputDir))
 			}
+		} else if os.IsNotExist(err) {
+			if err = os.MkdirAll(outputDir, 0755); err != nil {
+				return ctx, fmt.Errorf("failed to create output directory: %w", err)
+			}
+		} else {
+			return ctx, fmt.Errorf("failed to access output directory: %w", err)
 		}
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
@@ -232,10 +234,7 @@ var splitCommand = &cli.Command{
 		printSceneStats(bypass, scenes, duration, stats.VideoTrack())
 
 		// split
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = filepath.Dir(inputFilePath)
-		}
+		outputDir := cmd.StringArg("outputdir")
 		fmt.Fprintf(bypass, "Splitting scenes...\n")
 		start = time.Now()
 		if err = liveSplitScenes(ctx, fileToProcess, outputDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {

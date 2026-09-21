@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/sptenc/ffmpeg"
-	"github.com/hekmon/sptenc/metadata"
 	"github.com/hekmon/sptenc/mkvtoolnix"
 
 	"github.com/hekmon/liveprogress/v2"
@@ -124,6 +125,18 @@ func getFileSize(path string) (size int64, err error) {
 	return
 }
 
+// validateOutputPath checks that the output path has a .mkv extension and
+// does not already exist.
+func validateOutputPath(outputPath string) error {
+	if filepath.Ext(outputPath) != ".mkv" {
+		return errors.New("output file must have a .mkv extension")
+	}
+	if _, err := os.Stat(outputPath); err == nil {
+		return fmt.Errorf("output file already exists: %s", shellescape.Quote(outputPath))
+	}
+	return nil
+}
+
 // AllAudioTracksPCM returns true if all audio streams in the given stats are PCM encoded.
 func AllAudioTracksPCM(stats ffmpeg.FFProbeStats) bool {
 	for _, stream := range stats.Streams {
@@ -134,13 +147,6 @@ func AllAudioTracksPCM(stats ffmpeg.FFProbeStats) bool {
 		}
 	}
 	return true
-}
-
-func computeFinalPath(input, outputDir string, encoder ffmpeg.Encoder) (final string) {
-	baseName, _ := extractFileNameInfos(input)
-	final = filepath.Join(outputDir,
-		fmt.Sprintf("%s [%s %s].mkv", baseName, encoder, metadata.TitleTagValue))
-	return
 }
 
 // formatPercent formats a float64 as a percentage string with up to 1 decimal

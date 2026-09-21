@@ -31,15 +31,7 @@ var masterCommand = &cli.Command{
 		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss.\n" +
 		"FFV1 is mathematically lossless, so this introduces no degradation compared to the original.",
 	Flags: func() []cli.Flag {
-		flags := []cli.Flag{
-			&cli.StringFlag{
-				Name:     outputDirFlagName,
-				Aliases:  []string{"o"},
-				Usage:    "Output directory",
-				Value:    "",
-				OnlyOnce: true,
-			},
-		}
+		flags := []cli.Flag{}
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
 	}(),
@@ -47,6 +39,10 @@ var masterCommand = &cli.Command{
 		&cli.StringArg{
 			Name:      "inputfile",
 			UsageText: "<input file>",
+		},
+		&cli.StringArg{
+			Name:      "output",
+			UsageText: "<output file>",
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
@@ -57,25 +53,25 @@ var masterCommand = &cli.Command{
 		if err := checkFFProbe(ctx); err != nil {
 			return ctx, err
 		}
-		// Input file
-		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("only one input file is required")
+		// Check arguments
+		if cmd.Args().Len() != 2 {
+			return ctx, errors.New("exactly two arguments are required: input file and output file")
 		}
-		fileInfos, err := os.Stat(cmd.Args().First()) // args are not parsed yet, can not use cmd.StringArg("inputfile")
+		inputFilePath := cmd.Args().First()
+		outputFilePath := cmd.Args().Get(1)
+		fileInfos, err := os.Stat(inputFilePath)
 		if err != nil {
 			return ctx, fmt.Errorf("failed to access input file: %w", err)
 		}
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input file must be a regular file")
 		}
-		// Check output directory if explicitly provided
-		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
-			if fileInfos, err = os.Stat(outputDir); err != nil {
-				return ctx, fmt.Errorf("failed to access output directory: %w", err)
-			}
-			if !fileInfos.IsDir() {
-				return ctx, errors.New("output directory path must be a directory")
-			}
+		// Validate output path
+		if err := validateOutputPath(outputFilePath); err != nil {
+			return ctx, err
+		}
+		if inputFilePath == outputFilePath {
+			return ctx, errors.New("input file and output file must be different paths")
 		}
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
@@ -99,6 +95,7 @@ var masterCommand = &cli.Command{
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		// handle input file
 		inputFilePath := cmd.StringArg("inputfile")
+		outputFilePath := cmd.StringArg("output")
 		fileInfos, err := os.Stat(inputFilePath)
 		if err != nil {
 			return fmt.Errorf("failed to access input file: %w", err)
@@ -122,12 +119,8 @@ var masterCommand = &cli.Command{
 			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 		}
 		// create master
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = filepath.Dir(inputFilePath)
-		}
 		var outputFile string
-		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputDir, fileInfos.Size(), cmd.Bool(debugFlagName), masterConfig)
+		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputFilePath, fileInfos.Size(), cmd.Bool(debugFlagName), masterConfig)
 		if err == nil {
 			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
 		}
@@ -135,8 +128,8 @@ var masterCommand = &cli.Command{
 	},
 }
 
-func createMaster(ctx context.Context, inputFilePath, outputDir string, inputFileSize int64, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (
-	outputFile string, totalFrames int, duration time.Duration, err error) {
+func createMaster(ctx context.Context, inputFilePath, outputFile string, inputFileSize int64, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (
+	outputFileResult string, totalFrames int, duration time.Duration, err error) {
 	// count frames
 	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
 	start := time.Now()
@@ -150,8 +143,6 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, inputFil
 	)
 	// ffv1 encode
 	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
-	inputFileName, _ := extractFileNameInfos(inputFilePath)
-	outputFile = filepath.Join(outputDir, fmt.Sprintf("%s - ffv1 master.mkv", inputFileName))
 	start = time.Now()
 	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, masterConfig); err != nil {
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
@@ -175,5 +166,6 @@ func createMaster(ctx context.Context, inputFilePath, outputDir string, inputFil
 			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
 	}
+	outputFileResult = outputFile
 	return
 }

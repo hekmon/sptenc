@@ -71,6 +71,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | `master` | `m` | Tooling | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
 | `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
+| `remux` | `r` | Tooling | Replace the video track of a file with a new one without re-encoding |
 | `vmaf` | | Tooling | Compute VMAF between a reference and a distorted video |
 | `batchsearch` | `bs` | Advanced | Automatically search for the optimal scene detection threshold by encoding multiple candidates |
 
@@ -84,7 +85,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 Instead of letting sptenc split the input automatically, you can provide an already-split directory of segments. Files must be `.mkv` or `.mp4` and are processed in **alphabetical order** — name them accordingly (e.g. `seg_01.mkv`, `seg_02.mkv`) to preserve scene order. All segments must share the same codec and frame rate.
 
 ```bash
-./sptenc encode ./gop_dir/ --original-file original_with_audio.mkv
+./sptenc encode ./gop_dir/ output.mkv --original-file original_with_audio.mkv
 ```
 
 When using a pre-segmented directory, `--original-file` (alias `-f`) is **required** so sptenc can remux audio, subtitles, and other streams into the final output.
@@ -98,33 +99,33 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 
 ### Basic encode - VMAF harmonic mean ≥ 93 (default)
 ```bash
-./sptenc encode video.mkv
+./sptenc encode video.mkv output.mkv
 ```
 
 ### Strict quality with multiple thresholds
 ```bash
-./sptenc encode video.mkv --vmaf-mean 95 --vmaf-p5 85 --vmaf-min 70
+./sptenc encode video.mkv output.mkv --vmaf-mean 95 --vmaf-p5 85 --vmaf-min 70
 ```
 
 ### Upscaled or denoised source - use VMAF NEG
 ```bash
-./sptenc encode upscaled.mkv --vmaf-neg --vmaf-mean 93
+./sptenc encode upscaled.mkv output.mkv --vmaf-neg --vmaf-mean 93
 ```
 
 ### Fast VMAF profile prototyping with NVENC on the second GPU
 ```bash
-./sptenc encode video.mkv --encoder hevc_nvenc --vmaf-cuda --nvidia-gpu-index 1 --vmaf-mean 93
+./sptenc encode video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --nvidia-gpu-index 1 --vmaf-mean 93
 # Once happy with the profile, re-run with the default libx265 for the final smaller encode
 ```
 
 ### Pre-segmented directory
 ```bash
-./sptenc encode ./gop_dir/ --original-file original_with_audio.mkv --vmaf-mean 95
+./sptenc encode ./gop_dir/ output.mkv --original-file original_with_audio.mkv --vmaf-mean 95
 ```
 
 ### Concatenate segments without re-encoding
 ```bash
-./sptenc concat ./segments/ --output-dir ./merged/
+./sptenc concat ./segments/ merged.mkv
 ```
 
 ### Compute VMAF between two videos
@@ -138,16 +139,16 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 
 ### Find the optimal scene threshold automatically
 ```bash
-./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93
+./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93
 # Once the optimal threshold is found, run the final CPU encode
-./sptenc batchsearch video.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93 --final-encode
+./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93 --final-encode
 ```
 
 ### Manual pipeline (master → split → encode)
 ```bash
-./sptenc master video.mkv
-./sptenc split "video - ffv1 master.mkv" --master --threshold 12 --output-dir ./segments/
-./sptenc encode ./segments/ --original-file video.mkv
+./sptenc master video.mkv master.mkv
+./sptenc split master.mkv ./segments/ --master --threshold 12
+./sptenc encode ./segments/ output.mkv --original-file video.mkv
 ```
 
 > Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (1–100, default 14): higher values detect fewer scenes, lower values detect more.
@@ -357,15 +358,9 @@ ffmpeg [...] -c:v 'av1_vaapi' -profile:v 'main' -rc_mode 'CQP' -global_quality '
 
 ## Output
 
-The final output file is named:
-
-```
-<basename> [<encoder> SptEncoded].mkv
-```
-
-For example, encoding `Movie.mkv` with `libx265` produces `Movie [libx265 SptEncoded].mkv`.
-
 The output is always Matroska (`.mkv`) because it is the most permissive container for stream copy.
+
+You specify the output path explicitly as the final positional argument for file-producing commands (`encode`, `batchsearch`, `remux`, `master`, `concat`). Directory-producing commands (`split`) take an output directory in the same way.
 
 ### Metadata tags
 

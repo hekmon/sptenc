@@ -92,11 +92,8 @@ var remuxCommand = &cli.Command{
 			return ctx, errors.New("new video file and output file must be different paths")
 		}
 		// Validate output path
-		if filepath.Ext(outputPath) != ".mkv" {
-			return ctx, errors.New("output file must have a .mkv extension")
-		}
-		if _, err := os.Stat(outputPath); err == nil {
-			return ctx, fmt.Errorf("output file already exists: %s", shellescape.Quote(outputPath))
+		if err := validateOutputPath(outputPath); err != nil {
+			return ctx, err
 		}
 		// Validate new video file has a video stream
 		newStats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{

@@ -211,23 +211,9 @@ const (
 	directoriesCategoryName = "Directories"
 )
 
-// newDirectoryFlags returns the output, stats cache and temporary directory flags.
-func newDirectoryFlags(segmented bool) []cli.Flag {
-	var outputDefault string
-	if segmented {
-		outputDefault = " (defaults to input file directory, or original file directory for segment inputs)"
-	} else {
-		outputDefault = " (defaults to input file directory)"
-	}
+// newDirectoryFlags returns the stats cache and temporary directory flags.
+func newDirectoryFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringFlag{
-			Name:     outputDirFlagName,
-			Aliases:  []string{"o"},
-			Usage:    "Output directory" + outputDefault,
-			Value:    "",
-			OnlyOnce: true,
-			Category: directoriesCategoryName,
-		},
 		&cli.StringFlag{
 			Name:     statsCacheDirFlagName,
 			Aliases:  []string{"s"},

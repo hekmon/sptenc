@@ -24,14 +24,6 @@ var concatCommand = &cli.Command{
 		"This is useful for merging segments produced by the split command without re-encoding.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     outputDirFlagName,
-			Aliases:  []string{"o"},
-			Usage:    "Output directory for the concatenated file",
-			Value:    "",
-			OnlyOnce: true,
-			Category: "Directories",
-		},
-		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
 			Usage:            "Directory for temporary working files",
@@ -47,6 +39,10 @@ var concatCommand = &cli.Command{
 			Name:      "inputdir",
 			UsageText: "<input directory>",
 		},
+		&cli.StringArg{
+			Name:      "output",
+			UsageText: "<output file>",
+		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 		// Check required tools
@@ -56,25 +52,25 @@ var concatCommand = &cli.Command{
 		if err := checkFFProbe(ctx); err != nil {
 			return ctx, err
 		}
-		// Input directory arg
-		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("only one input directory is required")
+		// Check arguments
+		if cmd.Args().Len() != 2 {
+			return ctx, errors.New("exactly two arguments are required: input directory and output file")
 		}
-		fileInfos, err := os.Stat(cmd.Args().First())
+		inputDir := cmd.Args().First()
+		outputPath := cmd.Args().Get(1)
+		fileInfos, err := os.Stat(inputDir)
 		if err != nil {
 			return ctx, fmt.Errorf("failed to access input path: %w", err)
 		}
 		if !fileInfos.IsDir() {
 			return ctx, errors.New("input path must be a directory")
 		}
-		// Check output directory if explicitly provided
-		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
-			if fileInfos, err = os.Stat(outputDir); err != nil {
-				return ctx, fmt.Errorf("failed to access output directory: %w", err)
-			}
-			if !fileInfos.IsDir() {
-				return ctx, errors.New("output directory path must be a directory")
-			}
+		// Validate output path
+		if err := validateOutputPath(outputPath); err != nil {
+			return ctx, err
+		}
+		if inputDir == outputPath {
+			return ctx, errors.New("input directory and output file must be different paths")
 		}
 		return ctx, nil
 	},
@@ -83,18 +79,13 @@ var concatCommand = &cli.Command{
 			Prepare
 		*/
 		inputDir := cmd.StringArg("inputdir")
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = inputDir
-		}
+		outputPath := cmd.StringArg("output")
 		// start live progress
 		if err = liveprogress.Start(); err != nil {
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
-		// Build output path from directory name
-		outputPath := filepath.Join(outputDir, fmt.Sprintf("%s-concat.mkv", filepath.Base(inputDir)))
 		// create a temporary directory
 		var workingDir string
 		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {

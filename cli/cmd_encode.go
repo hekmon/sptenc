@@ -108,7 +108,7 @@ var encodeCommand = &cli.Command{
 			},
 		}
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
-		flags = append(flags, newDirectoryFlags(true)...)
+		flags = append(flags, newDirectoryFlags()...)
 		flags = append(flags, newVMAFFlags()...)
 		return
 	}(),
@@ -116,6 +116,10 @@ var encodeCommand = &cli.Command{
 		&cli.StringArg{
 			Name:      "inputpath",
 			UsageText: "<input path>",
+		},
+		&cli.StringArg{
+			Name:      "output",
+			UsageText: "<output file>",
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
@@ -152,13 +156,15 @@ var encodeCommand = &cli.Command{
 				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
 			}
 		}
-		// Input path argument
-		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("only one input file is required")
+		// Check arguments
+		if cmd.Args().Len() != 2 {
+			return ctx, errors.New("exactly two arguments are required: input path and output file")
 		}
-		fileInfos, err := os.Stat(cmd.Args().First()) // args are not parsed yet, can not use cmd.StringArg("inputpath")
+		inputPath := cmd.Args().First()
+		outputPath := cmd.Args().Get(1)
+		fileInfos, err := os.Stat(inputPath) // args are not parsed yet, can not use cmd.StringArg("inputpath")
 		if err != nil {
-			return ctx, fmt.Errorf("failed to access input file: %w", err)
+			return ctx, fmt.Errorf("failed to access input path: %w", err)
 		}
 		inputIsDir := fileInfos.IsDir()
 		if !inputIsDir {
@@ -181,14 +187,12 @@ var encodeCommand = &cli.Command{
 				return ctx, errors.New("original file must be a regular file")
 			}
 		}
-		// Check output directory if explicitly provided
-		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
-			if fileInfos, err = os.Stat(outputDir); err != nil {
-				return ctx, fmt.Errorf("failed to access output directory: %w", err)
-			}
-			if !fileInfos.IsDir() {
-				return ctx, errors.New("output directory path must be a directory")
-			}
+		// Validate output path
+		if err := validateOutputPath(outputPath); err != nil {
+			return ctx, err
+		}
+		if inputPath == outputPath {
+			return ctx, errors.New("input path and output file must be different paths")
 		}
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {
@@ -481,15 +485,7 @@ var encodeCommand = &cli.Command{
 		} else {
 			originalFile = inputPath
 		}
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			if inputInfos.IsDir() {
-				outputDir = filepath.Dir(cmd.String(originalFileFlagName))
-			} else {
-				outputDir = filepath.Dir(inputPath)
-			}
-		}
-		outputPath := computeFinalPath(originalFile, outputDir, ffmpeg.Encoder(cmd.String(encoderFlagName)))
+		outputPath := cmd.StringArg("output")
 		// Determine whether to auto-convert audio to FLAC.
 		// sourceStats was probed from either the input file (single file) or the first segment (directory).
 		// Probe originalFile directly to get the correct audio stream info in both cases.

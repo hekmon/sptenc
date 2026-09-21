@@ -179,7 +179,7 @@ var batchsearchCommand = &cli.Command{
 			},
 		)
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
-		flags = append(flags, newDirectoryFlags(false)...)
+		flags = append(flags, newDirectoryFlags()...)
 		flags = append(flags, newVMAFFlags()...)
 		return
 	}(),
@@ -187,6 +187,10 @@ var batchsearchCommand = &cli.Command{
 		&cli.StringArg{
 			Name:      "inputpath",
 			UsageText: "<input path>",
+		},
+		&cli.StringArg{
+			Name:      "output",
+			UsageText: "<output file>",
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
@@ -224,11 +228,13 @@ var batchsearchCommand = &cli.Command{
 				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc verify' to see available filters")
 			}
 		}
-		// Input path argument: batchsearch only accepts a single regular file
-		if cmd.Args().Len() != 1 {
-			return ctx, errors.New("only one input file is required")
+		// Check arguments: batchsearch only accepts a single regular file
+		if cmd.Args().Len() != 2 {
+			return ctx, errors.New("exactly two arguments are required: input file and output file")
 		}
-		fileInfos, err := os.Stat(cmd.Args().First())
+		inputPath := cmd.Args().First()
+		outputPath := cmd.Args().Get(1)
+		fileInfos, err := os.Stat(inputPath)
 		if err != nil {
 			return ctx, fmt.Errorf("failed to access input file: %w", err)
 		}
@@ -238,14 +244,12 @@ var batchsearchCommand = &cli.Command{
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input path must be a regular file")
 		}
-		// Check output directory if explicitly provided
-		if outputDir := cmd.String(outputDirFlagName); outputDir != "" {
-			if fileInfos, err = os.Stat(outputDir); err != nil {
-				return ctx, fmt.Errorf("failed to access output directory: %w", err)
-			}
-			if !fileInfos.IsDir() {
-				return ctx, errors.New("output directory path must be a directory")
-			}
+		// Validate output path
+		if err := validateOutputPath(outputPath); err != nil {
+			return ctx, err
+		}
+		if inputPath == outputPath {
+			return ctx, errors.New("input file and output file must be different paths")
 		}
 		// Create the cache dir if necessary
 		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {
@@ -634,15 +638,11 @@ var batchsearchCommand = &cli.Command{
 
 		// Step 6 - remuxing
 		fmt.Fprintln(bypass, "Remuxing to final file...")
-		outputDir := cmd.String(outputDirFlagName)
-		if outputDir == "" {
-			outputDir = filepath.Dir(inputPath)
-		}
+		outputPath := cmd.StringArg("output")
 		usedEncoder := ffmpeg.Encoder(cmd.String(encoderFlagName))
 		if finalEncoder != "" {
 			usedEncoder = finalEncoder
 		}
-		outputPath := computeFinalPath(inputPath, outputDir, usedEncoder)
 		var encodeToFlac bool
 		if originalStats, err := getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName)); err == nil {
 			encodeToFlac = AllAudioTracksPCM(originalStats)
