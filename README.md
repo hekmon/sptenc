@@ -414,7 +414,7 @@ Build from source:
 ```bash
 git clone https://github.com/hekmon/sptenc.git
 cd sptenc
-go build -o sptenc ./cli/
+go build -o sptenc ./cmd/sptenc/
 ```
 
 **External Dependencies:**

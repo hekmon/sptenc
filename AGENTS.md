@@ -25,13 +25,13 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 | `ffmpeg/` | ffmpeg command builders, ffprobe parsers, encoder wrappers, VMAF computation, hardware detection | Platform-specific ffmpeg logic, new encoder support, hardware acceleration paths. |
 | `pipeline/` | `EncoderAdapter` — bridges `core.SegmentEncoder` to concrete `ffmpeg` encoder functions | The adapter *is* the ffmpeg invocation mapping; changes here must be audited against the exact encoder switch in `ffmpeg/`. |
 | `metadata/` | `GenerateTags` — assembles ffmpeg metadata flags from `core` and `ffmpeg` results | Shared between CLI and any future front-ends (e.g. GUI). |
-| `cli/` | urfave/cli v3 commands, orchestration, live progress UI | UX changes, new commands, workflow modifications. |
+| `cmd/sptenc/` | urfave/cli v3 commands, orchestration, live progress UI | UX changes, new commands, workflow modifications. |
 | `mkvtoolnix/` | `mkvpropedit` wrapper for metadata tagging | Metadata format changes. |
 
 ## Critical files to read before changing anything
 
 - **`README.md`** — QP-vs-CRF rationale, cache system, GPU selection, all commands.
-- **`cli/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes live progress UI and statistical decision logic.
+- **`cmd/sptenc/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes live progress UI and statistical decision logic.
 - **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.
 - **`core/predicator.go`** — Monotonic interpolation with empirical ceiling adaptation. Contains benchmark data in comments proving method selection.

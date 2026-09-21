@@ -8,7 +8,7 @@ crosscompile () {
     else
         name='sptenc'
     fi
-    GOOS="$1" GOARCH="$2" go build -ldflags="-s" -o "$name" ./cli
+    GOOS="$1" GOARCH="$2" go build -ldflags="-s" -o "$name" ./cmd/sptenc
     zip -9 "sptenc_${version}_${1}_${2}.zip" "$name"
     rm "$name"
 }
