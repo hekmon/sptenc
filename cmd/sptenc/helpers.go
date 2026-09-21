@@ -151,6 +151,16 @@ func validateOutputPath(outputPath string) error {
 	return nil
 }
 
+// hasAudioTracks returns true if there is at least one audio stream in the given stats.
+func hasAudioTracks(stats ffmpeg.FFProbeStats) bool {
+	for _, stream := range stats.Streams {
+		if stream.CodecType == "audio" {
+			return true
+		}
+	}
+	return false
+}
+
 // AllAudioTracksPCM returns true if there is at least one audio stream in the given stats and
 // all of them are PCM encoded. A file without any audio is not "all PCM": there is nothing to
 // compress to FLAC, and saying otherwise to the user is misleading.

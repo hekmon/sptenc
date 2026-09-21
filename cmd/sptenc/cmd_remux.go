@@ -130,7 +130,12 @@ var remuxCommand = &cli.Command{
 		if cmd.Bool(encodeToFLACFlagName) {
 			encodeToFlac = AllAudioTracksPCM(origStats)
 			if !encodeToFlac {
-				fmt.Fprintf(bypass, "WARNING: --%s is set but not all audio tracks are PCM; copying audio instead\n", encodeToFLACFlagName)
+				// AllAudioTracksPCM is also false without any audio track: do not blame non PCM tracks then
+				if hasAudioTracks(origStats) {
+					fmt.Fprintf(bypass, "WARNING: --%s is set but not all audio tracks are PCM; copying audio instead\n", encodeToFLACFlagName)
+				} else {
+					fmt.Fprintf(bypass, "WARNING: --%s is set but the original file has no audio track; nothing to encode\n", encodeToFLACFlagName)
+				}
 			}
 		}
 
