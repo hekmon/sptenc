@@ -44,11 +44,19 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 ### QP (Constant QP), not CRF
 
-CQP applies the same base quantization to every frame, making QP→VMAF **monotonic and predictable**. This monotonicity enables interpolation search to converge in ~3–5 attempts per segment.
+The search needs a dial that is deterministic and monotonic for a given segment: QP→VMAF is, which lets the interpolation converge in ~3–5 attempts per segment. CRF→VMAF is too (measured with libx265): "CRF is too noisy to be searched" was the documented reason for years and it is wrong, do not bring it back.
 
-CRF varies QP frame-by-frame internally. The same CRF value produces different effective quantizations depending on scene complexity, making the search space noisy and unsuitable for interpolation.
+The actual reasons:
+- QP exists on every supported encoder, CRF does not (hardware encoders expose a constant quantizer or their own quality target). QP ranges, cache statistics and the GPU search → CPU final encode workflow are all built on that single dial.
+- CRF is a rate control moving bits with the encoder's own perceptual model, which is not VMAF. Here the scene splitter and the per-segment search decide where quality varies, against the metric the user chose, and a single-scene segment leaves little for a rate control to adapt to.
 
-**Implication:** Adding CRF modes, adaptive quantizers, or "hybrid CRF/QP" approaches would require redesigning the entire search algorithm, not just adding a flag.
+No claim is made about which one gives the smaller file at the same VMAF: it depends on the content. Switching the CPU encoders to CRF has been evaluated (file size needed to reach VMAF hmean 93 and 95, CRF relative to QP, three synthetic single-scene clips):
+- `libx265`: from -7% to +49%. cu-tree helps, but adaptive quantization spends bits VMAF does not see, massively so on grain.
+- `libsvtav1`: from -19% to 0%, never worse (its `-qp` mode turns off its temporal dependency model).
+
+Not obvious enough to change the dial every encoder shares, so QP stays. Reopening this needs measurements on real content, on several clips with different temporal structures: a single clip proves anything (a noisy one shows no difference at all, a static one shows a large gain).
+
+**Implication:** Adding CRF modes or "hybrid CRF/QP" approaches is not adding a flag: it means another dial with its own range, its own statistics, and no equivalent on the hardware encoders the search workflow relies on.
 
 ### Segment encoding concurrency
 

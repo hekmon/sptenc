@@ -53,12 +53,14 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 
 sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant QP)** mode, not CRF.
 
-- **CQP** applies the same base quantization to every frame. The encoder does not second-guess the quality target — QP 22 means QP 22, period. This makes the relationship between the dial and VMAF **stable and predictable**, which is what allows the interpolation search to converge in 3–5 attempts instead of testing every value.
-- **CRF** (Constant Rate Factor) tells the encoder to vary QP frame-by-frame internally to hit a perceptual quality target. The same CRF value can produce different effective quantizations depending on scene complexity, which turns the search space into a moving target. Interpolating across CRF values is noisy and unreliable.
+This is not because CRF could not be searched: for a given segment, both dials are deterministic (same value, same file) and monotonic (VMAF goes down as the value goes up), which is all the interpolation search needs to converge in a few attempts. The reasons are elsewhere:
+
+- **One dial for every encoder.** CRF is a software encoder concept. Hardware encoders expose a constant quantizer, or their own flavor of quality target, not CRF. With QP, the same search, the same statistics and the same workflow (search on a GPU encoder, final encode on its CPU counterpart) apply to every supported encoder.
+- **No rate control competing with the search.** CRF is a rate control: the encoder moves bits between frames and blocks following its own perceptual model (adaptive quantization, cu-tree), which is not VMAF. sptenc already has something deciding where quality must vary, against the metric you chose: the scene splitter, then the search of each segment. A segment being a single scene, its content is homogeneous, there is not much left for a rate control to adapt to.
 
 What happens around that base QP depends on the encoder. `libx265` turns adaptive quantization and cu-tree off by itself in constant QP mode, whatever is asked: the QP requested is the QP applied, frame type offsets aside. NVENC encoders keep their spatial and temporal adaptive quantization (and their lookahead) active under `constqp`: the QP requested is a base the driver modulates per block. Either way these settings are **identical for every tested QP**, only the base QP moves, so the comparison between candidates remains stable.
 
-The trade-off is familiar: CRF produces smaller files for a given *average* quality, but it delegates quality control to the encoder. sptenc takes the opposite approach — it fixes quantization and lets the scene splitter decide where quality should vary. This is slower, but it makes the VMAF guarantee enforceable segment by segment.
+Whether CRF would give a smaller or a bigger file at the same VMAF score depends on the content and is not something sptenc relies on. The guarantee does not come from the dial anyway: it comes from measuring every segment after it has been encoded, and encoding it again when it fails.
 
 ## Commands
 
