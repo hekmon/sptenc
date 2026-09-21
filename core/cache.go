@@ -22,17 +22,13 @@ type StatsCache interface {
 	GetMeanStdDev() (mean, stddev int)
 }
 
-// NewStatsCacheHistory initializes a stats cache for the given encoder, VMAF profile,
-// and optional user-provided cache profile. It loads any existing cache from disk or
+// NewStatsCacheHistory initializes a stats cache for the given encoder name, QP range, VMAF model,
+// VMAF profile, and optional user-provided cache profile. It loads any existing cache from disk or
 // starts with an empty history.
-func NewStatsCacheHistory(dir string, encoder SegmentEncoder, profile VMAFChecker, cacheProfile string) (sch *StatsCacheHistory, err error) {
-	qpMin, qpMax, found := encoder.QPRange()
-	if !found {
-		err = fmt.Errorf("unsupported encoder %s", encoder.Name())
-		return
-	}
+func NewStatsCacheHistory(dir string, encoderName string, qpMin, qpMax int, vmafModel string, profile VMAFChecker, cacheProfile string) (
+	sch *StatsCacheHistory, err error) {
 	sch = &StatsCacheHistory{
-		path:  filepath.Join(dir, computeCacheStatsFileName(encoder.Name(), profile, cacheProfile)),
+		path:  filepath.Join(dir, computeCacheStatsFileName(encoderName, vmafModel, profile, cacheProfile)),
 		qpMin: qpMin,
 		qpMax: qpMax,
 	}
@@ -174,6 +170,7 @@ func (sch *StatsCacheHistory) saveStats() error {
 // CacheFileIdentity holds the decoded components of a cache filename.
 type CacheFileIdentity struct {
 	Encoder      string
+	VMAFModel    string
 	Profile      VMAFChecker
 	CacheProfile string
 }
@@ -181,6 +178,7 @@ type CacheFileIdentity struct {
 const (
 	CacheFilePrefix        = "qphistory_"
 	cacheFileMarker        = "_vmaf-"
+	cacheFileModelMarker   = ".model~"
 	cacheFileVMAFSeparator = "|"
 	CacheFileExtension     = ".json"
 )
@@ -200,10 +198,17 @@ func ParseCacheFilename(name string) (identity CacheFileIdentity, ok bool) {
 	name = strings.TrimPrefix(name, CacheFilePrefix)
 	// Step 3 - check and remove marker to extract encoder and the rest
 	var rest string
-	identity.Encoder, rest, ok = strings.Cut(name, cacheFileMarker)
+	beforeMarker, rest, ok := strings.Cut(name, cacheFileMarker)
 	if !ok || rest == "" {
 		ok = false
 		return
+	}
+	// Extract optional model from beforeMarker
+	if modelIdx := strings.LastIndex(beforeMarker, cacheFileModelMarker); modelIdx != -1 {
+		identity.Encoder = beforeMarker[:modelIdx]
+		identity.VMAFModel = beforeMarker[modelIdx+len(cacheFileModelMarker):]
+	} else {
+		identity.Encoder = beforeMarker
 	}
 	// Try whole remainder as vmaf blob (no profile).
 	if decoded, err := base64.RawURLEncoding.DecodeString(rest); err == nil {
@@ -259,8 +264,12 @@ func parseVMAFBlob(blob string) (VMAFChecker, bool) {
 	return vc, true
 }
 
-func computeCacheStatsFileName(encoderName string, profile VMAFChecker, cacheProfile string) (filename string) {
-	filename = CacheFilePrefix + encoderName + cacheFileMarker
+func computeCacheStatsFileName(encoderName string, vmafModel string, profile VMAFChecker, cacheProfile string) (filename string) {
+	filename = CacheFilePrefix + encoderName
+	if vmafModel != "" {
+		filename += cacheFileModelMarker + vmafModel
+	}
+	filename += cacheFileMarker
 	// vmaf profile
 	var builder bytes.Buffer
 	builder.WriteString(strconv.FormatFloat(profile.min, 'f', -1, 64))

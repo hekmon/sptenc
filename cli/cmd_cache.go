@@ -88,12 +88,16 @@ var cacheListCommand = &cli.Command{
 				},
 			}),
 		)
-		t.Header("Encoder", "Profile", "VMAF Thresholds", "Runs", "Segments", "Mean QP", "Size", "Modified")
+		t.Header("Encoder", "Model", "Profile", "VMAF Thresholds", "Runs", "Segments", "Mean QP", "Size", "Modified")
 
 		for _, e := range entries {
 			profile := e.identity.CacheProfile
 			if profile == "" {
 				profile = "-"
+			}
+			model := e.identity.VMAFModel
+			if model == "" {
+				model = "-"
 			}
 			thresholdStr := formatThresholdsCompact(e.identity.Profile)
 			meanQPStr := "-"
@@ -102,6 +106,7 @@ var cacheListCommand = &cli.Command{
 			}
 			t.Append([]string{
 				e.identity.Encoder,
+				model,
 				profile,
 				thresholdStr,
 				strconv.Itoa(e.runs),
@@ -171,7 +176,8 @@ var cacheClearCommand = &cli.Command{
 				e := &entries[i]
 				if strings.Contains(strings.ToLower(e.identity.Encoder), pattern) ||
 					strings.Contains(strings.ToLower(e.identity.CacheProfile), pattern) ||
-					strings.Contains(strings.ToLower(formatThresholdsCompact(e.identity.Profile)), pattern) {
+					strings.Contains(strings.ToLower(formatThresholdsCompact(e.identity.Profile)), pattern) ||
+					strings.Contains(strings.ToLower(e.identity.VMAFModel), pattern) {
 					toDelete = append(toDelete, e)
 				}
 			}

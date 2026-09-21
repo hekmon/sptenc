@@ -325,24 +325,6 @@ var batchsearchCommand = &cli.Command{
 			return fmt.Errorf("failed to create VMAF auditor: %w", err)
 		}
 
-		// Get the stats cache
-		encoderAdapter := &pipeline.EncoderAdapter{
-			Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
-			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
-			VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
-			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
-			VMAFNeg:           cmd.Bool(vmafNegFlagName),
-			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
-		}
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter,
-			vmafAuditor, cmd.String(cacheProfileFlagName))
-		if err != nil {
-			return fmt.Errorf("failed to create stats cache: %w", err)
-		}
-		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
-		}
-
 		// final encoding ?
 		var finalEncoder ffmpeg.Encoder
 		if cmd.Bool(finalEncodeFlagName) {
@@ -355,6 +337,16 @@ var batchsearchCommand = &cli.Command{
 		// Validate threshold range
 		if cmd.Float64(maxThresholdFlagName) <= cmd.Float64(minThresholdFlagName) {
 			return fmt.Errorf("%s must be greater than %s", maxThresholdFlagName, minThresholdFlagName)
+		}
+
+		// Prepare the encoder adapter (used for cache creation and segment encoding)
+		encoderAdapter := &pipeline.EncoderAdapter{
+			Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
+			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
+			VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
+			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
+			VMAFNeg:           cmd.Bool(vmafNegFlagName),
+			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
 		}
 
 		/*
@@ -400,6 +392,21 @@ var batchsearchCommand = &cli.Command{
 			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
 		}
 		totalDuration := sourceStats.Format.Duration
+
+		// Get the stats cache (after probing so we know the VMAF model)
+		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
+		if !qpFound {
+			return fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
+		}
+		vmafModel := ffmpeg.VMAFModel(videoStream.Height >= ffmpeg.Height4K, cmd.Bool(vmafNegFlagName))
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax,
+			vmafModel, vmafAuditor, cmd.String(cacheProfileFlagName))
+		if err != nil {
+			return fmt.Errorf("failed to create stats cache: %w", err)
+		}
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
+		}
 
 		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
 		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
@@ -605,8 +612,14 @@ var batchsearchCommand = &cli.Command{
 				VMAFNeg:           cmd.Bool(vmafNegFlagName),
 				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
 			}
-			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter,
-				vmafAuditor, cmd.String(cacheProfileFlagName))
+			finalQPMin, finalQPMax, finalQPFound := finalEncoderAdapter.QPRange()
+			if !finalQPFound {
+				return fmt.Errorf("unsupported final encoder %s", finalEncoderAdapter.Name())
+			}
+			// videoStream is still in scope from the probe above
+			finalVMAFModel := ffmpeg.VMAFModel(videoStream.Height >= ffmpeg.Height4K, cmd.Bool(vmafNegFlagName))
+			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter.Name(), finalQPMin, finalQPMax,
+				finalVMAFModel, vmafAuditor, cmd.String(cacheProfileFlagName))
 			if err != nil {
 				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
 			}

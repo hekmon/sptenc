@@ -275,7 +275,7 @@ var encodeCommand = &cli.Command{
 			return
 		}
 
-		// Get the stats cache
+		// Prepare the encoder adapter (used for cache creation and segment encoding)
 		encoderAdapter := &pipeline.EncoderAdapter{
 			Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
 			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
@@ -283,14 +283,6 @@ var encodeCommand = &cli.Command{
 			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
 			VMAFNeg:           cmd.Bool(vmafNegFlagName),
 			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
-		}
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter, vmafAuditor, cmd.String(cacheProfileFlagName))
-		if err != nil {
-			err = fmt.Errorf("failed to create stats cache: %w", err)
-			return
-		}
-		if cmd.Bool(debugFlagName) {
-			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
 		}
 
 		/*
@@ -415,6 +407,22 @@ var encodeCommand = &cli.Command{
 		if !videoStream.IsConstantFrameRate() {
 			err = errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
 			return
+		}
+
+		// Get the stats cache (after probing so we know the VMAF model)
+		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
+		if !qpFound {
+			err = fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
+			return
+		}
+		vmafModel := ffmpeg.VMAFModel(videoStream.Height >= ffmpeg.Height4K, cmd.Bool(vmafNegFlagName))
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, vmafModel, vmafAuditor, cmd.String(cacheProfileFlagName))
+		if err != nil {
+			err = fmt.Errorf("failed to create stats cache: %w", err)
+			return
+		}
+		if cmd.Bool(debugFlagName) {
+			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
 		}
 
 		// Step 2 - Process segments
