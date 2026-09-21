@@ -43,7 +43,8 @@ var encodeCommand = &cli.Command{
 		"Use the split command to preview scene boundaries for a given threshold, the thresholds\n" +
 		"command to inspect candidate thresholds and their scene-distribution statistics (scenes count,\n" +
 		"longest segment, std dev, mean, shortest segment) so you can pick a single threshold to feed\n" +
-		"into encode, or batchsearch to find the optimal threshold automatically.\n" +
+		"into encode, or batchsearch to search for the threshold that yields the smallest passing file\n" +
+		"automatically.\n" +
 		"VMAF METRICS\n" +
 		fmt.Sprintf("Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n", core.VMAFMinValue, core.VMAFMaxValue) +
 		fmt.Sprintf("below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n", core.VMAFOffValue) +
@@ -65,6 +66,14 @@ var encodeCommand = &cli.Command{
 		"This option is intended for GPU encoders, which often support multiple parallel sessions.\n" +
 		"Hard session limits vary by generation and SKU (typically 1-3 on consumer cards), so verify\n" +
 		"your specific GPU's capabilities before raising this value.\n\n" +
+		"SEGMENT LENGTH\n" +
+		"The --" + minSegmentLengthFlagName + " flag removes scene boundaries that would create segments shorter\n" +
+		"than the given duration. Short segments are merged into their shorter neighbour.\n" +
+		"This happens after scene detection but before splitting, so the QP search and VMAF\n" +
+		"evaluation operate on segments long enough to yield statistically valid percentile\n" +
+		"metrics (p1 needs ≥100 frames, p5 needs ≥20). It is a quality-floor guardrail, not a\n" +
+		"compression tuning knob. Lower below the default only if you explicitly accept the risk\n" +
+		"of sub-minimum segments.\n\n" +
 		"AUDIO\n" +
 		"If all audio tracks are PCM (e.g. from Blu-ray remuxes), they are automatically compressed\n" +
 		"to FLAC during the final remux step. This reduces file size with no quality loss.",
@@ -90,6 +99,7 @@ var encodeCommand = &cli.Command{
 				Category:  "Single Video File",
 				Validator: validateSceneThreshold,
 			},
+
 			&cli.StringFlag{
 				Name:     originalFileFlagName,
 				Aliases:  []string{"f"},
@@ -107,6 +117,7 @@ var encodeCommand = &cli.Command{
 				Category: "Cache isolation",
 			},
 		}
+		flags = append(flags, segmentFilterFlag(""))
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeEncode)...)
 		flags = append(flags, newDirectoryFlags()...)
 		flags = append(flags, newVMAFFlags()...)
@@ -160,9 +171,9 @@ var encodeCommand = &cli.Command{
 		if cmd.Args().Len() != 2 {
 			return ctx, errors.New("exactly two arguments are required: input path and output file")
 		}
-		inputPath := cmd.Args().First()
+		inputPath := cmd.Args().First() // args are not parsed yet, can not use cmd.StringArg("inputpath")
 		outputPath := cmd.Args().Get(1)
-		fileInfos, err := os.Stat(inputPath) // args are not parsed yet, can not use cmd.StringArg("inputpath")
+		fileInfos, err := os.Stat(inputPath)
 		if err != nil {
 			return ctx, fmt.Errorf("failed to access input path: %w", err)
 		}
@@ -301,6 +312,9 @@ var encodeCommand = &cli.Command{
 				cunits.ImportInBytes(float64(inputInfos.Size())),
 				cmd.String(encoderFlagName),
 			)
+			if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+				fmt.Fprintf(bypass, "Min segment length: %s\n", minSegLen)
+			}
 			fmt.Fprintf(bypass, "Each segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 			// Build decoder config for scene detection on the original file (hw decoding if available)
 			decoderCfg := ffmpeg.SelectDecoderForEncoder(ctx, inputPath, ffmpeg.Encoder(cmd.String(encoderFlagName)),
@@ -332,6 +346,15 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 				1+len(scenes), time.Since(start).Round(time.Second),
 			)
+			// Apply min-segment-length filter if requested.
+			if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+				filtered := pipeline.FilterShortScenes(scenes, totalDuration, minSegLen)
+				if removed := len(scenes) - len(filtered); removed > 0 {
+					fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
+						removed, minSegLen, 1+len(filtered))
+				}
+				scenes = filtered
+			}
 			// create master
 			var masterFile string
 			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, workingDir, inputFileSize, cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {

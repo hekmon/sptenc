@@ -73,7 +73,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
 | `remux` | `r` | Tooling | Replace the video track of a file with a new one without re-encoding |
 | `vmaf` | | Tooling | Compute VMAF between a reference and a distorted video |
-| `batchsearch` | `bs` | Advanced | Automatically search for the optimal scene detection threshold by encoding multiple candidates |
+| `batchsearch` | `bs` | Advanced | Search for the scene threshold that yields the smallest passing file by encoding multiple candidates |
 
 ## Input Requirements
 
@@ -137,10 +137,10 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 ./sptenc vmaf --vmaf-cuda --vmaf-neg original.mkv encoded.mkv
 ```
 
-### Find the optimal scene threshold automatically
+### Search for the threshold that yields the smallest passing file
 ```bash
 ./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93
-# Once the optimal threshold is found, run the final CPU encode
+# Once the best threshold is found, run a final CPU encode to shrink even further the file
 ./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93 --final-encode
 ```
 
@@ -154,6 +154,36 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 > Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (1–100, default 14): higher values detect fewer scenes, lower values detect more.
 >
 > Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec` to speed up processing.
+
+## Scene Detection and Threshold Selection
+
+Scene detection splits a video into independent segments, and each segment gets its own QP. The threshold controls how many boundaries are kept, which directly affects both quality visibility and file size. There is no single right threshold — the choice depends on which tradeoff you are willing to accept.
+
+### Too fine: many short segments
+
+A low threshold keeps almost every detected boundary. This gives hard passages their own QP and keeps VMAF metrics honest — a bad frame in a 5-second segment will almost certainly move the segment's mean or percentiles enough to trigger a re-encode.
+
+The cost is keyframe bloat and B/P-frame starvation. Every boundary forces an I-frame, and runs shorter than a few seconds never let inter-frame referencing amortize the intra cost. File size inflates, and VMAF percentile metrics become statistically unreliable on very short segments (p1 needs ≥100 frames, p5 needs ≥20).
+
+### Too coarse: few long segments
+
+A high threshold discards weak boundaries, merging scenes into long runs. B/P-frame compression thrives, and file size drops — but the whole segment must bow to its hardest passage. Easy sections pay for quality they do not need.
+
+More dangerously, a short complex passage inside a long easy segment can fail VMAF locally while the segment-wide average still passes. The bad frames are statistically invisible, undermining the guarantee that every part of the video meets your quality floor.
+
+### The role of `batchsearch`
+
+`batchsearch` automates the tedious work of testing multiple thresholds and picking the one that produces the smallest file while still passing your VMAF targets. Its objective is file size — it has no opinion on whether the winning threshold's segment lengths are short enough for their percentile metrics to be trustworthy.
+
+If you care more about tight quality control than file size, skip `batchsearch`. Use the `thresholds` command to inspect distributions, pick a threshold manually, and run `encode`.
+
+### The `--min-segment-length` guardrail
+
+The `--min-segment-length` flag (default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbour.
+
+It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
+
+Use the `thresholds` command to preview the segment distributions a threshold would produce before committing to an `encode` or a `batchsearch` run. It is fast and produces no files.
 
 ## VMAF
 

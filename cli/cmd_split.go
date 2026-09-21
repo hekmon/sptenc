@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -34,7 +35,17 @@ var splitCommand = &cli.Command{
 		"By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts,\n" +
 		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
 		"If the input has already been converted with the master command, use --" + masterFlagName + " to skip the\n" +
-		"master creation phase.",
+		"master creation phase.\n\n" +
+		"SEGMENT LENGTH\n" +
+		"The --" + minSegmentLengthFlagName + " flag removes scene boundaries that would create segments shorter\n" +
+		"than the given duration. Short segments are merged into their shorter neighbour.\n" +
+		"This is a quality-floor guardrail: segments under ~5 seconds do not yield statistically\n" +
+		"valid VMAF percentile metrics (p1 needs ≥100 frames, p5 needs ≥20). Lower below the\n" +
+		"default only if you explicitly accept the risk of sub-minimum segments.\n\n" +
+		"CHOOSING A THRESHOLD\n" +
+		"If you are trying to find a good threshold for encode or batchsearch, use the thresholds\n" +
+		"command to preview candidate distributions without creating files. It is faster and avoids\n" +
+		"filling your disk with test splits.",
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{
 			&cli.Float64Flag{
@@ -45,6 +56,7 @@ var splitCommand = &cli.Command{
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
 			},
+
 			&cli.BoolFlag{
 				Name:     masterFlagName,
 				Aliases:  []string{"m"},
@@ -64,6 +76,7 @@ var splitCommand = &cli.Command{
 				Category:         "Directories",
 			},
 		}
+		flags = append(flags, segmentFilterFlag(""))
 		// HW dec
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
@@ -167,6 +180,9 @@ var splitCommand = &cli.Command{
 			cunits.ImportInBytes(float64(fileInfos.Size())),
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
+		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+			fmt.Fprintf(bypass, "Min segment length: %s\n", minSegLen)
+		}
 		if !cmd.Bool(masterFlagName) {
 			// create a temporary directory
 			var workingDir string
@@ -232,6 +248,16 @@ var splitCommand = &cli.Command{
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 		printSceneStats(bypass, scenes, duration, stats.VideoTrack())
+
+		// Apply min-segment-length filter if requested.
+		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+			filtered := pipeline.FilterShortScenes(scenes, duration, minSegLen)
+			if removed := len(scenes) - len(filtered); removed > 0 {
+				fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
+					removed, minSegLen, 1+len(filtered))
+			}
+			scenes = filtered
+		}
 
 		// split
 		outputDir := cmd.StringArg("outputdir")

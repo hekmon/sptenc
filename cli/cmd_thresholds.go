@@ -12,6 +12,7 @@ import (
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -46,22 +47,31 @@ var thresholdsCommand = &cli.Command{
 	Usage:    "Preview candidate thresholds and their scene distributions",
 	Description: "Detect scene boundaries once, then simulate what segment distributions\n" +
 		"each candidate threshold would produce. This helps you choose sensible values for\n" +
-		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", and --" + minDropFlagName + " before running\n" +
+		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", --" + minDropFlagName + ", and --" + minSegmentLengthFlagName + " before running\n" +
 		"batchsearch, where a bad range can cost hours of encoding time.\n\n" +
 		"WHY THRESHOLD SELECTION MATTERS\n" +
 		"Scene detection splits a video into independent segments. Each segment gets its own QP, so\n" +
 		"splitting finely lets hard passages use low QP and easy ones high. But every split forces an\n" +
-		"I-frame, and short runs starve B/P compression. Split coarsely and B/P frames thrive across\n" +
-		"long runs, yet the whole scene must bow to its hardest passage — easy sections pay for quality\n" +
-		"they do not need.\n\n" +
-		"The sweet spot is a threshold that gives each scene enough freedom to use its own QP while\n" +
-		"leaving enough continuous frames for the encoder to compress efficiently. This command lets you\n" +
-		"preview where that sweet spot likely lives without running a single encode.\n\n" +
+		"I-frame, and short runs starve B/P compression.\n\n" +
+		"Split coarsely and B/P frames thrive across long runs, yet the whole segment must bow to its\n" +
+		"hardest passage — easy sections pay for quality they do not need. Worse, a short complex\n" +
+		"passage inside a long easy segment can fail VMAF locally while the segment-wide average still\n" +
+		"passes. The bad frames are statistically invisible, undermining the guarantee that every part\n" +
+		"of the video meets your quality floor.\n\n" +
+		"There is no single right threshold. This command lets you preview the tradeoffs so you can\n" +
+		"choose based on your own tolerance for file size vs quality visibility.\n\n" +
+		"SEGMENT LENGTH\n" +
+		"The --" + minSegmentLengthFlagName + " filter removes boundaries that would create segments shorter\n" +
+		"than the given duration. It is applied before candidate generation, so the auto-tuner and the\n" +
+		"table both operate on the same post-filter scene count that encode and batchsearch will use.\n" +
+		"When disabled (--" + minSegmentLengthFlagName + " 0), the table shows raw distributions plus a column\n" +
+		"indicating how many segments the default filter would catch.\n\n" +
 		"The candidate generation logic is identical to batchsearch, so the preview is a\n" +
 		"faithful map of what the search will explore.",
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{}
 		flags = append(flags, thresholdSearchFlags()...)
+		flags = append(flags, segmentFilterFlag(thresholdCategoryName))
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
 	}(),
@@ -123,10 +133,6 @@ var thresholdsCommand = &cli.Command{
 		/*
 		 * Execute
 		 */
-
-		fmt.Fprintf(bypass, "\nDetecting scenes with threshold at %s...\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-		)
 		fileInfos, err := os.Stat(cmd.StringArg("inputfile"))
 		if err != nil {
 			return fmt.Errorf("failed to access input file: %w", err)
@@ -141,6 +147,10 @@ var thresholdsCommand = &cli.Command{
 		)
 		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
+		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
+		}
+		fmt.Fprintln(bypass)
 		// Detect scenes
 		stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
 			Path: cmd.StringArg("inputfile"),
@@ -174,7 +184,18 @@ var thresholdsCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
-		// Thresholds candidates refine
+		// Apply min-segment-length filter to the full scene list once. All downstream
+		// steps (candidate generation and table stats) use this filtered list.
+		minSegLen := cmd.Duration(minSegmentLengthFlagName)
+		if minSegLen > 0 {
+			filtered := pipeline.FilterShortScenes(scenes, stats.Format.Duration, minSegLen)
+			if removed := len(scenes) - len(filtered); removed > 0 {
+				fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
+					removed, minSegLen, 1+len(filtered))
+			}
+			scenes = filtered
+		}
+		// Cap scenes to the max threshold
 		cappedScenes := make([]core.Scene, 0, len(scenes))
 		for _, scene := range scenes {
 			if scene.Score <= cmd.Float64(maxThresholdFlagName) {
@@ -205,22 +226,57 @@ var thresholdsCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tCandidates: %v\n", candidates)
 		}
 		// Results table
+		filterActive := minSegLen > 0
 		var buff strings.Builder
-		table := tablewriter.NewTable(&buff, tablewriter.WithConfig(thresholdsTableConfig))
-		table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest", "≤1s %", "≤1s", "≤0.5s")
+		cfg := thresholdsTableConfig
+		if filterActive {
+			// 6 columns when filter is active (no Merged: all merging happened upfront)
+			cfg = tablewriter.Config{
+				Header: tw.CellConfig{
+					Formatting: tw.CellFormatting{
+						AutoFormat: tw.Off,
+					},
+				},
+				Row: tw.CellConfig{
+					Alignment: tw.CellAlignment{
+						PerColumn: []tw.Align{
+							tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight,
+						},
+					},
+				},
+			}
+		}
+		table := tablewriter.NewTable(&buff, tablewriter.WithConfig(cfg))
+		if filterActive {
+			table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest")
+		} else {
+			table.Header("Threshold", "Scenes", "Longest", "Std Dev", "Mean", "Shortest",
+				fmt.Sprintf("≤%s", minSegmentLengthDefault), "≤1s", "≤0.5s")
+		}
 		for _, candidate := range candidates {
-			row := computeCandidateStats(scenes, stats.Format.Duration, candidate)
-			table.Append([]string{
-				strconv.FormatFloat(candidate, 'f', -1, 64),
-				strconv.Itoa(row.scenes),
-				row.longest.Round(time.Millisecond).String(),
-				row.stddev.Round(time.Millisecond).String(),
-				row.mean.Round(time.Millisecond).String(),
-				row.shortest.Round(time.Millisecond).String(),
-				strconv.FormatFloat(row.short1sPct, 'f', 1, 64) + "%",
-				strconv.Itoa(row.short1s),
-				strconv.Itoa(row.shortHalf),
-			})
+			row := computeCandidateStats(scenes, stats.Format.Duration, candidate, minSegLen)
+			if filterActive {
+				table.Append([]string{
+					strconv.FormatFloat(candidate, 'f', -1, 64),
+					strconv.Itoa(row.scenes),
+					row.longest.Round(time.Millisecond).String(),
+					row.stddev.Round(time.Millisecond).String(),
+					row.mean.Round(time.Millisecond).String(),
+					row.shortest.Round(time.Millisecond).String(),
+				})
+			} else {
+				table.Append([]string{
+					strconv.FormatFloat(candidate, 'f', -1, 64),
+					strconv.Itoa(row.scenes),
+					row.longest.Round(time.Millisecond).String(),
+					row.stddev.Round(time.Millisecond).String(),
+					row.mean.Round(time.Millisecond).String(),
+					row.shortest.Round(time.Millisecond).String(),
+					strconv.Itoa(row.subDefault),
+					strconv.Itoa(row.short1s),
+					strconv.Itoa(row.shortHalf),
+				})
+			}
 		}
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
@@ -237,36 +293,65 @@ type candidateStats struct {
 	shortHalf  int
 	short1s    int
 	short1sPct float64
+	merged     int // boundaries removed by filter (when active)
+	subDefault int // segments ≤ default min (when disabled)
 }
 
-func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, threshold float64) candidateStats {
-	// Keep only if scene validate the minimum treshold
+func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, threshold float64, minSegLen time.Duration) candidateStats {
+	// Keep only scenes that meet the threshold
 	filtered := make([]ffmpeg.Scene, 0, len(scenes))
 	for _, s := range scenes {
 		if s.Score >= threshold {
 			filtered = append(filtered, s)
 		}
 	}
-	// Build scenes durations list
-	nbScenes := len(filtered) + 1
-	durations := make([]time.Duration, 0, nbScenes)
-	if len(filtered) == 0 {
-		// no cut, the whole is single scene of totalDuration
+
+	// Build segment durations from threshold-filtered boundaries
+	durations := buildDurations(filtered, totalDuration)
+
+	if minSegLen > 0 {
+		// Input is already pre-filtered upstream; just compute stats.
+		return buildStats(durations, 0, 0, 0, 0)
+	}
+
+	// Filter disabled: compute raw stats and simulate what the default filter would catch.
+	shortHalf := 0
+	short1s := 0
+	subDefault := 0
+	for _, d := range durations {
+		if d < 500*time.Millisecond {
+			shortHalf++
+		}
+		if d < time.Second {
+			short1s++
+		}
+		if d <= minSegmentLengthDefault {
+			subDefault++
+		}
+	}
+	return buildStats(durations, 0, shortHalf, short1s, subDefault)
+}
+
+// buildDurations converts a list of scene boundaries into segment durations.
+func buildDurations(scenes []ffmpeg.Scene, totalDuration time.Duration) []time.Duration {
+	durations := make([]time.Duration, 0, len(scenes)+1)
+	if len(scenes) == 0 {
 		durations = append(durations, totalDuration)
 	} else {
-		// We do have cuts, let's compute duration per scene with retained cuts
-		durations = append(durations, filtered[0].Start)
-		for i := 1; i < len(filtered); i++ {
-			durations = append(durations, filtered[i].Start-filtered[i-1].Start)
+		durations = append(durations, scenes[0].Start)
+		for i := 1; i < len(scenes); i++ {
+			durations = append(durations, scenes[i].Start-scenes[i-1].Start)
 		}
-		durations = append(durations, totalDuration-filtered[len(filtered)-1].Start)
+		durations = append(durations, totalDuration-scenes[len(scenes)-1].Start)
 	}
-	// Extract stats
+	return durations
+}
+
+// buildStats computes duration statistics from a segment durations slice.
+func buildStats(durations []time.Duration, merged, shortHalf, short1s, subDefault int) candidateStats {
 	durationsFloat := make([]float64, len(durations))
 	minDur := durations[0]
 	maxDur := durations[0]
-	shortHalf := 0
-	short1s := 0
 	for i, d := range durations {
 		durationsFloat[i] = float64(d)
 		if d < minDur {
@@ -275,23 +360,18 @@ func computeCandidateStats(scenes []ffmpeg.Scene, totalDuration time.Duration, t
 		if d > maxDur {
 			maxDur = d
 		}
-		if d < 500*time.Millisecond {
-			shortHalf++
-		}
-		if d < time.Second {
-			short1s++
-		}
 	}
 	mean, stddev := stat.MeanStdDev(durationsFloat, nil)
-	// Return all stats
 	return candidateStats{
-		scenes:     nbScenes,
+		scenes:     len(durations),
 		mean:       time.Duration(mean),
 		stddev:     time.Duration(stddev),
 		shortest:   minDur,
 		longest:    maxDur,
 		shortHalf:  shortHalf,
 		short1s:    short1s,
-		short1sPct: float64(short1s) / float64(nbScenes) * 100,
+		short1sPct: float64(short1s) / float64(len(durations)) * 100,
+		merged:     merged,
+		subDefault: subDefault,
 	}
 }

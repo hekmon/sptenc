@@ -51,9 +51,10 @@ var batchsearchCommand = &cli.Command{
 	Name:     "batchsearch",
 	Aliases:  []string{"bs"},
 	Category: "Advanced",
-	Usage:    "Automatically search for the optimal scene threshold by encoding the video multiple times",
+	Usage:    "Search for the scene threshold that yields the smallest passing file",
 	Description: "Orchestrate multiple encode passes with different scene detection thresholds\n" +
-		"to find the one that produces the smallest file while still passing your VMAF targets.\n\n" +
+		"to find the one that produces the smallest file while still passing your VMAF targets.\n" +
+		"This is a file-size optimizer, not a quality oracle.\n\n" +
 		"HOW IT WORKS\n" +
 		"  1. Scans the source once to map all natural scene boundaries. Only boundaries with scores\n" +
 		"     between --" + minThresholdFlagName + " and --" + maxThresholdFlagName + " are considered.\n" +
@@ -62,19 +63,28 @@ var batchsearchCommand = &cli.Command{
 		"     --" + maxCandidatesFlagName + " budget, but it will not go below --" + minDropFlagName + ".\n" +
 		"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
 		"  4. Stops after --" + strikesFlagName + " consecutive candidates fail to reduce file size.\n\n" +
-		"WHY THRESHOLD SELECTION MATTERS\n" +
-		"Scene detection splits a video into independent segments. Each segment gets its own QP, so\n" +
-		"splitting finely lets hard passages use low QP and easy ones high. But every split forces an\n" +
-		"I-frame, and short runs starve B/P compression. Split coarsely and B/P frames thrive across\n" +
-		"long runs, yet the whole scene must bow to its hardest passage — easy sections pay for quality\n" +
-		"they do not need.\n\n" +
-		"The sweet spot is a threshold that gives each scene enough freedom to use its own QP while\n" +
-		"leaving enough continuous frames for the encoder to compress efficiently. batchsearch finds this\n" +
-		"automatically by testing candidates across the spectrum.\n\n" +
+		"WHAT THIS IS NOT\n" +
+		"There is no single right threshold. Finer splitting gives hard passages their own QP and\n" +
+		"keeps VMAF metrics honest, but inflates file size with keyframe overhead and starves B/P-frame\n" +
+		"compression. Coarser splitting improves compression and shrinks files, but long segments can\n" +
+		"drown local quality problems: a 3-second hard burst inside a 90-second easy segment may fail\n" +
+		"VMAF locally while the segment-wide average still passes.\n\n" +
+		"batchsearch only asks 'which threshold produces the smallest file that still passes?' It has\n" +
+		"no opinion on whether the winning threshold's segment lengths are short enough for their\n" +
+		"percentile metrics to be trustworthy. That judgment is yours.\n\n" +
+		"If you care more about tight quality control than file size, skip this command. Use the\n" +
+		"thresholds command to inspect distributions, pick a threshold manually, and run encode.\n\n" +
+		"SEGMENT LENGTH\n" +
+		"The --" + minSegmentLengthFlagName + " filter removes boundaries that would create segments shorter\n" +
+		"than the given duration. It is applied before candidate generation, so the auto-tuner operates\n" +
+		"on the same post-filter scene count that each candidate encode will use.\n" +
+		"Segments shorter than ~5 seconds produce unreliable VMAF percentile metrics and starve\n" +
+		"B/P-frame compression. The filter prevents both problems by merging short segments before\n" +
+		"the search begins. It does not protect against the opposite problem: segments that are too long.\n\n" +
 		"PREVIEWING CANDIDATES\n" +
 		"Use the thresholds command to preview what candidate thresholds and scene distributions your\n" +
 		"chosen range will produce, without running any encodes. It is a fast way to validate that\n" +
-		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", and --" + minDropFlagName + " are set\n" +
+		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", --" + minDropFlagName + ", and --" + minSegmentLengthFlagName + " are set\n" +
 		"sensibly before committing to a long batchsearch run.\n\n" +
 		"CONTROLLING SEARCH COST\n" +
 		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
@@ -103,7 +113,8 @@ var batchsearchCommand = &cli.Command{
 		"non-improving candidates the search tolerates before giving up (default " + strconv.Itoa(strikesMinimum) + "). It acts as both an\n" +
 		"early-exit mechanism and a safety buffer — preventing the search from running forever once the best\n" +
 		"file size has been found, while tolerating short noisy plateaus so it does not bail out too soon.\n" +
-		"Lower values make the search more aggressive; higher values increase patience at the cost of\n" +
+		"Lower values make the search more aggressive; higher values let the search ride out more\n" +
+		"consecutive non-improving candidates in hope of a later meaningful drop, at the cost of\n" +
 		"additional full encode passes.\n\n" +
 		"ENCODERS\n" +
 		"Use --" + encoderFlagName + " to choose the encoder for the search loop. The default is " + string(ffmpeg.HEVCEncoderNVEnc) + "\n" +
@@ -154,6 +165,7 @@ var batchsearchCommand = &cli.Command{
 			},
 		}
 		flags = append(flags, thresholdSearchFlags()...)
+		flags = append(flags, segmentFilterFlag(thresholdCategoryName))
 		flags = append(flags,
 			&cli.IntFlag{
 				Name:     strikesFlagName,
@@ -362,6 +374,9 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\t• testing at most %d candidate thresholds\n", cmd.Int(maxCandidatesFlagName))
 		fmt.Fprintf(bypass, "\t• waiting at least %d strikes before stopping\n", cmd.Int(strikesFlagName))
 		fmt.Fprintf(bypass, "\t• minimum scene drop: %d\n", cmd.Int(minDropFlagName))
+		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
+		}
 		if finalEncoder != "" {
 			fmt.Fprintf(bypass, "\t• once the best threshold is found, a final encoding will be performed with %s\n", finalEncoder)
 		}
@@ -397,6 +412,20 @@ var batchsearchCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
+		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
+			1+len(scenes), time.Since(start).Round(time.Second),
+		)
+		// Apply min-segment-length filter to the full scene list once. All downstream
+		// steps (candidate generation, per-candidate splits, final encode) use this
+		// filtered list, so filtering never needs to happen again.
+		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
+			filtered := pipeline.FilterShortScenes(scenes, totalDuration, minSegLen)
+			if removed := len(scenes) - len(filtered); removed > 0 {
+				fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
+					removed, minSegLen, 1+len(filtered))
+			}
+			scenes = filtered
+		}
 		// Cap scenes to the max threshold
 		cappedScenes := make([]core.Scene, 0, len(scenes))
 		for _, scene := range scenes {
@@ -404,9 +433,6 @@ var batchsearchCommand = &cli.Command{
 				cappedScenes = append(cappedScenes, core.Scene{Start: scene.Start, Score: scene.Score})
 			}
 		}
-		fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
-			1+len(scenes), time.Since(start).Round(time.Second),
-		)
 		if len(cappedScenes) < len(scenes) {
 			fmt.Fprintf(bypass, "\tCapped to %d scenes with score ≤ %s\n",
 				1+len(cappedScenes), strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
@@ -463,6 +489,7 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Step 3.A - Build the filtered scenes list
+			// scenes was already filtered upfront, so no additional merging is needed.
 			runScenes := make([]ffmpeg.Scene, 0, len(scenes))
 			for _, scene := range scenes {
 				if scene.Score >= batch.candidates[batch.currentCandidateIndex] {
@@ -543,6 +570,7 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Build the filtered scenes list for the best candidate
+			// scenes was already filtered upfront, so no additional merging is needed.
 			bestScenes := make([]ffmpeg.Scene, 0, len(scenes))
 			for _, scene := range scenes {
 				if scene.Score >= batch.candidates[bestIndex] {

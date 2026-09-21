@@ -3,6 +3,7 @@ package core
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestGetSearchThresholdCandidates_Empty(t *testing.T) {
@@ -172,5 +173,150 @@ func TestGetSearchThresholdCandidates_MinDropRespectedBetweenCandidates(t *testi
 		if math.Abs(candidates[i]-expected[i]) > 1e-9 {
 			t.Errorf("candidate[%d] expected %v, got %v", i, expected[i], candidates[i])
 		}
+	}
+}
+
+func TestFilterShortScenes_ZeroMinDuration(t *testing.T) {
+	scenes := []Scene{{Start: 1 * time.Second}, {Start: 2 * time.Second}}
+	got := FilterShortScenes(scenes, 10*time.Second, 0)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 scenes for minDuration=0, got %d", len(got))
+	}
+}
+
+func TestFilterShortScenes_NoShortSegments(t *testing.T) {
+	// All segments are 5s, minDuration is 3s → no change.
+	scenes := []Scene{
+		{Start: 5 * time.Second},
+		{Start: 10 * time.Second},
+		{Start: 15 * time.Second},
+	}
+	got := FilterShortScenes(scenes, 20*time.Second, 3*time.Second)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 scenes, got %d", len(got))
+	}
+}
+
+func TestFilterShortScenes_SingleShortAtStart(t *testing.T) {
+	// Segments: 1s | 9s. Min 4s. Shortest is first segment → merge right.
+	scenes := []Scene{{Start: 1 * time.Second}}
+	got := FilterShortScenes(scenes, 10*time.Second, 4*time.Second)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 scenes (single 10s segment), got %d", len(got))
+	}
+}
+
+func TestFilterShortScenes_SingleShortAtEnd(t *testing.T) {
+	// Segments: 9s | 1s. Min 4s. Shortest is last segment → merge left.
+	scenes := []Scene{{Start: 9 * time.Second}}
+	got := FilterShortScenes(scenes, 10*time.Second, 4*time.Second)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 scenes (single 10s segment), got %d", len(got))
+	}
+}
+
+func TestFilterShortScenes_SingleShortInMiddle(t *testing.T) {
+	// Segments: 5s | 1s | 4s. Min 2s. Shortest is middle (1s).
+	// Left neighbour 5s, right neighbour 4s. Right is shorter → merge right.
+	// Expected boundaries: [5s] → segments 5s | 5s.
+	scenes := []Scene{{Start: 5 * time.Second}, {Start: 6 * time.Second}}
+	got := FilterShortScenes(scenes, 10*time.Second, 2*time.Second)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 scene, got %d", len(got))
+	}
+	if got[0].Start != 5*time.Second {
+		t.Errorf("expected boundary at 5s, got %v", got[0].Start)
+	}
+}
+
+func TestFilterShortScenes_MergeIntoShorterNeighbour(t *testing.T) {
+	// Segments: 6s | 1s | 3s. Min 2s. Shortest is middle (1s).
+	// Left neighbour 6s, right neighbour 3s. Right is shorter → merge right.
+	// Expected boundaries: [6s] → segments 6s | 4s.
+	scenes := []Scene{{Start: 6 * time.Second}, {Start: 7 * time.Second}}
+	got := FilterShortScenes(scenes, 10*time.Second, 2*time.Second)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 scene, got %d", len(got))
+	}
+	if got[0].Start != 6*time.Second {
+		t.Errorf("expected boundary at 6s, got %v", got[0].Start)
+	}
+}
+
+func TestFilterShortScenes_EqualNeighboursPreferLeft(t *testing.T) {
+	// Segments: 3s | 1s | 3s. Min 2s. Shortest is middle (1s).
+	// Left and right are equal (3s). leftDur <= rightDur → merge left.
+	// Expected boundaries: [4s] → segments 4s | 3s.
+	scenes := []Scene{{Start: 3 * time.Second}, {Start: 4 * time.Second}}
+	got := FilterShortScenes(scenes, 7*time.Second, 2*time.Second)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 scene, got %d", len(got))
+	}
+	if got[0].Start != 4*time.Second {
+		t.Errorf("expected boundary at 4s, got %v", got[0].Start)
+	}
+}
+
+func TestFilterShortScenes_ClusterOfShortSegments(t *testing.T) {
+	// Segments: 5s | 1s | 1s | 1s | 7s. Min 2s.
+	// Iteration 1: shortest is 1s (index 1). Left 5s, right 1s. Right shorter → merge right.
+	//   Boundaries: [5s, 2s, 3s, 8s] → durations 5s | 1s | 1s | 7s... wait.
+	//
+	// Let me trace carefully:
+	// Initial scenes: [1s, 2s, 3s, 8s], total=9s
+	// Initial durations: 1s, 1s, 1s, 5s, 1s
+	//
+	// Iter 1: shortest idx=0 (1s). First segment → merge right.
+	//   durations[1] += 1s → 2s. durations = [2s, 1s, 5s, 1s]. scenes = [2s, 3s, 8s]
+	//
+	// Iter 2: shortest idx=1 (1s). Left 2s, right 5s. Left shorter → merge left.
+	//   durations[0] += 1s → 3s. durations = [3s, 5s, 1s]. scenes = [3s, 8s]
+	//
+	// Iter 3: shortest idx=2 (1s). Last segment → merge left.
+	//   durations[1] += 1s → 6s. durations = [3s, 6s]. scenes = [3s]
+	//
+	// Result: segments 3s | 6s.
+	scenes := []Scene{{Start: 1 * time.Second}, {Start: 2 * time.Second}, {Start: 3 * time.Second}, {Start: 8 * time.Second}}
+	got := FilterShortScenes(scenes, 9*time.Second, 2*time.Second)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 scene, got %d", len(got))
+	}
+	if got[0].Start != 3*time.Second {
+		t.Errorf("expected boundary at 3s, got %v", got[0].Start)
+	}
+}
+
+func TestFilterShortScenes_TotalDurationBelowMin(t *testing.T) {
+	// Total 5s, min 10s → single segment.
+	scenes := []Scene{{Start: 2 * time.Second}, {Start: 4 * time.Second}}
+	got := FilterShortScenes(scenes, 5*time.Second, 10*time.Second)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 scenes (whole video is one segment), got %d", len(got))
+	}
+}
+
+func TestFilterShortScenes_EmptyScenes(t *testing.T) {
+	got := FilterShortScenes(nil, 10*time.Second, 2*time.Second)
+	if got != nil {
+		t.Fatalf("expected nil for empty scenes, got %v", got)
+	}
+}
+
+func TestFilterShortScenes_MergeCreatesNewShortSegment(t *testing.T) {
+	// Segments: 3s | 2s | 2s | 3s. Min 3s.
+	// Shortest are indices 1 and 2 (both 2s). Pick index 1 (first encountered).
+	// Left 3s, right 2s. Right shorter → merge right.
+	// New durations: 3s | 4s | 3s. All >= 3s → stop.
+	// Result: boundaries [3s, 7s] → 2 scenes.
+	scenes := []Scene{{Start: 3 * time.Second}, {Start: 5 * time.Second}, {Start: 7 * time.Second}}
+	got := FilterShortScenes(scenes, 10*time.Second, 3*time.Second)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 scenes, got %d", len(got))
+	}
+	if got[0].Start != 3*time.Second {
+		t.Errorf("expected first boundary at 3s, got %v", got[0].Start)
+	}
+	if got[1].Start != 7*time.Second {
+		t.Errorf("expected second boundary at 7s, got %v", got[1].Start)
 	}
 }

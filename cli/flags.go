@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
@@ -135,11 +136,49 @@ const (
 	maxThresholdFlagName  = "max-threshold"
 	maxThresholdDefault   = 50.0
 	maxCandidatesFlagName = "max-candidates"
-	maxCandidatesDefault  = 30
+	maxCandidatesDefault  = 20
 	minDropFlagName       = "min-drop"
 	minDropDefault        = 3
 	thresholdCategoryName = "Threshold Search"
 )
+
+// Segment filter flag names and defaults.
+const (
+	minSegmentLengthFlagName = "min-segment-length"
+	// minSegmentLengthDefault is set to 5 seconds because 24 fps content is the
+	// limiting factor. p1 needs ≥100 frames to be statistically meaningful:
+	//   - 24 fps (film): 4s = 96 frames, which falls short. 5s = 120 frames.
+	//   - 25 fps (PAL):  4s = 100 frames, which meets the floor exactly but
+	//     leaves no margin for segmenter rounding that can shift boundaries by
+	//     ±1–2 frames. 5s = 125 frames.
+	//   - 30 fps (NTSC): 4s = 120 frames, already comfortable. 5s = 150 frames.
+	// The 5-second default guarantees all common frame rates stay above the p1
+	// threshold with enough headroom to absorb segmenter frame-count variance.
+	// Segments shorter than this produce VMAF metrics that are mathematically
+	// unreliable (p1 variance dominates, p5 is marginal) and encoder-meaningless
+	// (I-frame overhead overwhelms B/P-frame gains).
+	minSegmentLengthDefault = 5 * time.Second
+)
+
+// segmentFilterFlag returns the min-segment-length flag. Commands that support
+// scene detection and splitting (encode, split, thresholds, batchsearch) include it.
+// If category is non-empty, the flag is grouped under that category in help output.
+func segmentFilterFlag(category string) cli.Flag {
+	return &cli.DurationFlag{
+		Name:     minSegmentLengthFlagName,
+		Aliases:  []string{"L"},
+		Usage:    "Minimum segment duration. Boundaries creating shorter segments are merged.",
+		Value:    minSegmentLengthDefault,
+		Category: category,
+		OnlyOnce: true,
+		Validator: func(v time.Duration) error {
+			if v < 0 {
+				return fmt.Errorf("%s must be >= 0", minSegmentLengthFlagName)
+			}
+			return nil
+		},
+	}
+}
 
 // thresholdSearchFlags returns the standard threshold search tuning flags.
 func thresholdSearchFlags() []cli.Flag {
