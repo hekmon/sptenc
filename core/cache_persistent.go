@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gofrs/flock"
 	"gonum.org/v1/gonum/stat"
 )
 
@@ -114,6 +115,15 @@ func (sch *StatsCacheHistory) GetPath() string {
 func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error) {
 	sch.access.Lock()
 	defer sch.access.Unlock()
+	// Cross-process lock: block until available so concurrent sptenc instances
+	// don't lose updates. If the OS/filesystem doesn't support locking, return
+	// the error so the user is informed the cache is unprotected.
+	fileLock := flock.New(sch.path + ".lock")
+	if err = fileLock.Lock(); err != nil {
+		err = fmt.Errorf("failed to lock cache file: %w", err)
+		return
+	}
+	defer fileLock.Unlock()
 	// Load last version of the cached file (another encode may have added a run since)
 	if err = sch.loadStats(); err != nil {
 		err = fmt.Errorf("failed to reload stats from disk: %w", err)
@@ -174,19 +184,27 @@ func (sch *StatsCacheHistory) loadStats() (err error) {
 	return json.NewDecoder(fd).Decode(&sch.stats)
 }
 
-// SaveStats writes the current cache to disk as indented JSON.
+// SaveStats writes the current cache to disk as indented JSON atomically.
 func (sch *StatsCacheHistory) saveStats() error {
-	// Create or truncate file
-	fd, err := os.Create(sch.path)
+	tmpPath := sch.path + ".tmp"
+	fd, err := os.Create(tmpPath)
 	if err != nil {
 		return err
 	}
-	defer fd.Close()
 	// Make it human readable
 	enc := json.NewEncoder(fd)
 	enc.SetIndent("", "  ")
 	// Dump data
-	return enc.Encode(sch.stats)
+	if err := enc.Encode(sch.stats); err != nil {
+		fd.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := fd.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, sch.path)
 }
 
 // CacheFileIdentity holds the decoded components of a cache filename.

@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	al.essio.dev/pkg/shellescape v1.6.0
 	github.com/fatih/color v1.19.0
+	github.com/gofrs/flock v0.13.1
 	github.com/hekmon/cunits/v3 v3.0.0
 	github.com/hekmon/liveprogress/v2 v2.2.1
 	github.com/hekmon/liveterm/v2 v2.6.1
@@ -38,5 +39,5 @@ require (
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )
