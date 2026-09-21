@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/metadata"
 	"github.com/hekmon/sptenc/mkvtoolnix"
@@ -64,46 +62,12 @@ func createTempDir(basePath string) (path string, err error) {
 	return os.MkdirTemp(basePath, "sptenc-*")
 }
 
-func validateSceneThreshold(v float64) error {
-	if v <= 0 {
-		return fmt.Errorf("must be between 1 and %d", ffmpeg.SceneThresholdMax)
-	}
-	if v > ffmpeg.SceneThresholdMax {
-		return fmt.Errorf("must be between 1 and %d", ffmpeg.SceneThresholdMax)
-	}
-	return nil
-}
-
-func validateConcurrentSegments(v int) error {
-	if v < 1 {
-		return fmt.Errorf("must be at least 1")
-	}
-	return nil
-}
-
-func validateTmpDir(path string) error {
-	// validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
-	if runtime.GOOS == "windows" && !isASCII(path) {
-		return fmt.Errorf("the temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows\n"+
-			"Please use a path with only ASCII characters (no accents or special characters).\n"+
-			"Current path: %s", path)
-	}
-	return nil
-}
-
 func getCacheDir() string {
 	userCacheDir, err := os.UserCacheDir()
 	if err != nil {
 		userCacheDir = os.TempDir()
 	}
 	return filepath.Join(userCacheDir, "sptenc")
-}
-
-func vmafValueValidator(v float64) error {
-	if v != core.VMAFOffValue && (v < core.VMAFMinValue || v > core.VMAFMaxValue) {
-		return fmt.Errorf("must be between %d and %d, or %d to disable", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue)
-	}
-	return nil
 }
 
 // getSegmentsFromDir returns sorted list of video file paths from inputDir.

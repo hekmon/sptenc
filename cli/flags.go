@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
@@ -16,17 +17,15 @@ const (
 	vaapiDecFlagName        = "vaapi-dec"
 	d3d12DecFlagName        = "d3d12va-dec"
 	videoToolboxDecFlagName = "videotoolbox-dec"
-)
 
-const (
 	nvidiaGPUIndexFlagName    = "nvidia-gpu-index"
 	vaapiRendererPathFlagName = "vaapi-renderer-path"
 	d3d12vaGPUIndexFlagName   = "d3d12va-gpu-index"
-)
 
-const (
 	concurrentSegmentsFlagName = "concurrent-segments"
 	vmafCUDAFlagName           = "vmaf-cuda"
+
+	hardwareAccelerationCategoryName = "Hardware acceleration"
 )
 
 // hwAccelScope controls which hardware acceleration flags are emitted.
@@ -46,21 +45,21 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 			Usage:    "NVIDIA GPU device index for hardware acceleration",
 			Value:    ffmpeg.CUDADefaultDevice,
 			OnlyOnce: true,
-			Category: "Hardware acceleration",
+			Category: hardwareAccelerationCategoryName,
 		},
 		&cli.StringFlag{
 			Name:     vaapiRendererPathFlagName,
 			Usage:    "DRM render node for VA-API hardware acceleration",
 			Value:    ffmpeg.VAAPIDefaultDevice,
 			OnlyOnce: true,
-			Category: "Hardware acceleration",
+			Category: hardwareAccelerationCategoryName,
 		},
 		&cli.IntFlag{
 			Name:     d3d12vaGPUIndexFlagName,
 			Usage:    "GPU device index for D3D12VA hardware acceleration",
 			Value:    ffmpeg.D3D12VADefaultDevice,
 			OnlyOnce: true,
-			Category: "Hardware acceleration",
+			Category: hardwareAccelerationCategoryName,
 		},
 	}
 	if scope == hwAccelScopeDecode || scope == hwAccelScopeVMAF {
@@ -70,28 +69,28 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 				Usage:    "Use NVDEC hardware decoding",
 				Value:    false,
 				OnlyOnce: true,
-				Category: "Hardware acceleration",
+				Category: hardwareAccelerationCategoryName,
 			},
 			&cli.BoolFlag{
 				Name:     vaapiDecFlagName,
 				Usage:    "Use VA-API hardware decoding",
 				Value:    false,
 				OnlyOnce: true,
-				Category: "Hardware acceleration",
+				Category: hardwareAccelerationCategoryName,
 			},
 			&cli.BoolFlag{
 				Name:     d3d12DecFlagName,
 				Usage:    "Use D3D12VA hardware decoding",
 				Value:    false,
 				OnlyOnce: true,
-				Category: "Hardware acceleration",
+				Category: hardwareAccelerationCategoryName,
 			},
 			&cli.BoolFlag{
 				Name:     videoToolboxDecFlagName,
 				Usage:    "Use VideoToolbox hardware decoding",
 				Value:    false,
 				OnlyOnce: true,
-				Category: "Hardware acceleration",
+				Category: hardwareAccelerationCategoryName,
 			},
 		)
 	}
@@ -102,7 +101,7 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 				Usage:    "Use CUDA for VMAF computation",
 				Value:    false,
 				OnlyOnce: true,
-				Category: "Hardware acceleration",
+				Category: hardwareAccelerationCategoryName,
 			},
 		)
 	}
@@ -115,11 +114,18 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 				Value:     1,
 				OnlyOnce:  true,
 				Validator: validateConcurrentSegments,
-				Category:  "Hardware acceleration",
+				Category:  hardwareAccelerationCategoryName,
 			},
 		)
 	}
 	return
+}
+
+func validateConcurrentSegments(v int) error {
+	if v < 1 {
+		return fmt.Errorf("must be at least 1")
+	}
+	return nil
 }
 
 // Threshold search flag names and defaults.
@@ -132,6 +138,7 @@ const (
 	maxCandidatesDefault  = 30
 	minDropFlagName       = "min-drop"
 	minDropDefault        = 3
+	thresholdCategoryName = "Threshold Search"
 )
 
 // thresholdSearchFlags returns the standard threshold search tuning flags.
@@ -145,7 +152,7 @@ func thresholdSearchFlags() []cli.Flag {
 			),
 			Value:     minThresholdDefault,
 			OnlyOnce:  true,
-			Category:  "Threshold Search",
+			Category:  thresholdCategoryName,
 			Validator: validateSceneThreshold,
 		},
 		&cli.Float64Flag{
@@ -156,7 +163,7 @@ func thresholdSearchFlags() []cli.Flag {
 			),
 			Value:     maxThresholdDefault,
 			OnlyOnce:  true,
-			Category:  "Threshold Search",
+			Category:  thresholdCategoryName,
 			Validator: validateSceneThreshold,
 		},
 		&cli.IntFlag{
@@ -171,7 +178,7 @@ func thresholdSearchFlags() []cli.Flag {
 				}
 				return nil
 			},
-			Category: "Threshold Search",
+			Category: thresholdCategoryName,
 		},
 		&cli.IntFlag{
 			Name:     minDropFlagName,
@@ -185,15 +192,23 @@ func thresholdSearchFlags() []cli.Flag {
 				}
 				return nil
 			},
-			Category: "Threshold Search",
+			Category: thresholdCategoryName,
 		},
 	}
 }
 
+func validateSceneThreshold(v float64) error {
+	if v < ffmpeg.SceneThresholdMin || v > ffmpeg.SceneThresholdMax {
+		return fmt.Errorf("must be between %d and %d", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax)
+	}
+	return nil
+}
+
 const (
-	outputDirFlagName     = "output-dir"
-	statsCacheDirFlagName = "stats-cache-dir"
-	tmpDirFlagName        = "tmp-dir"
+	outputDirFlagName       = "output-dir"
+	statsCacheDirFlagName   = "stats-cache-dir"
+	tmpDirFlagName          = "tmp-dir"
+	directoriesCategoryName = "Directories"
 )
 
 // newDirectoryFlags returns the output, stats cache and temporary directory flags.
@@ -211,7 +226,7 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 			Usage:    "Output directory" + outputDefault,
 			Value:    "",
 			OnlyOnce: true,
-			Category: "Directories",
+			Category: directoriesCategoryName,
 		},
 		&cli.StringFlag{
 			Name:     statsCacheDirFlagName,
@@ -219,7 +234,7 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 			Usage:    "Directory for QP history cache",
 			Value:    getCacheDir(),
 			OnlyOnce: true,
-			Category: "Directories",
+			Category: directoriesCategoryName,
 		},
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
@@ -229,21 +244,32 @@ func newDirectoryFlags(segmented bool) []cli.Flag {
 			OnlyOnce:         true,
 			Validator:        validateTmpDir,
 			ValidateDefaults: true,
-			Category:         "Directories",
+			Category:         directoriesCategoryName,
 		},
 	}
 }
 
+func validateTmpDir(path string) error {
+	// validate tmpDir path for non-ASCII characters (Windows compatibility issue with libvmaf)
+	if runtime.GOOS == "windows" && !isASCII(path) {
+		return fmt.Errorf("the temporary directory path contains non-ASCII characters which are not compatible with libvmaf on Windows\n"+
+			"Please use a path with only ASCII characters (no accents or special characters).\n"+
+			"Current path: %s", path)
+	}
+	return nil
+}
+
 const (
-	vmafNegFlagName    = "vmaf-neg"
-	vmafMinFlagName    = "vmaf-min"
-	vmafP1FlagName     = "vmaf-p1"
-	vmafP5FlagName     = "vmaf-p5"
-	vmafP10FlagName    = "vmaf-p10"
-	vmafP25FlagName    = "vmaf-p25"
-	vmafMedianFlagName = "vmaf-median"
-	vmafHMeanFlagName  = "vmaf-hmean"
-	vmafMeanFlagName   = "vmaf-mean"
+	vmafNegFlagName         = "vmaf-neg"
+	vmafMinFlagName         = "vmaf-min"
+	vmafP1FlagName          = "vmaf-p1"
+	vmafP5FlagName          = "vmaf-p5"
+	vmafP10FlagName         = "vmaf-p10"
+	vmafP25FlagName         = "vmaf-p25"
+	vmafMedianFlagName      = "vmaf-median"
+	vmafHMeanFlagName       = "vmaf-hmean"
+	vmafMeanFlagName        = "vmaf-mean"
+	vmafProfileCategoryName = "VMAF Profile"
 )
 
 // newVMAFFlags returns the VMAF quality metric flags.
@@ -254,14 +280,14 @@ func newVMAFFlags() []cli.Flag {
 			Usage:    "Use VMAF NEG models",
 			Value:    false,
 			OnlyOnce: true,
-			Category: "VMAF",
+			Category: vmafProfileCategoryName,
 		},
 		&cli.Float64Flag{
 			Name:      vmafMinFlagName,
 			Usage:     "Minimum acceptable VMAF score for the worst frame.",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -269,7 +295,7 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for the 1st percentile.",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -277,7 +303,7 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for the 5th percentile.",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -285,7 +311,7 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for the 10th percentile.",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -293,7 +319,7 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for the 25th percentile.",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -301,7 +327,7 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for the median (50th percentile).",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -309,7 +335,7 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for mean.",
 			Value:     core.VMAFOffValue,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 		&cli.Float64Flag{
@@ -317,8 +343,15 @@ func newVMAFFlags() []cli.Flag {
 			Usage:     "Minimum acceptable VMAF score for harmonic mean.",
 			Value:     93,
 			OnlyOnce:  true,
-			Category:  "VMAF",
+			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
 	}
+}
+
+func vmafValueValidator(v float64) error {
+	if v != core.VMAFOffValue && (v < core.VMAFMinValue || v > core.VMAFMaxValue) {
+		return fmt.Errorf("must be between %d and %d, or %d to disable", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue)
+	}
+	return nil
 }
