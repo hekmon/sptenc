@@ -595,3 +595,38 @@ func TestParseCacheFilename_BackwardCompatibility(t *testing.T) {
 		})
 	}
 }
+
+// TestStatsCacheHistory_AddRunSingleQP ensures a single segment run (single scene
+// input) can be saved: the sample standard deviation of one value is NaN, which
+// JSON can not encode. The cold start step (a quarter of the QP range) is recorded instead.
+func TestStatsCacheHistory_AddRunSingleQP(t *testing.T) {
+	tmpDir := t.TempDir()
+	encoder := &cacheMockEncoder{name: "mockenc", qpMin: 0, qpMax: 51}
+	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatalf("failed to create profile: %v", err)
+	}
+
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	if err != nil {
+		t.Fatalf("NewStatsCacheHistory failed: %v", err)
+	}
+
+	mean, stddev, err := sch.AddRun([]int{36})
+	if err != nil {
+		t.Fatalf("AddRun failed: %v", err)
+	}
+	if mean != 36 || stddev != 13 {
+		t.Errorf("expected mean 36 and stddev 13, got %v/%v", mean, stddev)
+	}
+
+	// The saved file must be loadable
+	runs, err := LoadRunStats(sch.GetPath())
+	if err != nil {
+		t.Fatalf("LoadRunStats failed: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Mean != 36 || runs[0].StdDev != 13 || runs[0].Weight != 1 {
+		t.Errorf("unexpected saved runs: %+v", runs)
+	}
+}

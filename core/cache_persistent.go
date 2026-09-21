@@ -135,7 +135,16 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error
 		qpf[i] = float64(q)
 	}
 	// Prepare the stats object
-	mean, stddev = stat.MeanStdDev(qpf, nil)
+	if len(qpf) == 1 {
+		// The sample standard deviation of a single value is NaN, which can not be serialized
+		// to JSON. A single segment tells where the center is but nothing about the spread:
+		// record the same step a cold start would use (a quarter of the QP range). Recording 0
+		// would make the next search crawl one QP at a time if this run is alone in the cache.
+		mean = qpf[0]
+		stddev = float64(sch.qpMax-sch.qpMin+1) / 4
+	} else {
+		mean, stddev = stat.MeanStdDev(qpf, nil)
+	}
 	rs := RunStats{
 		Mean:   mean,
 		StdDev: stddev,
