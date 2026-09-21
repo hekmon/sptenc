@@ -28,8 +28,13 @@ var masterCommand = &cli.Command{
 		"    so cutting at an I-frame can still silently drop surrounding frames.\n\n" +
 		"THE SOLUTION\n" +
 		"This command re-encodes the source into a lossless all-intra master using the FFV1 codec.\n" +
-		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss.\n" +
-		"FFV1 is mathematically lossless, so this introduces no degradation compared to the original.",
+		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss.\n\n" +
+		"PIXEL FORMAT\n" +
+		"FFV1 is mathematically lossless, but the master is stored as 10-bit 4:2:0, the pixel format of\n" +
+		"every sptenc output. For 8-bit and 10-bit 4:2:0 sources, by far the most common ones, the master\n" +
+		"is bit-exact with the original. 4:2:2 and 4:4:4 sources get their chroma subsampled (luma stays\n" +
+		"exact) and sources deeper than 10 bits are reduced to 10 bits: the conversion the final encode\n" +
+		"requires anyway simply happens at this step.",
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{}
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)

@@ -367,6 +367,8 @@ These are the opinionated defaults sptenc passes to ffmpeg. They are intentional
 The defaults are selected for a single goal: **guaranteed perceptual quality at the smallest possible file size**. Every option is chosen with that trade-off in mind.
 
 > **10-bit output is mandatory.** All encoders target `yuv420p10le` (`main10` for HEVC, `main` for AV1 which includes 10-bit). 10-bit greatly reduces banding and improves compression efficiency at low bitrates — it is the modern baseline for quality encoding.
+>
+> The lossless FFV1 master is already stored in that format. It is bit-exact with 8-bit and 10-bit 4:2:0 sources, by far the most common ones. 4:2:2 and 4:4:4 sources get their chroma subsampled at that step (luma stays exact, and luma is all VMAF measures), and sources deeper than 10 bits are reduced to 10 bits.
 
 Under the hood, here are the base options used by sptenc. `X` is the QP value being tested for the current segment.
 
