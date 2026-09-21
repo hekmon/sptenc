@@ -49,6 +49,28 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 5. **Best effort** - If the encoder's minimum QP is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
 6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
 
+## How does it compare to Av1an?
+
+[Av1an](https://github.com/rust-av/Av1an) is the reference tool for scene based chunked encoding, and its Target Quality mode looks like what sptenc does: find, for each scene, the encoder setting reaching a metric score. If you know Av1an, this is the question you have. Both tools overlap, they do not aim at the same thing. As of Av1an's documentation and sources in September 2026:
+
+| | Av1an (Target Quality) | sptenc |
+|---|---|---|
+| Purpose | Encode faster by running several encoder processes in parallel; Target Quality is one of its modes | Enforce a quality floor on every scene; speed is what is traded for it |
+| What is promised for a scene | A score to aim at: a limited number of probes (4 by default), and the probe closest to the target is used if none reached it | A floor: no limit on attempts, a segment is only accepted once it passes, or is flagged as best effort when even the lowest QP of the encoder can not pass |
+| What is measured | Probes, by default faster and lower resolution encodes than the final one, which is then not measured (`--probe-slow` makes the probes real encodes) | The segments ending up in the output file, always |
+| Quality gate | One statistic of one metric (mean, harmonic mean, a percentile, minimum...) | Any combination of 8 statistics, all having to pass |
+| Metrics | VMAF, SSIMULACRA2, Butteraugli, XPSNR | VMAF only |
+| Dial | CRF / CQ, the rate control of the encoder stays in charge | Constant QP (see [why](#why-qp-instead-of-crf)) |
+| Encoders | Software: aomenc, SVT-AV1, rav1e, vpxenc, x264, x265, with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox), with fixed opinionated parameters |
+| GPU | Decoding (DGDecNV) and some metrics | Encoding, to search fast then encode the final file on CPU (`batchsearch --final-encode`), and VMAF (CUDA) |
+| Scene cuts | av-scenechange, frame exact chunks piped through VapourSynth, no intermediate file needed | ffmpeg `scdet`, frame exact cuts of a lossless intermediate (large: count on disk space), and a search of the scene threshold itself (`batchsearch`) |
+| Verification | Optional VMAF plot of the result | Frame counts of every segment and of the final file, final VMAF of the whole file embedded in its tags |
+| Learning | None between runs | QP statistics of previous encodes kept to start the next searches closer |
+| Interrupted run | Can be resumed | Starts over |
+| Requirements | FFmpeg, VapourSynth, the encoders binaries | ffmpeg (with libvmaf) and mkvpropedit |
+
+In short: choose Av1an to encode fast and well, with the encoder, the parameters and the metric of your choice, a metric seeing color (SSIMULACRA2, Butteraugli) included. Choose sptenc when the point is not to get close to a score but to never get under it, on the very files you will keep, and to have that written in them.
+
 ## Why QP instead of CRF?
 
 sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant QP)** mode, not CRF.
