@@ -481,6 +481,9 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, duration time.Durat
 			return "   Counting | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" | %d frames", bar.Current())
+		}),
 	)
 }
 
