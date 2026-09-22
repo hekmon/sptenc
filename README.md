@@ -476,8 +476,8 @@ go build -o sptenc ./cmd/sptenc/
 ```
 
 **External Dependencies:**
-- `ffmpeg` - compiled with `libx265` (or another supported encoder) and `libvmaf` support ([build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128)) - can be used in WSL to get `libvmaf_cuda` support on Windows. A recent ffmpeg version is highly recommended.
-- `ffprobe` - bundled with ffmpeg build
+- `ffmpeg` - the one your distribution, Homebrew or the [static builds](https://ffmpeg.org/download.html) ship is enough: it must be built with `libvmaf` and with `libx265` (or another supported encoder), which the usual packages are. A recent version is highly recommended. Nothing to compile, with one exception: `--vmaf-cuda` needs `libvmaf_cuda`, which no package ships. See the [build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128) for that one (works in WSL on Windows).
+- `ffprobe` - bundled with ffmpeg
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
 
 **Where the binaries are looked for:**
