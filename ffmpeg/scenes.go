@@ -88,27 +88,10 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 		err = fmt.Errorf("scene detection threshold must be between %d and %d", SceneThresholdMin, SceneThresholdMax)
 		return
 	}
-	// Auto-detect hardware decode compatibility if flags are set
-	if config.NVDec || config.VAAPIDec || config.D3D12Dec || config.VideoToolboxDec {
-		if stats, probeErr := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.Path}); probeErr == nil {
-			if video := stats.VideoTrack(); video != nil {
-				if config.NVDec && !IsNVDecCompatible(video.CodecName) {
-					config.NVDec = false
-				}
-				if config.VAAPIDec && !IsVAAPIDecCompatible(video.CodecName) {
-					config.VAAPIDec = false
-				}
-				if config.D3D12Dec && !IsD3D12DecCompatible(video.CodecName) {
-					config.D3D12Dec = false
-				}
-				if config.VideoToolboxDec && !IsVideoToolboxDecCompatible(video.CodecName) {
-					config.VideoToolboxDec = false
-				}
-			}
-		} else if config.RuntimeError != nil {
-			config.RuntimeError(fmt.Errorf("failed to probe input for hardware decode auto-detection: %w, falling back to software decode", probeErr))
-		}
-	}
+	// Ignore the hardware decoders incompatible with the input codec
+	dec := HWDecoderConfig{NVDec: config.NVDec, VAAPIDec: config.VAAPIDec, D3D12Dec: config.D3D12Dec, VideoToolboxDec: config.VideoToolboxDec}.
+		compatibleWith(ctx, config.Path, "", config.RuntimeError)
+	config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec = dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec
 	// Apply defaults
 	if config.NVDevice == 0 {
 		config.NVDevice = CUDADefaultDevice

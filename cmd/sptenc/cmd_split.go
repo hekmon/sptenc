@@ -187,19 +187,16 @@ var splitCommand = &cli.Command{
 			return
 		}
 		duration := stats.Format.Duration
+		action := "Splitting"
 		if cmd.Bool(listScenesFlagName) {
-			fmt.Fprintf(bypass, "Listing scenes of %s (%s) with threshold %s\n",
-				shellescape.Quote(filepath.Base(inputFilePath)),
-				cunits.ImportInBytes(float64(fileInfos.Size())),
-				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			)
-		} else {
-			fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
-				shellescape.Quote(filepath.Base(inputFilePath)),
-				cunits.ImportInBytes(float64(fileInfos.Size())),
-				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			)
+			action = "Listing"
 		}
+		fmt.Fprintf(bypass, "%s scenes of %s (%s) with threshold %s\n",
+			action,
+			shellescape.Quote(filepath.Base(inputFilePath)),
+			cunits.ImportInBytes(float64(fileInfos.Size())),
+			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+		)
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "Min segment length: %s\n", minSegLen)
 		}

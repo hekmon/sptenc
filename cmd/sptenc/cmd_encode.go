@@ -481,7 +481,7 @@ var encodeCommand = &cli.Command{
 		var sourceFrames, encodedFrames int
 		if inputInfos.IsDir() {
 			// merged FFV1 segments: no hardware decoder for this codec, the count falls back by itself
-			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, cmd.Bool(debugFlagName), hwDecoder)
+			sourceFrames, err = liveCountNbFrames(ctx, vmafSource, cmd.Bool(debugFlagName), hwDecoder)
 			if err != nil {
 				err = fmt.Errorf("could not count frames in source for verification: %w", err)
 				return
@@ -490,7 +490,7 @@ var encodeCommand = &cli.Command{
 			// Reuse the exact frame count from createMaster instead of re-probing the source.
 			sourceFrames = sourceTotalFrames
 		}
-		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName), hwDecoder)
+		encodedFrames, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName), hwDecoder)
 		if err != nil {
 			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
 			return

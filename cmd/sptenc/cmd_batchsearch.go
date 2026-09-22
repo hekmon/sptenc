@@ -712,7 +712,7 @@ var batchsearchCommand = &cli.Command{
 			err = fmt.Errorf("could not stat encoded output for frame count verification: %w", err)
 			return
 		}
-		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName), hwDecoder)
+		encodedFrames, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName), hwDecoder)
 		if err != nil {
 			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
 			return

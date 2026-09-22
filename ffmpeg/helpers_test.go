@@ -50,3 +50,22 @@ func TestResolveHWDecoder(t *testing.T) {
 		})
 	}
 }
+
+// With the codec known, no file is probed: the path does not even need to exist.
+func TestHWDecoderConfig_CompatibleWithKnownCodec(t *testing.T) {
+	requested := HWDecoderConfig{NVDec: true, NVDevice: 1, VAAPIDevice: "/dev/dri/renderD129"}
+	if dec := requested.compatibleWith(t.Context(), "does-not-exist.mkv", CodecVideoAVC, nil); dec != requested {
+		t.Errorf("an H.264 file must keep NVDEC: got %+v", dec)
+	}
+	dec := requested.compatibleWith(t.Context(), "does-not-exist.mkv", CodecName("ffv1"), nil)
+	if dec.Enabled() {
+		t.Errorf("a FFV1 file must fall back to software decode: got %+v", dec)
+	}
+	if dec.NVDevice != 1 || dec.VAAPIDevice != "/dev/dri/renderD129" {
+		t.Errorf("devices lost: %+v", dec)
+	}
+	// Nothing requested: nothing to check, whatever the codec
+	if dec := (HWDecoderConfig{NVDevice: 1}).compatibleWith(t.Context(), "does-not-exist.mkv", "", nil); dec.Enabled() || dec.NVDevice != 1 {
+		t.Errorf("unexpected change without any decoder requested: %+v", dec)
+	}
+}

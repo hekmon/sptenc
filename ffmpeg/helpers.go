@@ -53,38 +53,46 @@ type HWDecoderConfig struct {
 
 // SelectCompatibleDecoders probes the input file and returns an HWDecoderConfig
 // with only the hardware decoders that are both requested and compatible.
-func SelectCompatibleDecoders(ctx context.Context, inputPath string, wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec bool, nvDevice int, vaDevice string, d3d12Device int) (dec HWDecoderConfig) {
-	stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: inputPath})
-	if err != nil {
-		return
-	}
-	video := stats.VideoTrack()
-	if video == nil {
-		return
-	}
-	if wantNVDec && IsNVDecCompatible(video.CodecName) {
-		dec.NVDec = true
-		dec.NVDevice = nvDevice
-	}
-	if wantVAAPIDec && IsVAAPIDecCompatible(video.CodecName) {
-		dec.VAAPIDec = true
-		dec.VAAPIDevice = vaDevice
-	}
-	if wantD3D12Dec && IsD3D12DecCompatible(video.CodecName) {
-		dec.D3D12Dec = true
-		dec.D3D12Device = d3d12Device
-	}
-	if wantVideoToolboxDec && IsVideoToolboxDecCompatible(video.CodecName) {
-		dec.VideoToolboxDec = true
-	}
-	return
+func SelectCompatibleDecoders(ctx context.Context, inputPath string, wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec bool, nvDevice int, vaDevice string, d3d12Device int) HWDecoderConfig {
+	return HWDecoderConfig{
+		NVDec: wantNVDec, NVDevice: nvDevice,
+		VAAPIDec: wantVAAPIDec, VAAPIDevice: vaDevice,
+		D3D12Dec: wantD3D12Dec, D3D12Device: d3d12Device,
+		VideoToolboxDec: wantVideoToolboxDec,
+	}.CompatibleWith(ctx, inputPath)
 }
 
-// CompatibleWith returns the same decoder when it can decode the codec of the file (see
-// SelectCompatibleDecoders), a software decode configuration otherwise.
+// CompatibleWith returns the same decoder when it can decode the codec of the file, a software
+// decode configuration otherwise (the devices are kept). The file is probed for its codec.
 func (dec HWDecoderConfig) CompatibleWith(ctx context.Context, inputPath string) HWDecoderConfig {
-	return SelectCompatibleDecoders(ctx, inputPath, dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec,
-		dec.NVDevice, dec.VAAPIDevice, dec.D3D12Device)
+	return dec.compatibleWith(ctx, inputPath, "", nil)
+}
+
+// compatibleWith is CompatibleWith for the ffmpeg functions themselves: the codec is not probed
+// when the caller knows it already, and a failed probe is reported to runtimeError (if any)
+// before falling back to software decode.
+func (dec HWDecoderConfig) compatibleWith(ctx context.Context, inputPath string, codec CodecName, runtimeError func(error)) HWDecoderConfig {
+	if !dec.Enabled() {
+		return dec
+	}
+	if codec == "" {
+		stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: inputPath})
+		if err != nil {
+			if runtimeError != nil {
+				runtimeError(fmt.Errorf("failed to probe input for hardware decode auto-detection: %w, falling back to software decode", err))
+			}
+			dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec = false, false, false, false
+			return dec
+		}
+		if video := stats.VideoTrack(); video != nil {
+			codec = video.CodecName
+		}
+	}
+	dec.NVDec = dec.NVDec && IsNVDecCompatible(codec)
+	dec.VAAPIDec = dec.VAAPIDec && IsVAAPIDecCompatible(codec)
+	dec.D3D12Dec = dec.D3D12Dec && IsD3D12DecCompatible(codec)
+	dec.VideoToolboxDec = dec.VideoToolboxDec && IsVideoToolboxDecCompatible(codec)
+	return dec
 }
 
 // Enabled reports whether a hardware decoder is selected (software decode otherwise).

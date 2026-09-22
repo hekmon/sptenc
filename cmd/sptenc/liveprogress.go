@@ -49,15 +49,13 @@ var batchProgressRunes = liveprogress.BarRunes{
  * Master
  */
 
-func liveCountNbFrames(ctx context.Context, inputFilePath string, debug bool, dec ffmpeg.HWDecoderConfig) (
-	nbFrames int, codec string, duration time.Duration, err error) {
-	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, debug, dec)
+// liveCountNbFrames is liveProbeVideoCF for callers only interested in the exact number of frames.
+func liveCountNbFrames(ctx context.Context, inputFilePath string, debug bool, dec ffmpeg.HWDecoderConfig) (nbFrames int, err error) {
+	videoInfos, _, err := liveProbeVideoCF(ctx, inputFilePath, debug, dec)
 	if err != nil {
 		return
 	}
-	nbFrames = videoInfos.NbReadFrames
-	codec = string(videoInfos.CodecName)
-	return
+	return videoInfos.NbReadFrames, nil
 }
 
 // liveProbeVideoCF returns the video stream of the file along with what can only be known by
@@ -74,7 +72,7 @@ func liveProbeVideoCF(ctx context.Context, inputFilePath string, debug bool, dec
 		err = errors.New("input file has no video stream")
 		return
 	}
-	frames, err := liveCountFrames(ctx, inputFilePath, duration, debug, dec)
+	frames, err := liveCountFrames(ctx, inputFilePath, videoInfos.CodecName, duration, debug, dec)
 	if err != nil {
 		return
 	}
@@ -82,7 +80,7 @@ func liveProbeVideoCF(ctx context.Context, inputFilePath string, debug bool, dec
 	return
 }
 
-func liveCountFrames(ctx context.Context, path string, duration time.Duration, debug bool, dec ffmpeg.HWDecoderConfig) (
+func liveCountFrames(ctx context.Context, path string, codec ffmpeg.CodecName, duration time.Duration, debug bool, dec ffmpeg.HWDecoderConfig) (
 	frames ffmpeg.ReadFrames, err error) {
 	// prepare live progress
 	var currentStats ffmpeg.ProgressStats
@@ -112,6 +110,7 @@ func liveCountFrames(ctx context.Context, path string, duration time.Duration, d
 	return ffmpeg.CountFrames(ctx, ffmpeg.CountFramesConfig{
 		// Input
 		Path:            path,
+		Codec:           codec,
 		HWDecoderConfig: dec,
 		// Reporting
 		Debug: func(s string) {
