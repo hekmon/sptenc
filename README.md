@@ -426,7 +426,7 @@ ffmpeg [...] -c:v 'hevc_d3d12va' -profile:v 'main10' -rc_mode 'CQP' -qp 'X' [...
 
 **hevc_videotoolbox**
 ```bash
-ffmpeg [...] -c:v 'hevc_videotoolbox' -profile:v 'main10' -q:v 'X' [...]
+ffmpeg [...] -c:v 'hevc_videotoolbox' -profile:v 'main10' -q:v 'X' -bsf:v 'dump_extra' [...]
 ```
 
 ### AV1

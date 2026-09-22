@@ -77,7 +77,7 @@ Each encoder uses **distinct ffmpeg semantics**:
 - `libx265`: `-qp X` (no `aq-mode`: x265 disables AQ by itself in constant QP mode)
 - NVENC: `-rc constqp -qp X -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1` (AQ is honored under `constqp`)
 - VAAPI: `-rc_mode CQP -qp X`
-- VideoToolbox: `-q:v X` (note: `-q:v`, not `-qp`)
+- VideoToolbox: `-q:v X` (note: `-q:v`, not `-qp`), plus `-bsf:v dump_extra`: this encoder bakes the quality into the PPS and emits the parameter sets only in the container extradata, which the stream-copy concat keeps for the first segment only. Without the in-band copy before every keyframe, every segment after the first decodes against a foreign PPS: VideoToolbox decoding fails, software decoding outputs garbage. libx265 and NVENC do not need it, see the comment in `ffmpeg/hevc.go`.
 
 These differences are subtle, encoder-specific, and break in different ways across ffmpeg versions. The `core.SegmentEncoder` interface enables testability, but the adapter behind it is intentionally explicit about every ffmpeg flag. Abstracting the adapter switch behind a generic function would save ~30 lines and cost hours of debugging when one encoder drifts. The codebase is **intentionally WET** (Write Explicit Twice) here, not DRY.
 

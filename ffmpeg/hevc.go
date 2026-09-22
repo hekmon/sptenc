@@ -768,6 +768,20 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	args = append(args,
 		"-q:v", strconv.Itoa(quality),
 	)
+	//// parameter sets in-band, before every keyframe: DO NOT REMOVE
+	// hevc_videotoolbox writes the quality into the PPS (init_qp_minus26) and emits the
+	// VPS/SPS/PPS only once, in the container extradata. When segments encoded at different
+	// qualities are concatenated (stream copy), only the extradata of the first one survives:
+	// every following segment is then decoded against a PPS that is not its own. VideoToolbox
+	// refuses the first foreign frame and never recovers (decode error rate exceeded), the
+	// software decoder silently outputs garbage (PSNR ~8 dB against the segment alone). The
+	// concat demuxer only re-inserts headers for H.264, so the segments must carry their own:
+	// dump_extra copies the extradata before each keyframe, ~90 bytes per keyframe. libx265
+	// keeps its PPS constant whatever the QP and NVENC repeats its headers on every IDR by
+	// itself, which is why they do not need it.
+	args = append(args,
+		"-bsf:v", "dump_extra",
+	)
 	//// end with output
 	args = append(args,
 		"-fps_mode", "passthrough", // preserve original timestamps, prevent frame drop/duplicate
