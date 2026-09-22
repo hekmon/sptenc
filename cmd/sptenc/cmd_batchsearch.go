@@ -279,7 +279,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		// Check arguments: batchsearch only accepts a single regular file
 		if cmd.Args().Len() != 2 {
-			return ctx, errors.New("exactly two arguments are required: input file and output file")
+			return ctx, fmt.Errorf("exactly two arguments are required: input file and output file (currently %d)", cmd.Args().Len())
 		}
 		inputPath := cmd.Args().First()
 		outputPath := cmd.Args().Get(1)
