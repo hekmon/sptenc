@@ -21,9 +21,10 @@ import (
 // StatsCache provides statistical guidance for the QP search start point.
 type StatsCache interface {
 	GetMeanStdDev() (mean, stddev int)
-	// Snapshot returns the historical aggregate as a single weighted run.
-	// ok=false when no history exists (empty persistent cache).
-	Snapshot() (mean, stddev float64, weight int, ok bool)
+	// Snapshot returns the historical aggregate as one mean and stddev, for another cache to
+	// seed from (see NewEphemeralStatsCache). ok=false when no history exists (empty
+	// persistent cache).
+	Snapshot() (mean, stddev float64, ok bool)
 }
 
 // NewStatsCacheHistory initializes a stats cache for the given encoder name, QP range, VMAF model,
@@ -74,16 +75,16 @@ func (sch *StatsCacheHistory) GetMeanStdDev() (mean, stddev int) {
 	return
 }
 
-// Snapshot returns the historical aggregate as a single weighted run.
-// ok=false when no history exists.
-func (sch *StatsCacheHistory) Snapshot() (mean, stddev float64, weight int, ok bool) {
+// Snapshot returns the historical aggregate (runs weighted by their number of segments) as
+// one mean and stddev. ok=false when no history exists.
+func (sch *StatsCacheHistory) Snapshot() (mean, stddev float64, ok bool) {
 	sch.access.RLock()
 	defer sch.access.RUnlock()
 	if len(sch.stats) == 0 {
-		return 0, 0, 0, false
+		return 0, 0, false
 	}
-	mean, stddev, weight, _ = sch.computeWeightedAggregate()
-	return mean, stddev, weight, true
+	mean, stddev, _, _ = sch.computeWeightedAggregate()
+	return mean, stddev, true
 }
 
 // computeWeightedAggregate computes the weighted mean and stddev of all recorded runs

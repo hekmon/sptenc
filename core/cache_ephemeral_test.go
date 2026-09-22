@@ -6,21 +6,6 @@ import (
 	"testing"
 )
 
-// weightedMockStatsCache is a StatsCache with explicit snapshot weight.
-type weightedMockStatsCache struct {
-	mean   int
-	stddev int
-	weight int
-}
-
-func (m *weightedMockStatsCache) GetMeanStdDev() (mean, stddev int) {
-	return m.mean, m.stddev
-}
-
-func (m *weightedMockStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
-	return float64(m.mean), float64(m.stddev), m.weight, true
-}
-
 func TestEphemeralStatsCache_EmptyBase(t *testing.T) {
 	base := &mockStatsCache{mean: 26, stddev: 13} // empty persistent cache behavior
 	e := NewEphemeralStatsCache(base, 0, 51)
@@ -56,43 +41,54 @@ func TestEphemeralStatsCache_EmptyBase(t *testing.T) {
 	}
 }
 
-func TestEphemeralStatsCache_WithSolidBase(t *testing.T) {
-	// Simulate a solid persistent cache: mean=15, stddev=3, weight=100
-	base := &weightedMockStatsCache{mean: 15, stddev: 3, weight: 100}
+func TestEphemeralStatsCache_BaseWeighsOneSegment(t *testing.T) {
+	// The base is a starting point only: whatever history it aggregates, it weighs one
+	// segment, so the segments of the run take over as soon as they exist (see
+	// NewEphemeralStatsCache). A base mean far from this content must be overtaken
+	// within a handful of segments.
+	base := &mockStatsCache{mean: 40, stddev: 3}
 	e := NewEphemeralStatsCache(base, 0, 51)
 
 	mean, stddev := e.GetMeanStdDev()
-	if mean != 15 {
-		t.Errorf("expected initial mean 15 from base, got %d", mean)
+	if mean != 40 {
+		t.Errorf("expected initial mean 40 from base, got %d", mean)
 	}
 	if stddev != 3 {
 		t.Errorf("expected initial stddev 3 from base, got %d", stddev)
 	}
 
-	// Add one QP — base still dominates (100 vs 1)
+	// One segment: halfway there, spread kept from the base
 	e.addQP(20)
 	mean, stddev = e.GetMeanStdDev()
-	// (15*100 + 20) / 101 = 15.05 → 15
-	if mean != 15 {
-		t.Errorf("expected mean still 15 (100 vs 1 weight), got %d", mean)
+	// (40 + 20) / 2 = 30
+	if mean != 30 {
+		t.Errorf("expected mean 30 after one QP, got %d", mean)
 	}
-	// stddev stays at base because len(qps)==1
 	if stddev != 3 {
-		t.Errorf("expected stddev still 3, got %d", stddev)
+		t.Errorf("expected stddev still 3 after one QP, got %d", stddev)
 	}
 
-	// Add several more QPs so accumulated weight becomes significant
-	for _, qp := range []int{18, 22, 19, 21} {
+	// Three segments: the base is already a minority
+	e.addQP(21)
+	e.addQP(22)
+	mean, _ = e.GetMeanStdDev()
+	// (40 + 20 + 21 + 22) / 4 = 25.75 → 26
+	if mean != 26 {
+		t.Errorf("expected mean 26 after three QPs, got %d", mean)
+	}
+
+	// Nine segments: the base is noise
+	for _, qp := range []int{20, 21, 22, 20, 21, 22} {
 		e.addQP(qp)
 	}
 	mean, stddev = e.GetMeanStdDev()
-	// Weighted mean: (15*100 + 20+18+22+19+21) / 105 = (1500 + 100) / 105 ≈ 15.2 → 15
-	if mean != 15 {
-		t.Errorf("expected mean ~15 with solid base, got %d", mean)
+	// (40 + 3*(20+21+22)) / 10 = 22.9 → 23
+	if mean != 23 {
+		t.Errorf("expected mean 23 after nine QPs, got %d", mean)
 	}
-	// Stddev should still be close to 3 (base dominates)
-	if stddev < 2 || stddev > 4 {
-		t.Errorf("expected stddev near 3 with solid base, got %d", stddev)
+	// sample stddev of three times [20,21,22] is 0.866; combined: (3 + 0.866*9) / 10 = 1.08 → 1
+	if stddev != 1 {
+		t.Errorf("expected stddev 1 after nine QPs, got %d", stddev)
 	}
 }
 
@@ -117,16 +113,13 @@ func TestEphemeralStatsCache_ConcurrentAccess(t *testing.T) {
 }
 
 func TestEphemeralStatsCache_Snapshot(t *testing.T) {
-	base := &weightedMockStatsCache{mean: 10, stddev: 2, weight: 50}
+	base := &mockStatsCache{mean: 10, stddev: 2}
 	e := NewEphemeralStatsCache(base, 0, 51)
 
 	// Snapshot before adding QPs should reflect the base
-	mean, stddev, weight, ok := e.Snapshot()
+	mean, stddev, ok := e.Snapshot()
 	if !ok {
 		t.Fatal("expected ok=true from Snapshot")
-	}
-	if weight != 50 {
-		t.Errorf("expected weight 50, got %d", weight)
 	}
 	if mean != 10.0 {
 		t.Errorf("expected mean 10.0, got %v", mean)
@@ -135,48 +128,55 @@ func TestEphemeralStatsCache_Snapshot(t *testing.T) {
 		t.Errorf("expected stddev 2.0, got %v", stddev)
 	}
 
-	// Add QPs and verify Snapshot reflects combined data
+	// Add QPs and verify Snapshot reflects combined data, base weighing one segment
 	e.addQP(12)
 	e.addQP(14)
-	mean, stddev, weight, ok = e.Snapshot()
+	mean, stddev, ok = e.Snapshot()
 	if !ok {
 		t.Fatal("expected ok=true from Snapshot after addQP")
 	}
-	if weight != 52 {
-		t.Errorf("expected weight 52, got %d", weight)
+	// (10 + 12 + 14) / 3 = 12
+	if math.Abs(mean-12) > 1e-9 {
+		t.Errorf("expected mean 12, got %v", mean)
 	}
-	// Weighted mean: (10*50 + 12 + 14) / 52 = 536/52 ≈ 10.3077
-	expectedMean := (10.0*50 + 12 + 14) / 52
-	if math.Abs(mean-expectedMean) > 1e-9 {
-		t.Errorf("expected mean %v, got %v", expectedMean, mean)
+	// sample stddev of [12,14] is 1.414; combined: (2 + 1.414*2) / 3 = 1.609
+	expectedStddev := (2 + math.Sqrt2*2) / 3
+	if math.Abs(stddev-expectedStddev) > 1e-9 {
+		t.Errorf("expected stddev %v, got %v", expectedStddev, stddev)
 	}
 }
 
 func TestEphemeralStatsCache_WrapsAnotherEphemeral(t *testing.T) {
 	// An ephemeral cache is a StatsCache like any other: it can seed another one, which then
-	// starts from everything the first one knows (its own base and the QPs it accumulated).
-	// FindAllSegmentsQP wraps the cache it is given for the duration of one search, and
-	// batchsearch gives every candidate the same ephemeral cache fed with the previous
-	// candidates (see TestEphemeralStatsCache_AddRun), so each search starts from what the
-	// previous ones found.
-	persistent := &weightedMockStatsCache{mean: 20, stddev: 5, weight: 10}
+	// starts from everything the first one knows (its own base and the QPs it accumulated),
+	// as one ghost segment like any other base. FindAllSegmentsQP wraps the cache it is given
+	// for the duration of one search, and batchsearch gives every candidate the same ephemeral
+	// cache fed with the previous candidates (see TestEphemeralStatsCache_AddRun), so each
+	// search starts from what the previous ones found.
+	persistent := &mockStatsCache{mean: 20, stddev: 5}
 	inner := NewEphemeralStatsCache(persistent, 0, 51)
 	inner.addQP(22)
 	inner.addQP(24) // what a first search found
 
 	// Outer ephemeral seeds from inner, as FindAllSegmentsQP would if it was given inner
 	outer := NewEphemeralStatsCache(inner, 0, 51)
-	outer.addQP(23) // one segment of a second search
-
 	mean, stddev := outer.GetMeanStdDev()
-	// Total weight: 10 (persistent) + 2 (first search) + 1 (second search) = 13
-	// Weighted mean: (20*10 + 22 + 24 + 23) / 13 = 269/13 ≈ 20.69 → 21
-	if mean != 21 {
-		t.Errorf("expected mean 21, got %d", mean)
+	// inner: (20 + 22 + 24) / 3 = 22, stddev (5 + 1.414*2) / 3 = 2.61 → 3
+	if mean != 22 {
+		t.Errorf("expected mean 22 before any segment, got %d", mean)
 	}
-	// Stddev should be positive
-	if stddev < 1 {
-		t.Errorf("expected stddev >= 1, got %d", stddev)
+	if stddev != 3 {
+		t.Errorf("expected stddev 3 before any segment, got %d", stddev)
+	}
+
+	outer.addQP(30) // one segment of a second search
+	mean, stddev = outer.GetMeanStdDev()
+	// (22 + 30) / 2 = 26: inner weighs one segment, not its base's and its two QPs
+	if mean != 26 {
+		t.Errorf("expected mean 26, got %d", mean)
+	}
+	if stddev != 3 {
+		t.Errorf("expected stddev kept at 3 after one segment, got %d", stddev)
 	}
 }
 
@@ -184,7 +184,7 @@ func TestEphemeralStatsCache_AddRun(t *testing.T) {
 	// batchsearch: one ephemeral cache over the persistent one for the whole run, every
 	// candidate search wraps it and, once done, feeds its QPs back so the next candidate
 	// starts from them.
-	persistent := &weightedMockStatsCache{mean: 20, stddev: 5, weight: 10}
+	persistent := &mockStatsCache{mean: 20, stddev: 5}
 	run := NewEphemeralStatsCache(persistent, 0, 51)
 
 	// First candidate: what FindAllSegmentsQP sees before any result
@@ -197,21 +197,24 @@ func TestEphemeralStatsCache_AddRun(t *testing.T) {
 	// Second candidate starts from persistent + first candidate
 	second := NewEphemeralStatsCache(run, 0, 51)
 	mean, stddev := second.GetMeanStdDev()
-	// (20*10 + 30+32+34+36) / 14 = 332/14 ≈ 23.71 → 24
-	if mean != 24 {
-		t.Errorf("expected mean 24, got %d", mean)
+	// (20 + 30+32+34+36) / 5 = 30.4 → 30
+	if mean != 30 {
+		t.Errorf("expected mean 30, got %d", mean)
 	}
-	if stddev < 1 {
-		t.Errorf("expected stddev >= 1, got %d", stddev)
+	// sample stddev of [30,32,34,36] is 2.58; combined: (5 + 2.58*4) / 5 = 3.06 → 3
+	if stddev != 3 {
+		t.Errorf("expected stddev 3, got %d", stddev)
 	}
 	// Runs are not deduplicated: the same QPs again weigh twice
 	run.AddRun([]int{30, 32, 34, 36})
-	if _, _, weight, _ := run.Snapshot(); weight != 18 {
-		t.Errorf("expected weight 18 after two identical runs, got %d", weight)
+	snapMean, _, _ := run.Snapshot()
+	// (20 + 2*132) / 9 = 31.56
+	if math.Abs(snapMean-284.0/9) > 1e-9 {
+		t.Errorf("expected mean %v after two identical runs, got %v", 284.0/9, snapMean)
 	}
 	// An empty run changes nothing
 	run.AddRun(nil)
-	if _, _, weight, _ := run.Snapshot(); weight != 18 {
-		t.Errorf("expected weight 18 after an empty run, got %d", weight)
+	if again, _, _ := run.Snapshot(); again != snapMean {
+		t.Errorf("expected mean unchanged at %v after an empty run, got %v", snapMean, again)
 	}
 }

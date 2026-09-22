@@ -187,8 +187,8 @@ func (m *mockStatsCache) GetMeanStdDev() (mean, stddev int) {
 	return m.mean, m.stddev
 }
 
-func (m *mockStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
-	return float64(m.mean), float64(m.stddev), 1, true
+func (m *mockStatsCache) Snapshot() (mean, stddev float64, ok bool) {
+	return float64(m.mean), float64(m.stddev), true
 }
 
 // mockCallbacks satisfies QPSearchCallbacks for tests.

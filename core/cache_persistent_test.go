@@ -194,12 +194,12 @@ func TestStatsCacheHistory_Snapshot_Empty(t *testing.T) {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
 
-	mean, stddev, weight, ok := sch.Snapshot()
+	mean, stddev, ok := sch.Snapshot()
 	if ok {
 		t.Error("expected Snapshot to return ok=false for empty cache")
 	}
-	if mean != 0 || stddev != 0 || weight != 0 {
-		t.Errorf("expected zero values for empty snapshot, got %v %v %v", mean, stddev, weight)
+	if mean != 0 || stddev != 0 {
+		t.Errorf("expected zero values for empty snapshot, got %v %v", mean, stddev)
 	}
 }
 
@@ -228,16 +228,13 @@ func TestStatsCacheHistory_Snapshot_Weighted(t *testing.T) {
 		t.Fatalf("AddRun 2 failed: %v", err)
 	}
 
-	mean, stddev, weight, ok := sch.Snapshot()
+	mean, stddev, ok := sch.Snapshot()
 	if !ok {
 		t.Fatal("expected Snapshot to return ok=true")
 	}
 	// Weighted mean of means: (13.333*3 + 20*2) / 5 = 16
 	if math.Round(mean) != 16 {
 		t.Errorf("expected snapshot mean ~16, got %v", mean)
-	}
-	if weight != 5 {
-		t.Errorf("expected total weight 5, got %d", weight)
 	}
 	if stddev < 0 {
 		t.Errorf("expected non-negative stddev, got %v", stddev)
