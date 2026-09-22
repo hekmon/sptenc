@@ -592,7 +592,7 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 		err = fmt.Errorf("failed to get QP range for encoder %s", encoder.Name())
 		return
 	}
-	fmt.Fprintf(bypass, "\tStarting search with mean %d and stddev %d on the %q-%d QP range of %s\n",
+	fmt.Fprintf(bypass, "\tStarting search with mean %d and stddev %d on the %d-%d QP range of %s\n",
 		mean, stddev, qpMin, qpMax, encoder.Name())
 	lqps := LiveQPSearch{
 		PrintDebug:  debug,
