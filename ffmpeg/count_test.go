@@ -111,3 +111,16 @@ func TestStandardProgress_ReportsEnd(t *testing.T) {
 		t.Errorf("expected frames [10 48], got %v", frames)
 	}
 }
+
+// A caller not interested in the non fatal errors must not crash the parser, whatever ffmpeg
+// prints (a malformed line, an end without a progress=end block).
+func TestStandardProgress_NilRuntimeError(t *testing.T) {
+	const output = "garbage\nframe=abc\nprogress=continue\nframe=5\n"
+	var frames []int
+	standardProgress(io.NopCloser(strings.NewReader(output)), func(stats ProgressStats) {
+		frames = append(frames, stats.CurrentFrame)
+	}, nil)
+	if len(frames) != 1 || frames[0] != 0 {
+		t.Errorf("expected one report of frame 0, got %v", frames)
+	}
+}

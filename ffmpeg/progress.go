@@ -28,6 +28,10 @@ type ProgressStats struct {
 
 func standardProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressStats), runtimeError func(error)) {
 	defer ffmpegOutput.Close()
+	// every caller documents runtimeError as optional: the errors below are all non fatal
+	if runtimeError == nil {
+		runtimeError = func(error) {}
+	}
 	scanner := bufio.NewScanner(ffmpegOutput)
 	var (
 		stats        ProgressStats
@@ -113,7 +117,7 @@ func standardProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressSt
 			runtimeError(fmt.Errorf("unknown progress field: %q=%q", key, value))
 		}
 	}
-	if err := scanner.Err(); err != nil && runtimeError != nil {
+	if err := scanner.Err(); err != nil {
 		runtimeError(fmt.Errorf("error reading ffmpeg progress: %w", err))
 	} else {
 		runtimeError(errors.New("error reading ffmpeg progress: unexpected end"))
