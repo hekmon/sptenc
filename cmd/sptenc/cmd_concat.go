@@ -11,6 +11,7 @@ import (
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
+	"github.com/hekmon/sptenc/core"
 	"github.com/urfave/cli/v3"
 )
 
@@ -128,30 +129,41 @@ var concatCommand = &cli.Command{
 		}
 
 		// Calculate total duration and size
+		// The concat demuxer places each file at the end of the previous one, and takes
+		// that end from the duration the container declares, rounded to its time base: the
+		// rounding adds up at every boundary (see ffmpeg.GenerateConcatList). Give it the
+		// exact duration of every file instead: its number of video packets (one per frame)
+		// at its frame rate. The whole file is read for that, no frame is decoded.
 		var (
-			fileInfo      os.FileInfo
-			totalSize     int64
-			totalDuration time.Duration
+			fileInfo          os.FileInfo
+			totalSize         int64
+			totalDuration     time.Duration
+			segmentsDurations = make([]time.Duration, len(segmentsPaths))
 		)
-		for _, path := range segmentsPaths {
+		fmt.Fprintln(bypass, "Counting the frames of each file...")
+		for i, path := range segmentsPaths {
 			if fileInfo, err = os.Stat(path); err != nil {
 				err = fmt.Errorf("failed to access %s: %w", shellescape.Quote(path), err)
 				return
 			}
 			totalSize += fileInfo.Size()
-			stats, probeErr := getStreamsInfos(ctx, path, cmd.Bool(debugFlagName))
+			stats, probeErr := countStreamsPackets(ctx, path, cmd.Bool(debugFlagName))
 			if probeErr != nil {
-				fmt.Fprintf(bypass, "WARNING: failed to probe %s for duration: %s\n",
-					shellescape.Quote(filepath.Base(path)), probeErr,
-				)
-				continue
+				return fmt.Errorf("failed to probe %s: %w", shellescape.Quote(filepath.Base(path)), probeErr)
 			}
-			totalDuration += stats.Format.Duration
+			videoStream := stats.VideoTrack()
+			if videoStream == nil {
+				return fmt.Errorf("no video stream found in %s", shellescape.Quote(filepath.Base(path)))
+			}
+			if segmentsDurations[i], err = core.FramesDuration(videoStream.NbReadPackets, videoStream.RFrameRate); err != nil {
+				return fmt.Errorf("failed to compute the duration of %s: %w", shellescape.Quote(filepath.Base(path)), err)
+			}
+			totalDuration += segmentsDurations[i]
 			if cmd.Bool(debugFlagName) {
-				fmt.Fprintf(bypass, "DEBUG: %s %s (%s)\n",
-					shellescape.Quote(path),
-					stats.Format.Duration.Round(time.Millisecond),
-					cunits.ImportInBytes(float64(fileInfo.Size())),
+				fmt.Fprintf(bypass, "DEBUG: %s %d frames at %s fps, %s (%s), container declares %s\n",
+					shellescape.Quote(path), videoStream.NbReadPackets, videoStream.RFrameRate,
+					segmentsDurations[i], cunits.ImportInBytes(float64(fileInfo.Size())),
+					stats.Format.Duration,
 				)
 			}
 		}
@@ -161,7 +173,7 @@ var concatCommand = &cli.Command{
 
 		// concat
 		start := time.Now()
-		if err = liveConcatDuration(ctx, workingDir, outputPath, segmentsPaths, totalDuration, cmd.Bool(debugFlagName)); err != nil {
+		if err = liveConcatDuration(ctx, workingDir, outputPath, segmentsPaths, segmentsDurations, totalDuration, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to concatenate segments: %w", err)
 		}
 		duration := time.Since(start)

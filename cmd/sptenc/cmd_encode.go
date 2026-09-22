@@ -464,7 +464,12 @@ var encodeCommand = &cli.Command{
 			vmafSource = filepath.Join(workingDir, "source_segments_merged.mkv")
 			start = time.Now()
 			// Here we use results.TotalSegmentsFrames because all segments frames number have been checked against source in QP search
-			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
+			var segmentsDurations []time.Duration
+			if segmentsDurations, err = results.SegmentsDurations(); err != nil {
+				err = fmt.Errorf("failed to compute the source segments durations: %w", err)
+				return
+			}
+			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, segmentsDurations, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("failed to concat source segments: %w", err)
 				return
 			}
@@ -669,7 +674,12 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 	fmt.Fprintln(bypass, "Merging segments...")
 	encodedSegmentsMerged = filepath.Join(workingDir, "encoded_segments_merged.mkv")
 	start = time.Now()
-	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, results.TotalSegmentsFrames, debug); err != nil {
+	segmentsDurations, err := results.SegmentsDurations()
+	if err != nil {
+		err = fmt.Errorf("failed to compute the encoded segments durations: %w", err)
+		return
+	}
+	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, segmentsDurations, results.TotalSegmentsFrames, debug); err != nil {
 		err = fmt.Errorf("failed to concat encoded segments: %w", err)
 		return
 	}

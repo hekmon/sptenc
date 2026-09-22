@@ -1815,6 +1815,30 @@ func TestFindAllSegmentsQP_Concurrent(t *testing.T) {
 	if results.TotalSegmentsFrames != nbSegments*1000 {
 		t.Errorf("expected %d frames, got %d", nbSegments*1000, results.TotalSegmentsFrames)
 	}
+	// Per segment frame counts and the shared frame rate feed the concat durations
+	if len(results.SegmentsFrames) != nbSegments {
+		t.Fatalf("expected %d segments frame counts, got %d", nbSegments, len(results.SegmentsFrames))
+	}
+	for segment, frames := range results.SegmentsFrames {
+		if frames != 1000 {
+			t.Errorf("segment %d: expected 1000 frames, got %d", segment, frames)
+		}
+	}
+	if results.FrameRate != "24/1" {
+		t.Errorf("expected frame rate 24/1, got %q", results.FrameRate)
+	}
+	if durations, err := results.SegmentsDurations(); err != nil {
+		t.Errorf("SegmentsDurations failed: %v", err)
+	} else if len(durations) != nbSegments {
+		t.Errorf("expected %d durations, got %d", nbSegments, len(durations))
+	} else {
+		// 1000 frames at 24 fps: 41.666666... s, rounded to the microsecond
+		for segment, d := range durations {
+			if d != 41666667*time.Microsecond {
+				t.Errorf("segment %d: expected %s, got %s", segment, 41666667*time.Microsecond, d)
+			}
+		}
+	}
 	if results.TotalNbAttempts != len(encoder.encodeCalls) {
 		t.Errorf("expected %d attempts (encode calls), got %d", len(encoder.encodeCalls), results.TotalNbAttempts)
 	}
@@ -1836,5 +1860,113 @@ func TestFindAllSegmentsQP_Concurrent(t *testing.T) {
 	}
 	if expectedSize := int64(nbSegments * len("dummy")); callbacks.lastTotalSize != expectedSize {
 		t.Errorf("expected a total size of %d, got %d", expectedSize, callbacks.lastTotalSize)
+	}
+}
+
+func TestFramesDuration(t *testing.T) {
+	tests := []struct {
+		name      string
+		frames    int
+		frameRate string
+		expected  time.Duration
+		wantErr   bool
+	}{
+		// 886 frames at 23.976 fps last 36.953583333 s: rounded to the microsecond, not to
+		// the millisecond the container would use
+		{"ntsc film", 886, "24000/1001", 36953583 * time.Microsecond, false},
+		{"one frame ntsc film", 1, "24000/1001", 41708 * time.Microsecond, false},
+		{"pal", 125, "25/1", 5 * time.Second, false},
+		{"integer rate", 48, "24", 2 * time.Second, false},
+		{"zero frames", 0, "24000/1001", 0, false},
+		{"negative frames", -1, "24/1", 0, true},
+		{"empty rate", 10, "", 0, true},
+		{"zero rate", 10, "0/1", 0, true},
+		{"zero denominator", 10, "24/0", 0, true},
+		{"decimal rate is not a fraction", 10, "23.976", 0, true},
+		{"garbage", 10, "abc/def", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FramesDuration(tt.frames, tt.frameRate)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("FramesDuration(%d, %q) error = %v, wantErr %t", tt.frames, tt.frameRate, err, tt.wantErr)
+			}
+			if got != tt.expected {
+				t.Errorf("FramesDuration(%d, %q) = %s, expected %s", tt.frames, tt.frameRate, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSegmentsDurations(t *testing.T) {
+	results := QPSearchResults{
+		SegmentsFrames: []int{403, 167, 886},
+		FrameRate:      "24000/1001",
+	}
+	durations, err := results.SegmentsDurations()
+	if err != nil {
+		t.Fatalf("SegmentsDurations failed: %v", err)
+	}
+	expected := []time.Duration{16808458 * time.Microsecond, 6965292 * time.Microsecond, 36953583 * time.Microsecond}
+	if len(durations) != len(expected) {
+		t.Fatalf("expected %d durations, got %d", len(expected), len(durations))
+	}
+	for i := range expected {
+		if durations[i] != expected[i] {
+			t.Errorf("segment %d: expected %s, got %s", i, expected[i], durations[i])
+		}
+	}
+	// A bad frame rate fails the whole set
+	results.FrameRate = "vfr"
+	if _, err = results.SegmentsDurations(); err == nil {
+		t.Error("expected an error with an invalid frame rate")
+	}
+	// An empty result has no durations and no error
+	if durations, err = (QPSearchResults{FrameRate: "24/1"}).SegmentsDurations(); err != nil || len(durations) != 0 {
+		t.Errorf("expected no durations and no error for an empty result, got %v, %v", durations, err)
+	}
+}
+
+func TestFindAllSegmentsQP_FrameRateMismatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	segments := []string{
+		filepath.Join(tmpDir, "segment0.mkv"),
+		filepath.Join(tmpDir, "segment1.mkv"),
+	}
+	for _, seg := range segments {
+		if err := os.WriteFile(seg, []byte("source"), 0644); err != nil {
+			t.Fatalf("failed to create source segment: %v", err)
+		}
+	}
+	vmafResults := make(map[int]VMAFStats)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+	encoder := &mockEncoder{
+		name:        "mock",
+		qpMin:       0,
+		qpMax:       51,
+		vmafResults: vmafResults,
+		// The mock serves probe results in call order: the first call is the source probe of
+		// segment 0, which sets the frame rate of the whole set; every later probe (the
+		// encodes of segment 0, then segment 1) gets the mock default, 24/1.
+		probeResults: []VideoStream{
+			{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "25/1", Height: 1080, Duration: time.Minute},
+		},
+	}
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 85)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+	_, err = FindAllSegmentsQP(context.Background(), &mockCallbacks{}, QPSearchConfig{
+		SegmentsPaths: segments,
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
+		Encoder:       encoder,
+	})
+	if err == nil || !strings.Contains(err.Error(), "frame rate") {
+		t.Fatalf("expected a frame rate mismatch error, got %v", err)
 	}
 }

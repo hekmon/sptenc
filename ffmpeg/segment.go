@@ -73,6 +73,9 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 		args = append(args,
 			"-f", "segment",
 			"-segment_frames", formatScenesFrames(config.ScenesFrames),
+			// Each segment starts at 0. Keeping the source timestamps instead would not
+			// change how the segments are put back together: the concat demuxer offsets
+			// every file by the previous durations either way, see GenerateConcatList.
 			"-reset_timestamps", "1",
 			filepath.Join(config.OutputDir, SegmentOutputFormat),
 		)

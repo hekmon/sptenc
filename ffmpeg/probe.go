@@ -17,6 +17,9 @@ import (
 type GetStreamsInfosConfig struct {
 	// Input
 	Path string
+	// CountPackets reads every packet of the file to fill NbReadPackets on each stream
+	// (no decoding, the whole file is read).
+	CountPackets bool
 	// Reporting
 	Debug        func(msg string)
 	RuntimeError func(err error) // non fatal errors
@@ -31,6 +34,9 @@ func GetStreamsInfos(ctx context.Context, config GetStreamsInfosConfig) (stats F
 	}
 	// Build up args
 	args := []string{"-loglevel", "error", "-print_format", "json", "-show_format", "-show_streams"}
+	if config.CountPackets {
+		args = append(args, "-count_packets")
+	}
 	args = append(args, config.Path)
 	// Prepare command
 	if config.Debug != nil {
@@ -183,6 +189,7 @@ type FFProbeBinaryStream struct {
 	BitRate            string    `json:"bit_rate,omitempty"`
 	MaxBitRate         string    `json:"max_bit_rate,omitempty"` // need -count_frames to appear (only on video stream)
 	NbFrames           int       `json:"nb_frames"`
+	NbReadPackets      int       `json:"-"` // need -count_packets (GetStreamsInfosConfig.CountPackets) to be populated
 	// Measured by CountFrames and set by SetReadFrames (not part of the ffprobe report), see IsConstantFrameRate
 	NbReadFrames          int                            `json:"-"` // exact number of frames
 	NbFrameDurations      int                            `json:"-"` // number of durations measured (time between two consecutive frames)
@@ -212,7 +219,8 @@ func (ffpbs *FFProbeBinaryStream) UnmarshalJSON(data []byte) (err error) {
 	type Mask FFProbeBinaryStream
 	tmp := struct {
 		*Mask
-		NbFrames string `json:"nb_frames"`
+		NbFrames      string `json:"nb_frames"`
+		NbReadPackets string `json:"nb_read_packets"`
 	}{
 		Mask: (*Mask)(ffpbs),
 	}
@@ -222,6 +230,12 @@ func (ffpbs *FFProbeBinaryStream) UnmarshalJSON(data []byte) (err error) {
 	if tmp.NbFrames != "" {
 		if ffpbs.NbFrames, err = strconv.Atoi(tmp.NbFrames); err != nil {
 			err = fmt.Errorf("failed to parse nb_frames: %w", err)
+			return
+		}
+	}
+	if tmp.NbReadPackets != "" {
+		if ffpbs.NbReadPackets, err = strconv.Atoi(tmp.NbReadPackets); err != nil {
+			err = fmt.Errorf("failed to parse nb_read_packets: %w", err)
 			return
 		}
 	}

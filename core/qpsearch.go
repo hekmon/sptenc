@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,6 +97,13 @@ type QPSearchResults struct {
 	EncodedSegmentsPaths []string
 	// QPs contains the selected QP value for each segment (aligned with EncodedSegmentsPaths).
 	QPs []int
+	// SegmentsFrames contains the exact number of frames of each segment (aligned with
+	// EncodedSegmentsPaths): the source segment was decoded to count them, and its encode
+	// was checked to hold as many.
+	SegmentsFrames []int
+	// FrameRate is the frame rate declared by the segments, as ffprobe writes it ("24000/1001").
+	// All the segments have the same one: the search fails on the first that differs.
+	FrameRate string
 	// GlobalWeightedQP is the average QP across all segments, weighted by each segment's frame count.
 	GlobalWeightedQP float64
 	// TotalNbAttempts is the total number of encode attempts made during the search.
@@ -128,6 +137,82 @@ func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
 }
 
 // GetMeanStdDev returns the mean and standard deviation of the selected QPs.
+// SegmentsDurations returns the exact duration of each segment (aligned with
+// EncodedSegmentsPaths): its number of frames times the frame duration, computed from the
+// frame rate fraction with integer arithmetic and rounded to the microsecond.
+//
+// # WHY THIS EXISTS
+//
+// The segments are concatenated by the ffmpeg concat demuxer, which places each file after
+// the previous one at the previous one's duration. Left to itself, it takes that duration
+// from the container: for a Matroska file it is the last frame's timestamp plus that frame's
+// duration, both rounded to the millisecond, so a 23.976 fps segment declares itself up to
+// half a millisecond longer than its frames really last. That excess is never negative and
+// never compensated: it adds up at every boundary, and the video ends 46 ms behind its
+// audio on an episode of 163 segments (measured), a quarter of a second on a film of 800.
+// The concat list can state a duration per file, which the demuxer uses instead: the
+// sptenc pipeline knows the truth, the frame count of each segment (decoded and checked
+// against its encode) and the constant frame rate the source was verified to have.
+//
+// # WHY NOT THE CONTAINER DURATION, SNAPPED
+//
+// Rounding the container duration to the nearest multiple of the frame duration would
+// give the same value for files written by ffmpeg, but it is a guess on the muxer's
+// arithmetic, and a wrong one on a container whose duration is not last pts plus last
+// duration. The frame count is not a guess.
+//
+// # EDGE CASES
+//
+// The frame rate must be a fraction or an integer ("24000/1001", "24"), as ffprobe writes
+// r_frame_rate; anything else is an error rather than a float parsed with a loss. The
+// duration is rounded to the microsecond because that is the precision the concat demuxer
+// parses: the error is then at most half a microsecond per boundary, in no fixed
+// direction.
+func (qpsr QPSearchResults) SegmentsDurations() (durations []time.Duration, err error) {
+	durations = make([]time.Duration, len(qpsr.SegmentsFrames))
+	for i, frames := range qpsr.SegmentsFrames {
+		if durations[i], err = FramesDuration(frames, qpsr.FrameRate); err != nil {
+			return nil, fmt.Errorf("segment %d: %w", i, err)
+		}
+	}
+	return
+}
+
+// FramesDuration returns how long frames last at frameRate, a fraction or an integer as
+// ffprobe writes r_frame_rate ("24000/1001", "24"), computed with integer arithmetic and
+// rounded to the microsecond (see QPSearchResults.SegmentsDurations for why).
+func FramesDuration(frames int, frameRate string) (duration time.Duration, err error) {
+	if frames < 0 {
+		return 0, fmt.Errorf("negative frame count: %d", frames)
+	}
+	num, den, err := parseFrameRateFraction(frameRate)
+	if err != nil {
+		return 0, fmt.Errorf("invalid frame rate %q: %w", frameRate, err)
+	}
+	// frames * den / num seconds, in microseconds, rounded to nearest
+	micros := (int64(frames)*den*int64(time.Second/time.Microsecond) + num/2) / num
+	return time.Duration(micros) * time.Microsecond, nil
+}
+
+// parseFrameRateFraction parses a frame rate written as "num/den" or "num" (den 1) into
+// positive integers.
+func parseFrameRateFraction(s string) (num, den int64, err error) {
+	numStr, denStr, isFraction := strings.Cut(s, "/")
+	if !isFraction {
+		denStr = "1"
+	}
+	if num, err = strconv.ParseInt(strings.TrimSpace(numStr), 10, 64); err != nil {
+		return 0, 0, fmt.Errorf("invalid numerator %q: %w", numStr, err)
+	}
+	if den, err = strconv.ParseInt(strings.TrimSpace(denStr), 10, 64); err != nil {
+		return 0, 0, fmt.Errorf("invalid denominator %q: %w", denStr, err)
+	}
+	if num <= 0 || den <= 0 {
+		return 0, 0, fmt.Errorf("frame rate %d/%d is not positive", num, den)
+	}
+	return
+}
+
 func (qpsr QPSearchResults) GetMeanStdDev() (mean, stddev float64) {
 	if len(qpsr.QPs) == 0 {
 		return 0, 0
@@ -168,6 +253,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	)
 	results.EncodedSegmentsPaths = make([]string, len(config.SegmentsPaths))
 	results.QPs = make([]int, len(config.SegmentsPaths))
+	results.SegmentsFrames = make([]int, len(config.SegmentsPaths))
 	if config.NbConcurrentSegments < 1 {
 		config.NbConcurrentSegments = 1
 	}
@@ -184,6 +270,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 			var (
 				segmentDuration   time.Duration
 				segmentFrames     int
+				segmentFrameRate  string
 				segmentQP         int
 				segmentSize       int64
 				segmentNbAttempts int
@@ -193,7 +280,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 				for job := range jobs {
 					scb.OnSegmentStart(wID, job.segment, job.path)
 					// Find this segment QP
-					if segmentQP, segmentFrames, segmentNbAttempts, bestEffort, segmentDuration, err =
+					if segmentQP, segmentFrames, segmentFrameRate, segmentNbAttempts, bestEffort, segmentDuration, err =
 						findSegmentQP(workerCtx, scb, config, wID, job.segment, job.path); err != nil {
 						err = fmt.Errorf("failed to find the right encoding QP for segment %d: %w", job.segment, err)
 						return
@@ -207,6 +294,16 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 					resultsAccess.Lock()
 					results.EncodedSegmentsPaths[job.segment] = encodedSegmentPath
 					results.QPs[job.segment] = segmentQP
+					results.SegmentsFrames[job.segment] = segmentFrames
+					// One frame rate for the whole set: the concat durations and the final
+					// VMAF (-r) rely on it.
+					if results.FrameRate == "" {
+						results.FrameRate = segmentFrameRate
+					} else if segmentFrameRate != results.FrameRate {
+						resultsAccess.Unlock()
+						return fmt.Errorf("segment %d has a frame rate of %s while the previous ones have %s",
+							job.segment, segmentFrameRate, results.FrameRate)
+					}
 					results.TotalSegmentsFrames += segmentFrames
 					results.TotalEncodedFrames += segmentFrames * segmentNbAttempts
 					results.TotalNbAttempts += segmentNbAttempts
@@ -260,7 +357,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 
 func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, segment int, segmentPath string) (
-	finalQP, segmentFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
+	finalQP, segmentFrames int, frameRate string, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
 	scb.Debug(workerID, "Segment %d: Search for the right QP", segment)
 	// Prepare
 	videoTrack, err := probeVideoStream(ctx, scb, config, workerID, segmentPath)
@@ -269,6 +366,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		return
 	}
 	duration = videoTrack.Duration
+	frameRate = videoTrack.RFrameRate
 	// Abort if frame count is 0 or negative
 	totalFrames := videoTrack.NbReadFrames
 	if totalFrames <= 0 {

@@ -83,6 +83,12 @@ These differences are subtle, encoder-specific, and break in different ways acro
 
 **Implication:** The ffmpeg invocation *is* the business logic here. Refactoring the adapter for DRYness would reduce auditability.
 
+### The concat list states every segment's duration
+
+Segments are put back together by ffmpeg's concat demuxer, which starts each file where the previous one's duration ends. Left to the container, that duration is rounded to the millisecond and always upward at 23.976 fps: about a third of a millisecond per boundary, never compensated, so the video ended 46 ms behind the audio on a 163-segment episode and would end a quarter of a second behind on an 800-segment film. `ffmpeg.GenerateConcatList` therefore writes a `duration` line per file, computed in `core` from the segment's verified frame count and the frame rate (`QPSearchResults.SegmentsDurations`), and the `concat` command counts the packets of the files it is given for the same purpose. The frame counter's null muxer is what reveals a drift: a flood of `non monotonically increasing dts` while counting a merged file.
+
+**Implication:** the duration lines are not optional metadata. Removing them, or feeding them container durations, reintroduces the drift. Any change to how segments are cut or merged must be checked by comparing the sorted video packet timestamps of the output with the source's, frame by frame: the expected difference is 0 ms everywhere.
+
 ### VFR is rejected at startup
 
 Variable frame rate (VFR) content is rejected because VMAF requires frame-exact alignment between reference and distorted videos. VFR causes ffmpeg to duplicate or drop frames when forced to a constant rate, invalidating VMAF scores.

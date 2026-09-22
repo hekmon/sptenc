@@ -113,6 +113,12 @@ func CountFrames(ctx context.Context, config CountFramesConfig) (frames ReadFram
 			"metadata=mode=print:key=" + countFramesMetadataKey,
 		}, ","),
 		"-fps_mode", "passthrough", // no frame duplicated or dropped: every decoded frame is counted
+		// The null muxer still receives every frame, with its timestamp rescaled to one tick
+		// per frame (1/frame rate). If it floods stderr with "non monotonically increasing
+		// dts X >= X", the file's timestamps have drifted from the frame grid by half a
+		// frame: two consecutive frames round to the same tick. The count itself is right
+		// (nothing is dropped), the file is not: this is how the concat drift was found, see
+		// GenerateConcatList in concat.go.
 		"-f", "null", "-",
 	)
 	// Prepare command

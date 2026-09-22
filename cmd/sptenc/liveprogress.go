@@ -270,8 +270,8 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
  * Encode
  */
 
-func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segments []string, totalDuration time.Duration, debug bool) (err error) {
-	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
+func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segments []string, segmentsDurations []time.Duration, totalDuration time.Duration, debug bool) (err error) {
+	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments, segmentsDurations)
 	if err != nil {
 		err = fmt.Errorf("failed to generate concat list file: %w", err)
 		return
@@ -317,9 +317,20 @@ func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segm
  */
 
 func getStreamsInfos(ctx context.Context, path string, debug bool) (stats ffmpeg.FFProbeStats, err error) {
+	return probeStreams(ctx, path, false, debug)
+}
+
+// countStreamsPackets is getStreamsInfos with the packets of every stream counted (the whole
+// file is read, nothing is decoded).
+func countStreamsPackets(ctx context.Context, path string, debug bool) (stats ffmpeg.FFProbeStats, err error) {
+	return probeStreams(ctx, path, true, debug)
+}
+
+func probeStreams(ctx context.Context, path string, countPackets, debug bool) (stats ffmpeg.FFProbeStats, err error) {
 	return ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
 		// Input
-		Path: path,
+		Path:         path,
+		CountPackets: countPackets,
 		// Reporting
 		Debug: func(s string) {
 			if debug {
@@ -695,8 +706,8 @@ func liveVMAF(ctx context.Context, config ffmpeg.VMAFComputeConfig, totalFrames 
 	return ffmpeg.VMAFCompute(ctx, config)
 }
 
-func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, totalFrames int, debug bool) (err error) {
-	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments)
+func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, segmentsDurations []time.Duration, totalFrames int, debug bool) (err error) {
+	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments, segmentsDurations)
 	if err != nil {
 		err = fmt.Errorf("failed to generate concat list file: %w", err)
 		return
