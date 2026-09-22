@@ -7,10 +7,14 @@ import (
 	"gonum.org/v1/gonum/stat"
 )
 
-// ephemeralStatsCache wraps a persistent StatsCache with in-memory accumulation
-// of segment QPs within a single encode. It is discarded after the search; the
-// persistent cache is updated only once at the end by the caller.
-type ephemeralStatsCache struct {
+// EphemeralStatsCache wraps a StatsCache with in-memory accumulation of segment QPs.
+// It is a StatsCache itself, so it can wrap another EphemeralStatsCache: FindAllSegmentsQP
+// wraps whatever cache it is given for the duration of one search, and a caller running
+// several searches on the same content (batchsearch) can wrap the persistent cache once,
+// give that to every search and feed it their results with AddRun, so that each search
+// starts from what the previous ones found. It is never written to disk: the persistent
+// cache is updated only once at the end by the caller, with the run worth keeping.
+type EphemeralStatsCache struct {
 	mu         sync.RWMutex
 	baseMean   float64
 	baseStddev float64
@@ -18,10 +22,10 @@ type ephemeralStatsCache struct {
 	qps        []int
 }
 
-// newEphemeralStatsCache creates an ephemeral cache seeded from the persistent
-// cache (or a fallback heuristic if the persistent cache is empty).
-func newEphemeralStatsCache(base StatsCache, qpMin, qpMax int) *ephemeralStatsCache {
-	e := &ephemeralStatsCache{}
+// NewEphemeralStatsCache creates an ephemeral cache seeded from base (or a cold start
+// heuristic on the given QP range if base has no history).
+func NewEphemeralStatsCache(base StatsCache, qpMin, qpMax int) *EphemeralStatsCache {
+	e := &EphemeralStatsCache{}
 	if mean, stddev, weight, ok := base.Snapshot(); ok {
 		e.baseMean = mean
 		e.baseStddev = stddev
@@ -33,16 +37,26 @@ func newEphemeralStatsCache(base StatsCache, qpMin, qpMax int) *ephemeralStatsCa
 	return e
 }
 
+// AddRun records the final QPs of a whole search so the next searches seeded from this
+// cache benefit from it. Unlike the persistent cache, runs are not deduplicated: an
+// ephemeral cache only lives for one process, on one content, and every run on it is
+// wanted data.
+func (e *EphemeralStatsCache) AddRun(qps []int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.qps = append(e.qps, qps...)
+}
+
 // addQP records a segment's final QP so subsequent segments can benefit.
-func (e *ephemeralStatsCache) addQP(qp int) {
+func (e *EphemeralStatsCache) addQP(qp int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.qps = append(e.qps, qp)
 }
 
-// GetMeanStdDev returns the combined mean and stddev of the persistent base
-// and all accumulated segment QPs.
-func (e *ephemeralStatsCache) GetMeanStdDev() (mean, stddev int) {
+// GetMeanStdDev returns the combined mean and stddev of the base and all accumulated
+// segment QPs.
+func (e *EphemeralStatsCache) GetMeanStdDev() (mean, stddev int) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -53,7 +67,7 @@ func (e *ephemeralStatsCache) GetMeanStdDev() (mean, stddev int) {
 }
 
 // Snapshot returns the combined historical aggregate as a single weighted run.
-func (e *ephemeralStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
+func (e *EphemeralStatsCache) Snapshot() (mean, stddev float64, weight int, ok bool) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	mean, stddev, weight = e.compute()
@@ -62,7 +76,7 @@ func (e *ephemeralStatsCache) Snapshot() (mean, stddev float64, weight int, ok b
 
 // compute returns the raw weighted mean, stddev, and total weight.
 // Caller must hold at least e.mu.RLock.
-func (e *ephemeralStatsCache) compute() (mean, stddev float64, weight int) {
+func (e *EphemeralStatsCache) compute() (mean, stddev float64, weight int) {
 	weight = e.baseWeight + len(e.qps)
 
 	// Mean

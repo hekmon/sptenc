@@ -23,7 +23,7 @@ func (m *weightedMockStatsCache) Snapshot() (mean, stddev float64, weight int, o
 
 func TestEphemeralStatsCache_EmptyBase(t *testing.T) {
 	base := &mockStatsCache{mean: 26, stddev: 13} // empty persistent cache behavior
-	e := newEphemeralStatsCache(base, 0, 51)
+	e := NewEphemeralStatsCache(base, 0, 51)
 
 	mean, stddev := e.GetMeanStdDev()
 	if mean != 26 {
@@ -59,7 +59,7 @@ func TestEphemeralStatsCache_EmptyBase(t *testing.T) {
 func TestEphemeralStatsCache_WithSolidBase(t *testing.T) {
 	// Simulate a solid persistent cache: mean=15, stddev=3, weight=100
 	base := &weightedMockStatsCache{mean: 15, stddev: 3, weight: 100}
-	e := newEphemeralStatsCache(base, 0, 51)
+	e := NewEphemeralStatsCache(base, 0, 51)
 
 	mean, stddev := e.GetMeanStdDev()
 	if mean != 15 {
@@ -98,7 +98,7 @@ func TestEphemeralStatsCache_WithSolidBase(t *testing.T) {
 
 func TestEphemeralStatsCache_ConcurrentAccess(t *testing.T) {
 	base := &mockStatsCache{mean: 26, stddev: 13}
-	e := newEphemeralStatsCache(base, 0, 51)
+	e := NewEphemeralStatsCache(base, 0, 51)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
@@ -118,7 +118,7 @@ func TestEphemeralStatsCache_ConcurrentAccess(t *testing.T) {
 
 func TestEphemeralStatsCache_Snapshot(t *testing.T) {
 	base := &weightedMockStatsCache{mean: 10, stddev: 2, weight: 50}
-	e := newEphemeralStatsCache(base, 0, 51)
+	e := NewEphemeralStatsCache(base, 0, 51)
 
 	// Snapshot before adding QPs should reflect the base
 	mean, stddev, weight, ok := e.Snapshot()
@@ -155,18 +155,17 @@ func TestEphemeralStatsCache_Snapshot(t *testing.T) {
 func TestEphemeralStatsCache_WrapsAnotherEphemeral(t *testing.T) {
 	// An ephemeral cache is a StatsCache like any other: it can seed another one, which then
 	// starts from everything the first one knows (its own base and the QPs it accumulated).
-	// Nothing does it today: FindAllSegmentsQP wraps the cache it is given for the duration of
-	// one search, and batchsearch gives the same persistent cache to every candidate, so each
-	// one starts from the history only, not from what the previous candidates found. This test
-	// keeps the wrapping valid for a caller willing to carry that knowledge from a search to
-	// the next.
+	// FindAllSegmentsQP wraps the cache it is given for the duration of one search, and
+	// batchsearch gives every candidate the same ephemeral cache fed with the previous
+	// candidates (see TestEphemeralStatsCache_AddRun), so each search starts from what the
+	// previous ones found.
 	persistent := &weightedMockStatsCache{mean: 20, stddev: 5, weight: 10}
-	inner := newEphemeralStatsCache(persistent, 0, 51)
+	inner := NewEphemeralStatsCache(persistent, 0, 51)
 	inner.addQP(22)
 	inner.addQP(24) // what a first search found
 
 	// Outer ephemeral seeds from inner, as FindAllSegmentsQP would if it was given inner
-	outer := newEphemeralStatsCache(inner, 0, 51)
+	outer := NewEphemeralStatsCache(inner, 0, 51)
 	outer.addQP(23) // one segment of a second search
 
 	mean, stddev := outer.GetMeanStdDev()
@@ -178,5 +177,41 @@ func TestEphemeralStatsCache_WrapsAnotherEphemeral(t *testing.T) {
 	// Stddev should be positive
 	if stddev < 1 {
 		t.Errorf("expected stddev >= 1, got %d", stddev)
+	}
+}
+
+func TestEphemeralStatsCache_AddRun(t *testing.T) {
+	// batchsearch: one ephemeral cache over the persistent one for the whole run, every
+	// candidate search wraps it and, once done, feeds its QPs back so the next candidate
+	// starts from them.
+	persistent := &weightedMockStatsCache{mean: 20, stddev: 5, weight: 10}
+	run := NewEphemeralStatsCache(persistent, 0, 51)
+
+	// First candidate: what FindAllSegmentsQP sees before any result
+	first := NewEphemeralStatsCache(run, 0, 51)
+	if mean, _ := first.GetMeanStdDev(); mean != 20 {
+		t.Fatalf("first candidate should start from the persistent mean 20, got %d", mean)
+	}
+	run.AddRun([]int{30, 32, 34, 36})
+
+	// Second candidate starts from persistent + first candidate
+	second := NewEphemeralStatsCache(run, 0, 51)
+	mean, stddev := second.GetMeanStdDev()
+	// (20*10 + 30+32+34+36) / 14 = 332/14 ≈ 23.71 → 24
+	if mean != 24 {
+		t.Errorf("expected mean 24, got %d", mean)
+	}
+	if stddev < 1 {
+		t.Errorf("expected stddev >= 1, got %d", stddev)
+	}
+	// Runs are not deduplicated: the same QPs again weigh twice
+	run.AddRun([]int{30, 32, 34, 36})
+	if _, _, weight, _ := run.Snapshot(); weight != 18 {
+		t.Errorf("expected weight 18 after two identical runs, got %d", weight)
+	}
+	// An empty run changes nothing
+	run.AddRun(nil)
+	if _, _, weight, _ := run.Snapshot(); weight != 18 {
+		t.Errorf("expected weight 18 after an empty run, got %d", weight)
 	}
 }

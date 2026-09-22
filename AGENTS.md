@@ -67,7 +67,7 @@ Segments are encoded **sequentially by default**, but **optional concurrency** i
 
 Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `core/qpsearch.go`, with worker-scoped callbacks so the UI can attribute progress to individual workers.
 
-**Implication:** The default remains sequential: the right value depends on the hardware (GPU session limits, CPU cores, memory) and is the user's to pick. Naive goroutine-per-segment approaches would fail on hardware limits. Segments searched together can not learn from each other through the ephemeral cache: the first ones of a run need a few more attempts, a fixed cost.
+**Implication:** The default remains sequential: the right value depends on the hardware (GPU session limits, CPU cores, memory) and is the user's to pick. Naive goroutine-per-segment approaches would fail on hardware limits. Segments searched together can not learn from each other through the ephemeral cache: the first ones of a run need a few more attempts, a fixed cost. `batchsearch` pays it once rather than once per candidate: it wraps the persistent cache in a `core.EphemeralStatsCache` for the whole run, every candidate search wraps that one and feeds it back its QPs, so a candidate starts from what the previous ones found on this very content. Only the winner reaches the persistent cache.
 
 ### Explicit per-encoder switches
 

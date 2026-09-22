@@ -368,7 +368,7 @@ This typically requires only 3–5 encode attempts per segment, compared to a br
 
 ### Persistent stats from previous runs
 
-After each encode job finishes, sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments. A `batchsearch` run only stores its winning candidate (plus the final CPU encode with `--final-encode`, on that encoder's own cache): the other candidates are the same content encoded again and would over-represent that file. This further accelerates convergence on subsequent runs:
+After each encode job finishes, sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments. A `batchsearch` run only stores its winning candidate (plus the final CPU encode with `--final-encode`, on that encoder's own cache): the other candidates are the same content encoded again and would over-represent that file. Within the run though, every candidate starts from the QPs the previous candidates found: the same content is the best prior there is, so only the first candidate pays the learning cost. This further accelerates convergence on subsequent runs:
 
 | Encode job | Cold start | With cached stats |
 |---|---|---|

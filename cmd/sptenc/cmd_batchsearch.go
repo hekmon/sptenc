@@ -469,6 +469,11 @@ var batchsearchCommand = &cli.Command{
 		if cmd.Bool(debugFlagName) {
 			fmt.Fprintf(bypass, "DEBUG: Using stats cache at: %s\n", shellescape.Quote(statsCache.GetPath()))
 		}
+		// Every candidate is the same content searched again: what one finds is the best prior the
+		// next one can get, better than the history alone which mixes other content. Each candidate
+		// search wraps this cache for its own duration and feeds it back once done. It stays in
+		// memory: the persistent cache is only fed with the winner, at the end.
+		runCache := core.NewEphemeralStatsCache(statsCache, qpMin, qpMax)
 
 		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
 		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
@@ -548,10 +553,11 @@ var batchsearchCommand = &cli.Command{
 
 			// Step 3.C - QP search on this candidate scenes
 			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(
-				ctx, segmentsPaths, candidateWorkdir, totalDuration, vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+				ctx, segmentsPaths, candidateWorkdir, totalDuration, vmafAuditor, runCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("candidate %s: %w", candidateStr, err)
 			}
+			runCache.AddRun(batch.results[batch.currentCandidateIndex].QPs)
 
 			// Step 3.D - Ending this candidate
 			var encodedStats os.FileInfo

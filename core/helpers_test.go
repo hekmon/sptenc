@@ -35,7 +35,7 @@ func TestColdStartStats(t *testing.T) {
 	// Both caches must agree on an empty history
 	persistent := &StatsCacheHistory{qpMin: 20, qpMax: 40}
 	pMean, pStddev := persistent.GetMeanStdDev()
-	eMean, eStddev := newEphemeralStatsCache(persistent, 20, 40).GetMeanStdDev()
+	eMean, eStddev := NewEphemeralStatsCache(persistent, 20, 40).GetMeanStdDev()
 	if pMean != 30 || pStddev != 5 || eMean != pMean || eStddev != pStddev {
 		t.Errorf("expected 30/5 from both caches, got %d/%d (persistent) and %d/%d (ephemeral)", pMean, pStddev, eMean, eStddev)
 	}

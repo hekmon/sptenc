@@ -86,7 +86,7 @@ type QPSearchConfig struct {
 
 	// ephemeral holds the in-memory stats accumulator for this encode.
 	// It is set internally by FindAllSegmentsQP and discarded after the search.
-	ephemeral *ephemeralStatsCache
+	ephemeral *EphemeralStatsCache
 }
 
 // QPSearchResults holds the outcome of a QP search across all segments.
@@ -174,7 +174,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	// Wrap the persistent cache with an ephemeral one that learns from each
 	// segment within this encode. It is discarded after the search.
 	qpMin, qpMax, _ := config.Encoder.QPRange()
-	config.ephemeral = newEphemeralStatsCache(config.StatsCache, qpMin, qpMax)
+	config.ephemeral = NewEphemeralStatsCache(config.StatsCache, qpMin, qpMax)
 	config.StatsCache = config.ephemeral
 	// Launch Workers
 	jobsChan := make(chan job)
