@@ -18,6 +18,33 @@ import (
 )
 
 /*
+ * Progress bar runes
+ *
+ * Each level of the hierarchy uses a rune matching what it counts:
+ *   - segments (default WithMultiplyRunes): '×' discrete pieces of a file
+ *   - file:  '━' one continuous line, the pieces merged together
+ *   - batch: '═' a stack of complete files
+ */
+
+// fileProgressRunes is used for the global progress of a single file.
+var fileProgressRunes = liveprogress.BarRunes{
+	LeftEnd:  '❮', // https://www.compart.com/unicode/U+276E
+	Fill:     '━', // https://www.compart.com/unicode/U+2501
+	Head:     '━', // https://www.compart.com/unicode/U+2501
+	Empty:    ' ', // https://www.compart.com/unicode/U+0020
+	RightEnd: '❯', // https://www.compart.com/unicode/U+276F
+}
+
+// batchProgressRunes is used for the progress across batch-search candidates (one full file per candidate).
+var batchProgressRunes = liveprogress.BarRunes{
+	LeftEnd:  '❮', // https://www.compart.com/unicode/U+276E
+	Fill:     '═', // https://www.compart.com/unicode/U+2550
+	Head:     '═', // https://www.compart.com/unicode/U+2550
+	Empty:    ' ', // https://www.compart.com/unicode/U+0020
+	RightEnd: '❯', // https://www.compart.com/unicode/U+276F
+}
+
+/*
  * Master
  */
 
@@ -341,7 +368,7 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 	to.vmafProgressBars = make([]*liveprogress.Bar, to.Concurrency)
 	to.globalProgressBar = liveprogress.SetMainLineAsBar(
 		liveprogress.WithTotal(uint64(globalDuration)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {

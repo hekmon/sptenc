@@ -905,7 +905,7 @@ func (bs *batchStatus) Start() {
 	bs.candidatesLine = liveprogress.AddCustomLine(bs.line)
 	bs.progressBar = liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(len(bs.candidates))),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(batchProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
