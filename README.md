@@ -27,19 +27,14 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 
 ## Key Features
 
-- 🎯 **VMAF-driven encoding** - Guarantees a minimum perceptual quality level as measured by VMAF, not just a CRF or bitrate target (see [what VMAF does not see](#what-vmaf-does-not-see))
-- 🎬 **Scene-aware segmentation** - Segments aligned with scene cuts for consistent quality
-- 📊 **Multi-metric VMAF validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25), and worst-frame thresholds simultaneously; all must pass (AND logic)
-- 🔍 **4 VMAF models** - 1080p or 4K model auto-selected based on input resolution; NEG variants available via `--vmaf-neg`
-- 📋 **VMAF report embedded in output** - Final VMAF comparison results stored in the output file's metadata tags for full traceability
-- 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
-- ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`libsvtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
-- 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmaf-cuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
-- 🎞️ **Hardware decoding, even with a CPU encoder** - A hardware encoder decodes with its own GPU, `--vmaf-cuda` implies NVDEC, and `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec` bring an accelerator to a CPU encode: every decode taken away from the CPU is left to the encoder and VMAF.
-- 🚀 **Optional concurrent segment encoding** - Several segments can be searched in parallel via `--concurrent-segments` (`-C`), for the same output in less time: as many as your GPU accepts encoding sessions, or a few on a many-core CPU.
-- 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
-- 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
-- 🔬 **Automatic threshold search** - `batchsearch` tests multiple scene detection thresholds to find the one that produces the smallest file while still meeting your VMAF targets
+- 🎯 **VMAF-driven encoding** - The quality gate is a perceptual score measured on the output, not a CRF or bitrate you hope will be enough. 1080p or 4K model auto-selected from the input, NEG variants available (see [what VMAF does not see](#what-vmaf-does-not-see))
+- 🎬 **Scene-aware segmentation** - Segments are cut on scene changes, so the quality floor is enforced per scene, never averaged across a whole file
+- 📊 **Multi-metric validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25) and worst frame; every enabled threshold must pass
+- 🧠 **Adaptive QP search** - Each segment converges on the highest QP that still passes in a few attempts, and stats kept from previous runs make the next ones start closer (see [Adaptive QP Search](#adaptive-qp-search))
+- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU, encode the final file small on the CPU (see [Encoders](#encoders))
+- 🚀 **Hardware acceleration wherever it helps** - CUDA VMAF, GPU decoding even alongside a CPU encoder, and several segments searched in parallel: same output, less time
+- 🔬 **Automatic scene threshold search** - `batchsearch` tries several scene detection thresholds and keeps the one that produces the smallest passing file
+- 📋 **A file you can trust** - Audio, subtitles and color metadata are carried over (PCM audio losslessly compressed to FLAC), and the final whole-file VMAF result is written into the output's metadata tags
 
 ## How It Works
 
@@ -449,6 +444,8 @@ ffmpeg [...] -c:v 'av1_vaapi' -profile:v 'main' -rc_mode 'CQP' -global_quality '
 ## Output
 
 The output is always Matroska (`.mkv`) because it is the most permissive container for stream copy.
+
+Color metadata (`color_range`, `colorspace`, `color_trc` and `color_primaries`) is probed from the source and re-injected into the output container. HDR metadata handling is still being validated.
 
 You specify the output path explicitly as the final positional argument for file-producing commands (`encode`, `batchsearch`, `remux`, `master`, `concat`). Directory-producing commands (`split`) take an output directory in the same way.
 
