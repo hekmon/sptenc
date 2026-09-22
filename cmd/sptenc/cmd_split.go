@@ -60,7 +60,7 @@ var splitCommand = &cli.Command{
 				Name:      minThresholdFlagName,
 				Aliases:   []string{"T"},
 				Usage:     fmt.Sprintf("Scene detection threshold (%d-%d)", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
-				Value:     minThresholdDefault,
+				Value:     sceneThresholdDefault,
 				OnlyOnce:  true,
 				Validator: validateSceneThreshold,
 			},

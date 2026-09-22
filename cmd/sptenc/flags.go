@@ -170,10 +170,37 @@ func validateConcurrentSegments(v int) error {
 	return nil
 }
 
-// Threshold search flag names and defaults.
+// Scene threshold flag names and defaults.
+//
+// The scdet score is the mean absolute difference between two consecutive frames, as a
+// percentage of the pixel range, or its change from the previous frame if smaller (so a
+// sustained pan scores low, a cut scores high). ffmpeg documents "good values" in [8, 14]
+// with 10 as the filter default, without any justification: no published study measures
+// scdet against a ground truth, and none could answer the question asked here anyway, which
+// is not "is this a cut" but "does splitting here give a smaller file".
+//
+// The single-threshold default (encode, split) is ffmpeg's own 10, the middle of that range:
+// a blind guess should not sit at an edge of it.
+//
+// The search floor is the bottom of that range. It used to be 14 because a low threshold
+// turned every pan and flash into segments of a few frames, and the floor was doubling as
+// the quality guardrail. Since the minimum segment length (see minSegmentLengthDefault)
+// took that role, a low threshold only adds cuts that survive as segments of 5 s or more,
+// which is exactly what makes the file smaller: the search only walks upward and stops on
+// strikes, and with the floor at 14 too many searches were won by their first candidate,
+// which means a clipped range, not an optimum. Not lower than 8: below the documented
+// range scdet flags motion onsets, every unique score is a raw candidate (each one costing a
+// merge pass on the full markers list) and the candidates budget gets spread thinner.
+//
+// The ceiling has no rationale at all (it came in with the 14, before the segment filter,
+// and was 40 before that): the scores of real hard cuts stay far below it, and the search
+// stops long before on strikes. Its only real effect is on the candidates budget, which the
+// auto-tuned scene drop spreads over the whole range: a lower ceiling samples the low end,
+// where the winners are, more finely. To be revisited with a body of real search results.
 const (
 	minThresholdFlagName  = "min-threshold"
-	minThresholdDefault   = 14.0
+	sceneThresholdDefault = 10.0 // single-threshold commands: encode, split
+	minThresholdDefault   = 8.0  // search floor: batchsearch, thresholds
 	maxThresholdFlagName  = "max-threshold"
 	maxThresholdDefault   = 50.0
 	maxCandidatesFlagName = "max-candidates"

@@ -190,7 +190,7 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 ./sptenc encode ./segments/ output.mkv --original-file video.mkv
 ```
 
-> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (0–100, default 14): higher values detect fewer scenes, lower values detect more.
+> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (0–100): higher values detect fewer scenes, lower values detect more. `split` and `encode` default to 10, ffmpeg's own; `thresholds` and `batchsearch` search upward from 8.
 >
 > **Use everything you have.** A hardware encoder decodes with its own GPU and `--vmaf-cuda` decodes with NVDEC: nothing to set. With a CPU encoder (the smallest files, out of the CPU alone), hand the decoding to whatever GPU is in the machine, integrated or Apple silicon included: `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec`. Same file out, more CPU left for the encoder. The same flags serve `master`, `split`, `thresholds` and `vmaf`. You can not get it wrong: an unsupported source codec falls back to software with a warning, a flag contradicting the encoder is refused. Only the lossless FFV1 intermediate has no hardware decoder.
 
