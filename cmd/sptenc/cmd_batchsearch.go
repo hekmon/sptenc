@@ -103,9 +103,10 @@ var batchsearchCommand = &cli.Command{
 		"--" + maxCandidatesFlagName + ", --" + minDropFlagName + ", and --" + minSegmentLengthFlagName + " are set sensibly before\n" +
 		"committing to a long batchsearch run.\n\n" +
 		"CONTROLLING SEARCH COST\n" +
-		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
-		"  * GPU search: may take several days in total.\n" +
-		"  * CPU search: can take several weeks in total.\n\n" +
+		"Each candidate is a full encode pass with VMAF validation: the run costs as many encodes as\n" +
+		"candidates tried, up to --" + maxCandidatesFlagName + " (--" + strikesFlagName + " usually stops it earlier). Count in hours\n" +
+		"with a GPU encoder and several concurrent segments, in days with a CPU encoder, more for films\n" +
+		"and 4K content (see the README, Encoders, for measured encode times).\n\n" +
 		"You control the cost with three levers: which boundaries are eligible, how many candidates\n" +
 		"are generated from them, and when to give up.\n\n" +
 		"THRESHOLD RANGE (--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ")\n" +
