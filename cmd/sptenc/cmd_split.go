@@ -18,12 +18,17 @@ import (
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/urfave/cli/v3"
 	"gonum.org/v1/gonum/stat"
 )
 
 // Flag name for split-specific flags.
-const masterFlagName = "master"
+const (
+	masterFlagName     = "master"
+	listScenesFlagName = "list-scenes"
+)
 
 var splitCommand = &cli.Command{
 	Name:     "split",
@@ -35,7 +40,10 @@ var splitCommand = &cli.Command{
 		"By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts,\n" +
 		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
 		"If the input has already been converted with the master command, use --" + masterFlagName + " to skip the\n" +
-		"master creation phase.\n\n" +
+		"master creation phase.\n" +
+		"Use --" + listScenesFlagName + " to detect and print the actual scene list (frame, time, duration,\n" +
+		"and score) for a given threshold without creating any files. It is the fastest way to preview\n" +
+		"exactly where the cuts will fall before committing to an encode or split.\n\n" +
 		"SEGMENT LENGTH\n" +
 		"The --" + minSegmentLengthFlagName + " flag removes scene boundaries that would create segments shorter\n" +
 		"than the given duration. Short segments are merged into their shorter neighbour.\n" +
@@ -61,6 +69,13 @@ var splitCommand = &cli.Command{
 				Name:     masterFlagName,
 				Aliases:  []string{"m"},
 				Usage:    "Input is an already-processed master file",
+				Value:    false,
+				OnlyOnce: true,
+			},
+			&cli.BoolFlag{
+				Name:     listScenesFlagName,
+				Aliases:  []string{"l"},
+				Usage:    "Only detect and print scenes, do not split the file",
 				Value:    false,
 				OnlyOnce: true,
 			},
@@ -100,7 +115,11 @@ var splitCommand = &cli.Command{
 			return ctx, err
 		}
 		// Check arguments
-		if cmd.Args().Len() != 2 {
+		if cmd.Bool(listScenesFlagName) {
+			if cmd.Args().Len() != 1 {
+				return ctx, errors.New("exactly one argument is required in list mode: input file")
+			}
+		} else if cmd.Args().Len() != 2 {
 			return ctx, errors.New("exactly two arguments are required: input file and output directory")
 		}
 		inputFilePath := cmd.Args().First()
@@ -113,17 +132,19 @@ var splitCommand = &cli.Command{
 			return ctx, errors.New("input file must be a regular file")
 		}
 		// Validate or create output directory
-		fileInfos, err = os.Stat(outputDir)
-		if err == nil {
-			if !fileInfos.IsDir() {
-				return ctx, fmt.Errorf("output path exists and is not a directory: %s", shellescape.Quote(outputDir))
+		if !cmd.Bool(listScenesFlagName) {
+			fileInfos, err = os.Stat(outputDir)
+			if err == nil {
+				if !fileInfos.IsDir() {
+					return ctx, fmt.Errorf("output path exists and is not a directory: %s", shellescape.Quote(outputDir))
+				}
+			} else if os.IsNotExist(err) {
+				if err = os.MkdirAll(outputDir, 0755); err != nil {
+					return ctx, fmt.Errorf("failed to create output directory: %w", err)
+				}
+			} else {
+				return ctx, fmt.Errorf("failed to access output directory: %w", err)
 			}
-		} else if os.IsNotExist(err) {
-			if err = os.MkdirAll(outputDir, 0755); err != nil {
-				return ctx, fmt.Errorf("failed to create output directory: %w", err)
-			}
-		} else {
-			return ctx, fmt.Errorf("failed to access output directory: %w", err)
 		}
 		// Validate that at most one hardware decode flag is set
 		var hwDecFlags int
@@ -179,15 +200,23 @@ var splitCommand = &cli.Command{
 			return
 		}
 		duration := stats.Format.Duration
-		fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
-			shellescape.Quote(filepath.Base(inputFilePath)),
-			cunits.ImportInBytes(float64(fileInfos.Size())),
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-		)
+		if cmd.Bool(listScenesFlagName) {
+			fmt.Fprintf(bypass, "Listing scenes of %s (%s) with threshold %s\n",
+				shellescape.Quote(filepath.Base(inputFilePath)),
+				cunits.ImportInBytes(float64(fileInfos.Size())),
+				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+			)
+		} else {
+			fmt.Fprintf(bypass, "Splitting scenes of %s (%s) with threshold %s\n",
+				shellescape.Quote(filepath.Base(inputFilePath)),
+				cunits.ImportInBytes(float64(fileInfos.Size())),
+				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+			)
+		}
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "Min segment length: %s\n", minSegLen)
 		}
-		if !cmd.Bool(masterFlagName) {
+		if !cmd.Bool(masterFlagName) && !cmd.Bool(listScenesFlagName) {
 			// create a temporary directory
 			var workingDir string
 			if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
@@ -264,6 +293,11 @@ var splitCommand = &cli.Command{
 			scenes = filtered
 		}
 
+		if cmd.Bool(listScenesFlagName) {
+			printScenesList(bypass, scenes, duration)
+			return
+		}
+
 		// split
 		outputDir := cmd.StringArg("outputdir")
 		fmt.Fprintf(bypass, "Splitting scenes...\n")
@@ -333,18 +367,78 @@ func printSceneStats(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time
 	mean := time.Duration(meanF)
 	stddev := time.Duration(stddevF)
 
-	fmt.Fprintf(bypass, "\nScene length statistics (n=%d):\n", n)
-	fmt.Fprintf(bypass, "  Mean: %s, Std dev: %s\n", mean.Round(time.Millisecond), stddev.Round(time.Millisecond))
-	fmt.Fprintf(bypass, "  Range: %s–%s", minDur.Round(time.Millisecond), maxDur.Round(time.Millisecond))
+	var statsOut strings.Builder
+	fmt.Fprintf(&statsOut, "\nScene length statistics (n=%d):\n", n)
+	fmt.Fprintf(&statsOut, "    Mean: %s, Std dev: %s\n", mean.Round(time.Millisecond), stddev.Round(time.Millisecond))
+	fmt.Fprintf(&statsOut, "    Range: %s–%s", minDur.Round(time.Millisecond), maxDur.Round(time.Millisecond))
 	if frameRate > 0 {
 		minFrames := int(math.Round(float64(minDur) * frameRate / float64(time.Second)))
-		fmt.Fprintf(bypass, " (shortest: %d frames)", minFrames)
+		fmt.Fprintf(&statsOut, " (shortest: %d frames)", minFrames)
 	}
-	fmt.Fprintln(bypass)
-
+	fmt.Fprintln(&statsOut)
 	if shortHalf > 0 || short1s > 0 {
-		fmt.Fprintf(bypass, "  Short scenes: %d ≤ 0.5s, %d ≤ 1s\n", shortHalf, short1s)
+		fmt.Fprintf(&statsOut, "    Short scenes: %d ≤ 0.5s, %d ≤ 1s\n", shortHalf, short1s)
 	}
+	fmt.Fprint(bypass, statsOut.String())
+}
+
+// printScenesList prints each scene with its start frame, time marker, duration,
+// and the score of the boundary that starts it (if any).
+func printScenesList(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time.Duration) {
+	if len(scenes) == 0 {
+		fmt.Fprintln(bypass, "\nNo scene boundaries detected.")
+		fmt.Fprintf(bypass, "1 scene, duration %s\n", totalDuration.Round(time.Millisecond))
+		return
+	}
+
+	var buff strings.Builder
+	table := tablewriter.NewTable(&buff, tablewriter.WithConfig(tablewriter.Config{
+		Header: tw.CellConfig{
+			Formatting: tw.CellFormatting{AutoFormat: tw.Off},
+		},
+		Row: tw.CellConfig{
+			Alignment: tw.CellAlignment{
+				PerColumn: []tw.Align{tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight, tw.AlignRight},
+			},
+		},
+	}))
+	table.Header("#", "Frame", "Time", "Duration", "Score")
+
+	// Scene 1 starts at frame 0
+	prevTime := time.Duration(0)
+	prevFrame := 0
+	for i, s := range scenes {
+		dur := s.Start - prevTime
+		score := "-"
+		if i > 0 {
+			score = strconv.FormatFloat(scenes[i-1].Score, 'f', 2, 64)
+		}
+		table.Append([]string{
+			strconv.Itoa(i + 1),
+			strconv.Itoa(prevFrame),
+			prevTime.Round(time.Millisecond).String(),
+			dur.Round(time.Millisecond).String(),
+			score,
+		})
+		prevTime = s.Start
+		prevFrame = s.Frame
+	}
+	// Last scene
+	lastDur := totalDuration - prevTime
+	table.Append([]string{
+		strconv.Itoa(len(scenes) + 1),
+		strconv.Itoa(prevFrame),
+		prevTime.Round(time.Millisecond).String(),
+		lastDur.Round(time.Millisecond).String(),
+		strconv.FormatFloat(scenes[len(scenes)-1].Score, 'f', 2, 64),
+	})
+
+	table.Render()
+	var out strings.Builder
+	out.WriteString("\nScenes:\n")
+	out.WriteString(buff.String())
+	fmt.Fprintf(&out, "%d scene(s), %d boundary(ies)\n", 1+len(scenes), len(scenes))
+	fmt.Fprint(bypass, out.String())
 }
 
 // parseFrameRateLocal converts an ffprobe frame-rate string into a float64.

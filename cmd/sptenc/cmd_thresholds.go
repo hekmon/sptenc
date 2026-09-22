@@ -68,7 +68,9 @@ var thresholdsCommand = &cli.Command{
 		"When disabled (--" + minSegmentLengthFlagName + " 0), the table shows raw distributions plus a column\n" +
 		"indicating how many segments the default filter would catch.\n\n" +
 		"The candidate generation logic is identical to batchsearch, so the preview is a\n" +
-		"faithful map of what the search will explore.",
+		"faithful map of what the search will explore. Once you have chosen a threshold, use\n" +
+		"'split --" + listScenesFlagName + "' to see the actual per-scene cuts (frame, time, duration, score)\n" +
+		"it will produce before committing to an encode or batchsearch run.",
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{}
 		flags = append(flags, thresholdSearchFlags()...)

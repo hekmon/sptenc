@@ -97,9 +97,11 @@ var batchsearchCommand = &cli.Command{
 		"It does not protect against the opposite problem: segments that are too long.\n\n" +
 		"PREVIEWING CANDIDATES\n" +
 		"Use the thresholds command to preview what candidate thresholds and scene distributions your\n" +
-		"chosen range will produce, without running any encodes. It is a fast way to validate that\n" +
-		"--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ", --" + maxCandidatesFlagName + ", --" + minDropFlagName + ", and --" + minSegmentLengthFlagName + " are set\n" +
-		"sensibly before committing to a long batchsearch run.\n\n" +
+		"chosen range will produce, without running any encodes. Once you have picked a threshold,\n" +
+		"use 'split --" + listScenesFlagName + "' to see the actual per-scene cuts (frame, time, duration, score)\n" +
+		"it will produce. Both are fast ways to validate that --" + minThresholdFlagName + ", --" + maxThresholdFlagName + ",\n" +
+		"--" + maxCandidatesFlagName + ", --" + minDropFlagName + ", and --" + minSegmentLengthFlagName + " are set sensibly before\n" +
+		"committing to a long batchsearch run.\n\n" +
 		"CONTROLLING SEARCH COST\n" +
 		"Each candidate is a full encode pass with VMAF validation. The complete batchsearch process is slow:\n" +
 		"  * GPU search: may take several days in total.\n" +

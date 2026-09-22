@@ -40,11 +40,11 @@ var encodeCommand = &cli.Command{
 		"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n" +
 		"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate.\n\n" +
 		"SCENE DETECTION\n" +
-		"Use the split command to preview scene boundaries for a given threshold, the thresholds\n" +
-		"command to inspect candidate thresholds and their scene-distribution statistics (scenes count,\n" +
-		"longest segment, std dev, mean, shortest segment) so you can pick a single threshold to feed\n" +
-		"into encode, or batchsearch to search for the threshold that yields the smallest passing file\n" +
-		"automatically.\n\n" +
+		"Use 'split --" + listScenesFlagName + "' to preview the actual scene list (frame, time, duration, score)\n" +
+		"for a given threshold, the thresholds command to inspect candidate thresholds and their\n" +
+		"scene-distribution statistics (scenes count, longest segment, std dev, mean, shortest segment)\n" +
+		"so you can pick a single threshold to feed into encode, or batchsearch to search for the\n" +
+		"threshold that yields the smallest passing file automatically.\n\n" +
 		"VMAF METRICS\n" +
 		fmt.Sprintf("Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n", core.VMAFMinValue, core.VMAFMaxValue) +
 		fmt.Sprintf("below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n", core.VMAFOffValue) +
