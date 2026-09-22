@@ -17,7 +17,10 @@ type SegmentEncoder interface {
 	// ComputeVMAF calculates VMAF between a reference and a distorted segment.
 	ComputeVMAF(ctx context.Context, reference, distorted string, stream VideoStream,
 		progress func(ProgressStats), debug func(string), runtimeError func(error)) (VMAFStats, error)
-	// ProbeStream extracts video stream information from a media file.
-	ProbeStream(ctx context.Context, path string, progress func(int64),
-		debug func(string), runtimeError func(error)) (VideoStream, error)
+	// ProbeStream extracts video stream information from a media file: its metadata only, no
+	// frame is decoded (NbReadFrames is not set, see CountFrames).
+	ProbeStream(ctx context.Context, path string, debug func(string), runtimeError func(error)) (VideoStream, error)
+	// CountFrames decodes the whole video stream of a media file to count its frames exactly.
+	CountFrames(ctx context.Context, path string, progress func(ProgressStats),
+		debug func(string), runtimeError func(error)) (int, error)
 }

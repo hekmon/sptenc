@@ -123,17 +123,17 @@ var masterCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		// build optional hw decode config
-		masterConfig := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
+		decoderCfg := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
 			cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
 			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-		).ToFFV1MasterConfig()
+		)
 		if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
-			!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
+			!decoderCfg.NVDec && !decoderCfg.VAAPIDec && !decoderCfg.D3D12Dec && !decoderCfg.VideoToolboxDec {
 			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 		}
 		// create master
 		var outputFile string
-		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputFilePath, fileInfos.Size(), cmd.Bool(debugFlagName), masterConfig)
+		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputFilePath, cmd.Bool(debugFlagName), decoderCfg)
 		if err == nil {
 			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
 		}
@@ -141,12 +141,14 @@ var masterCommand = &cli.Command{
 	},
 }
 
-func createMaster(ctx context.Context, inputFilePath, outputFile string, inputFileSize int64, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (
+// createMaster counts the frames of the source then encodes its video stream to a lossless
+// FFV1 master, both with the hardware decoder of decoderCfg (software decode when none).
+func createMaster(ctx context.Context, inputFilePath, outputFile string, debug bool, decoderCfg ffmpeg.HWDecoderConfig) (
 	outputFileResult string, totalFrames int, duration time.Duration, err error) {
 	// count frames
 	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
 	start := time.Now()
-	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, inputFileSize, debug)
+	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, debug, decoderCfg)
 	if err != nil {
 		err = fmt.Errorf("failed to count number of frames: %w", err)
 		return
@@ -166,7 +168,7 @@ func createMaster(ctx context.Context, inputFilePath, outputFile string, inputFi
 	// ffv1 encode
 	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
 	start = time.Now()
-	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, masterConfig); err != nil {
+	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, decoderCfg.ToFFV1MasterConfig()); err != nil {
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
 		return
 	}

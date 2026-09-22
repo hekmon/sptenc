@@ -241,17 +241,17 @@ var splitCommand = &cli.Command{
 				fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
 			}
 			// build optional hw decode config
-			masterConfig := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
+			decoderCfg := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
 				cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
 				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-			).ToFFV1MasterConfig()
+			)
 			if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
-				!masterConfig.NVDec && !masterConfig.VAAPIDec && !masterConfig.D3D12Dec && !masterConfig.VideoToolboxDec {
+				!decoderCfg.NVDec && !decoderCfg.VAAPIDec && !decoderCfg.D3D12Dec && !decoderCfg.VideoToolboxDec {
 				fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
 			}
 			// create the master within
-			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, filepath.Join(workingDir, "master.mkv"), fileInfos.Size(),
-				cmd.Bool(debugFlagName), masterConfig); err != nil {
+			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, filepath.Join(workingDir, "master.mkv"),
+				cmd.Bool(debugFlagName), decoderCfg); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 		}

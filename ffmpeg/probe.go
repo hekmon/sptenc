@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/hekmon/processpriority"
 )
 
 // GetStreamsInfosConfig holds the configuration for GetStreamsInfos.
@@ -56,209 +53,6 @@ func GetStreamsInfos(ctx context.Context, config GetStreamsInfosConfig) (stats F
 	if err = json.Unmarshal(stdout.Bytes(), &stats); err != nil {
 		err = fmt.Errorf("error parsing %s output: %w", FFProbeBinary, err)
 		return
-	}
-	return
-}
-
-// GetStreamsInfosCFConfig holds the configuration for GetStreamsInfosCF.
-type GetStreamsInfosCFConfig struct {
-	// Same as light version
-	GetStreamsInfosConfig
-	// But with read report for long processing
-	ReadBytesReport func(n int)
-}
-
-// GetStreamsInfosCF runs ffprobe with -count_frames to get the exact number of frames of the
-// first video stream: it is decoded entirely, which can be long. Only that stream is returned
-// (along with the format): it is the one the master is made of, and the only one callers need.
-//
-// # WHY FFPROBE IS GIVEN THE PATH AND NOT THE FILE CONTENT ON ITS STANDARD INPUT
-//
-// The file used to be opened here and sent to ffprobe through its standard input, as counting
-// the bytes going through was a cheap way to report progress. But a pipe can not be seeked, and
-// some files can not be read without seeking: a MP4 file with its index at the end, which is what
-// ffmpeg and most cameras write by default, is one of them. ffprobe then complains on its
-// standard error output but still exits with a success and no frames count at all. It was read
-// as a count of 0, nothing noticed until the frames count verification before the final VMAF,
-// once everything had been encoded. Given the path, ffprobe reads the file the way ffmpeg will.
-//
-// Progress now comes from ffprobe itself: it is asked for the position in the file of each
-// frame it decodes, and prints them as it goes. The report stays expressed in bytes read.
-//
-// # WHY A COUNT OF 0 IS AN ERROR
-//
-// No caller can do anything with a video stream without frames, and this is how a file ffprobe
-// can not read properly looks like. Every reason for it can not be known in advance: better to
-// stop here, before any encoding, whatever the reason is.
-func GetStreamsInfosCF(ctx context.Context, config GetStreamsInfosCFConfig) (stats FFProbeStats, err error) {
-	// Validate inputs
-	if config.Path == "" {
-		err = errors.New("input path cannot be empty")
-		return
-	}
-	// Build up args
-	args := []string{
-		"-loglevel", "error", "-print_format", "json=c=1",
-		"-show_format", "-show_streams", "-count_frames",
-		"-select_streams", "v:0",
-		"-show_entries", "frame=pkt_pos,pts_time", // progress and frame durations, see parseProbeWithFrames
-		"-threads", "auto",
-		config.Path,
-	}
-	// Prepare command
-	if config.Debug != nil {
-		config.Debug(fmt.Sprintf("Extract input file complete metadata: %s", getPrintableCMDLine(FFProbeBinary, args)))
-	}
-	cmd := exec.CommandContext(ctx, FFProbeBinary, args...)
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		err = fmt.Errorf("error setting up stdout pipe: %w", err)
-		return
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	// Exec program
-	if err = cmd.Start(); err != nil {
-		err = fmt.Errorf("error starting %s: %w\n%s", FFProbeBinary, err, getPrintableCMDLine(FFProbeBinary, args))
-		return
-	}
-	if err = processpriority.Set(cmd.Process.Pid, ProcessPriority); err != nil && config.RuntimeError != nil {
-		config.RuntimeError(fmt.Errorf("Failed to lower %s process priority: %w", FFProbeBinary, err))
-	}
-	// Read the report as it comes (must be done before waiting for the program to end)
-	stats, parseErr := parseProbeWithFrames(stdoutPipe, config.ReadBytesReport)
-	if parseErr != nil {
-		// do not let ffprobe blocked on a standard output nobody reads anymore
-		_, _ = io.Copy(io.Discard, stdoutPipe)
-	}
-	if err = cmd.Wait(); err != nil {
-		err = fmt.Errorf("error during %s execution: %w\n%s\n%s", FFProbeBinary, err, stderr.String(), getPrintableCMDLine(FFProbeBinary, args))
-		return
-	}
-	// With this log level, anything ffprobe wrote is an error, even if it ended with a success
-	if config.RuntimeError != nil {
-		for line := range strings.SplitSeq(strings.TrimSpace(stderr.String()), "\n") {
-			if line != "" {
-				config.RuntimeError(fmt.Errorf("%s: %s", FFProbeBinary, line))
-			}
-		}
-	}
-	if parseErr != nil {
-		err = fmt.Errorf("error parsing %s output: %w", FFProbeBinary, parseErr)
-		return
-	}
-	if video := stats.VideoTrack(); video != nil && video.NbReadFrames <= 0 {
-		err = fmt.Errorf("%s did not count any frame in the video stream: the file can not be read properly\n%s",
-			FFProbeBinary, getPrintableCMDLine(FFProbeBinary, args))
-		return
-	}
-	return
-}
-
-// parseProbeWithFrames reads a ffprobe JSON report holding a frames section on top of the usual
-// streams and format ones. Frames come first and are printed while the file is decoded: they are
-// consumed one by one to report progress, not stored (there is one entry per frame of the video).
-//
-// Progress is the position of the frame within the file (pkt_pos), reported as the number of
-// bytes gained since the last report. Positions do not strictly increase (streams are
-// interleaved, frames reordered): only a new highest position counts. Some formats do not
-// provide it: there is no progress then, the count itself is not affected.
-//
-// The time of each frame (pts_time) is used to measure how long frames last: the shortest and
-// the longest time between two consecutive frames are kept on the video stream, this is what
-// IsConstantFrameRate relies on. Frames come out of the decoder in presentation order. A frame
-// without a time (some formats do not provide it, AVI for example) breaks the chain: the next
-// duration measured is the one between the two frames following it.
-func parseProbeWithFrames(report io.Reader, readBytesReport func(n int)) (stats FFProbeStats, err error) {
-	decoder := json.NewDecoder(report)
-	expectDelim := func(expected json.Delim) error {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		if delim, ok := token.(json.Delim); !ok || delim != expected {
-			return fmt.Errorf("unexpected token %v, expected %v", token, expected)
-		}
-		return nil
-	}
-	if err = expectDelim('{'); err != nil {
-		return
-	}
-	var (
-		highestPosition   int64
-		previousTime      time.Duration
-		previousTimeKnown bool
-		shortest, longest time.Duration
-		nbDurations       int
-	)
-	for decoder.More() {
-		var key json.Token
-		if key, err = decoder.Token(); err != nil {
-			return
-		}
-		switch key {
-		case "frames":
-			if err = expectDelim('['); err != nil {
-				return
-			}
-			for decoder.More() {
-				var frame struct {
-					PktPos  string `json:"pkt_pos"`
-					PtsTime string `json:"pts_time"`
-				}
-				if err = decoder.Decode(&frame); err != nil {
-					return
-				}
-				// missing or "N/A" when the format does not provide it
-				if position, parseErr := strconv.ParseInt(frame.PktPos, 10, 64); parseErr == nil && position > highestPosition {
-					if readBytesReport != nil {
-						readBytesReport(int(position - highestPosition))
-					}
-					highestPosition = position
-				}
-				// missing or "N/A" when the format does not provide it
-				seconds, parseErr := strconv.ParseFloat(frame.PtsTime, 64)
-				if parseErr != nil {
-					previousTimeKnown = false
-					continue
-				}
-				// ffprobe prints microseconds: get integers back to compare durations exactly
-				frameTime := time.Duration(math.Round(seconds*1e6)) * time.Microsecond
-				if previousTimeKnown {
-					duration := frameTime - previousTime
-					if nbDurations == 0 || duration < shortest {
-						shortest = duration
-					}
-					if nbDurations == 0 || duration > longest {
-						longest = duration
-					}
-					nbDurations++
-				}
-				previousTime, previousTimeKnown = frameTime, true
-			}
-			if err = expectDelim(']'); err != nil {
-				return
-			}
-		case "streams":
-			if err = decoder.Decode(&stats.Streams); err != nil {
-				return
-			}
-		case "format":
-			if err = decoder.Decode(&stats.Format); err != nil {
-				return
-			}
-		default:
-			var ignored json.RawMessage
-			if err = decoder.Decode(&ignored); err != nil {
-				return
-			}
-		}
-	}
-	if err = expectDelim('}'); err != nil {
-		return
-	}
-	if video := stats.VideoTrack(); video != nil {
-		video.NbFrameDurations, video.ShortestFrameDuration, video.LongestFrameDuration = nbDurations, shortest, longest
 	}
 	return
 }
@@ -389,8 +183,8 @@ type FFProbeBinaryStream struct {
 	BitRate            string    `json:"bit_rate,omitempty"`
 	MaxBitRate         string    `json:"max_bit_rate,omitempty"` // need -count_frames to appear (only on video stream)
 	NbFrames           int       `json:"nb_frames"`
-	NbReadFrames       int       `json:"-"` // need -count_frames to appear
-	// Measured by GetStreamsInfosCF only, see IsConstantFrameRate
+	// Measured by CountFrames and set by SetReadFrames (not part of the ffprobe report), see IsConstantFrameRate
+	NbReadFrames          int                            `json:"-"` // exact number of frames
 	NbFrameDurations      int                            `json:"-"` // number of durations measured (time between two consecutive frames)
 	ShortestFrameDuration time.Duration                  `json:"-"`
 	LongestFrameDuration  time.Duration                  `json:"-"`
@@ -418,8 +212,7 @@ func (ffpbs *FFProbeBinaryStream) UnmarshalJSON(data []byte) (err error) {
 	type Mask FFProbeBinaryStream
 	tmp := struct {
 		*Mask
-		NbFrames     string `json:"nb_frames"`
-		NbReadFrames string `json:"nb_read_frames"` // need -count_frames to appear
+		NbFrames string `json:"nb_frames"`
 	}{
 		Mask: (*Mask)(ffpbs),
 	}
@@ -432,13 +225,16 @@ func (ffpbs *FFProbeBinaryStream) UnmarshalJSON(data []byte) (err error) {
 			return
 		}
 	}
-	if tmp.NbReadFrames != "" {
-		if ffpbs.NbReadFrames, err = strconv.Atoi(tmp.NbReadFrames); err != nil {
-			err = fmt.Errorf("failed to parse nb_read_frames: %w", err)
-			return
-		}
-	}
 	return
+}
+
+// SetReadFrames stores on the stream what CountFrames measured by decoding it: its exact number
+// of frames and how long they last, which IsConstantFrameRate relies on from then on.
+func (ffpbs *FFProbeBinaryStream) SetReadFrames(frames ReadFrames) {
+	ffpbs.NbReadFrames = frames.Nb
+	ffpbs.NbFrameDurations = frames.NbDurations
+	ffpbs.ShortestFrameDuration = frames.ShortestDuration
+	ffpbs.LongestFrameDuration = frames.LongestDuration
 }
 
 // IsInterlaced reports whether the stream is declared as interlaced: a field order which is
@@ -501,8 +297,8 @@ func parseFrameRate(s string) (float64, error) {
 const FrameDurationTolerance = time.Millisecond
 
 // IsConstantFrameRate reports whether the stream has a constant frame rate. It relies on the
-// frame durations measured by GetStreamsInfosCF when they are available, on the frame rates
-// declared by the container otherwise (GetStreamsInfos: no frame is read).
+// frame durations measured by CountFrames when they have been set (SetReadFrames), on the frame
+// rates declared by the container otherwise (no frame read).
 //
 // # WHY THE DECLARED FRAME RATES ARE NOT ENOUGH
 //
@@ -533,7 +329,7 @@ const FrameDurationTolerance = time.Millisecond
 //   - A constant frame rate stream with a hole (a frame dropped by a capture device: one
 //     duration twice as long as the others) is reported as variable. It is on purpose: nothing
 //     here knows how to keep that hole, every frame after it would be shifted.
-//   - Not enough durations measured (GetStreamsInfos, a single frame, a format without frame
+//   - Not enough durations measured (no CountFrames run, a single frame, a format without frame
 //     timestamps such as AVI): the declared frame rates are compared, as before. Both values
 //     are metadata-level estimates, so unparseable or missing ones are treated as variable.
 //     They are compared as numbers, the same rate being written in different ways ("24000/1001"

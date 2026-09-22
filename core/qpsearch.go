@@ -39,8 +39,8 @@ type SegmentLifecycle interface {
 // so callers may index fixed-size slices rather than maintain maps or RWMutexes.
 type ProgressReporter interface {
 	OnSegmentNewCandidate(workerID, qpCandidate int)
-	OnSegmentAnalysisStart(workerID int, fileSize int64)
-	OnSegmentAnalysisProgress(workerID int, read int64) // not total, additional
+	OnSegmentAnalysisStart(workerID int, duration time.Duration) // the frames are counted: progress is expressed in time
+	OnSegmentAnalysisProgress(workerID int, stats ProgressStats)
 	OnSegmentAnalysisStop(workerID int)
 	OnSegmentEncodeStart(workerID int, totalFrames int)
 	OnSegmentEncodeProgress(workerID int, stats ProgressStats)
@@ -263,7 +263,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	finalQP, segmentFrames, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
 	scb.Debug(workerID, "Segment %d: Search for the right QP", segment)
 	// Prepare
-	videoTrack, err := getStreamsInfosCF(ctx, scb, config, workerID, segmentPath)
+	videoTrack, err := probeVideoStream(ctx, scb, config, workerID, segmentPath)
 	if err != nil {
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
@@ -285,7 +285,7 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		}
 		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, finalQP))
 		var finalStream VideoStream
-		if finalStream, err = getStreamsInfosCF(ctx, scb, config, workerID, finalQPSegmentPath); err != nil {
+		if finalStream, err = probeVideoStream(ctx, scb, config, workerID, finalQPSegmentPath); err != nil {
 			// make findSegmentQP return an error
 			err = fmt.Errorf("failed to get streams infos of final segment: %w", err)
 			return
@@ -323,25 +323,26 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	return
 }
 
-func getStreamsInfosCF(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, workerID int, filePath string) (
+// probeVideoStream returns the video stream of a file with its exact number of frames: the
+// metadata first, then the whole stream is decoded to count them (the long part, reported as
+// the analysis of the segment).
+func probeVideoStream(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, workerID int, filePath string) (
 	stream VideoStream, err error) {
-	// Recover size
-	fileInfos, err := os.Stat(filePath)
-	if err != nil {
-		err = fmt.Errorf("failed to stat the file: %w", err)
+	debug := func(s string) {
+		scb.Debug(workerID, s)
+	}
+	runtimeError := func(err error) {
+		scb.Error(workerID, err)
+	}
+	if stream, err = config.Encoder.ProbeStream(ctx, filePath, debug, runtimeError); err != nil {
 		return
 	}
-	// Prepare signals
-	scb.OnSegmentAnalysisStart(workerID, fileInfos.Size())
+	scb.OnSegmentAnalysisStart(workerID, stream.Duration)
 	defer scb.OnSegmentAnalysisStop(workerID)
-	// Start analysis
-	return config.Encoder.ProbeStream(ctx, filePath, func(bytesRead int64) {
-		scb.OnSegmentAnalysisProgress(workerID, bytesRead)
-	}, func(s string) {
-		scb.Debug(workerID, s)
-	}, func(err error) {
-		scb.Error(workerID, err)
-	})
+	stream.NbReadFrames, err = config.Encoder.CountFrames(ctx, filePath, func(stats ProgressStats) {
+		scb.OnSegmentAnalysisProgress(workerID, stats)
+	}, debug, runtimeError)
+	return
 }
 
 // searchSegmentQP finds the highest valid QP (smallest file) for a segment.

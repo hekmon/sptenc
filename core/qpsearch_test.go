@@ -32,6 +32,8 @@ type mockEncoder struct {
 	probeErrors   []error
 	probeResults  []VideoStream
 	probeCallIdx  int
+	countErr      error
+	counts        map[string]int // what CountFrames returns for each file, recorded by ProbeStream
 	validateQP    bool
 }
 
@@ -101,25 +103,41 @@ func (m *mockEncoder) ComputeVMAF(_ context.Context, reference, distorted string
 	return stats, nil
 }
 
-func (m *mockEncoder) ProbeStream(_ context.Context, _ string, _ func(int64),
-	_ func(string), _ func(error)) (VideoStream, error) {
+// ProbeStream returns the next probeResults entry (or the default 1000 frames stream). Its
+// NbReadFrames is what the mock will count for that file (CountFrames), it is not returned as
+// such: the real ProbeStream does not decode anything.
+func (m *mockEncoder) ProbeStream(_ context.Context, path string, _ func(string), _ func(error)) (VideoStream, error) {
 	if m.probeErr != nil {
 		return VideoStream{}, m.probeErr
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.probeCallIdx < len(m.probeResults) {
-		res := m.probeResults[m.probeCallIdx]
-		m.probeCallIdx++
-		return res, nil
-	}
-	if m.probeCallIdx < len(m.probeErrors) && m.probeErrors[m.probeCallIdx] != nil {
+	res := VideoStream{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "24/1", Height: 1080, Duration: time.Minute}
+	switch {
+	case m.probeCallIdx < len(m.probeResults):
+		res = m.probeResults[m.probeCallIdx]
+	case m.probeCallIdx < len(m.probeErrors) && m.probeErrors[m.probeCallIdx] != nil:
 		err := m.probeErrors[m.probeCallIdx]
 		m.probeCallIdx++
 		return VideoStream{}, err
 	}
 	m.probeCallIdx++
-	return VideoStream{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "24/1", Height: 1080, Duration: time.Minute}, nil
+	if m.counts == nil {
+		m.counts = make(map[string]int)
+	}
+	m.counts[path] = res.NbReadFrames
+	res.NbReadFrames = 0
+	return res, nil
+}
+
+func (m *mockEncoder) CountFrames(_ context.Context, path string, _ func(ProgressStats),
+	_ func(string), _ func(error)) (int, error) {
+	if m.countErr != nil {
+		return 0, m.countErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.counts[path], nil
 }
 
 func extractSegmentAndQP(path string) (segment, qp int, err error) {
@@ -182,16 +200,16 @@ func (m *mockCallbacks) Error(workerID int, err error)                          
 func (m *mockCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {}
 func (m *mockCallbacks) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
 }
-func (m *mockCallbacks) OnSegmentNewCandidate(workerID, qpCandidate int)           {}
-func (m *mockCallbacks) OnSegmentAnalysisStart(workerID int, fileSize int64)       {}
-func (m *mockCallbacks) OnSegmentAnalysisProgress(workerID int, read int64)        {}
-func (m *mockCallbacks) OnSegmentAnalysisStop(workerID int)                        {}
-func (m *mockCallbacks) OnSegmentEncodeStart(workerID int, totalFrames int)        {}
-func (m *mockCallbacks) OnSegmentEncodeProgress(workerID int, stats ProgressStats) {}
-func (m *mockCallbacks) OnSegmentEncodeStop(workerID int)                          {}
-func (m *mockCallbacks) OnSegmentVMAFStart(workerID int, totalFrames int)          {}
-func (m *mockCallbacks) OnSegmentVMAFProgress(workerID int, stats ProgressStats)   {}
-func (m *mockCallbacks) OnSegmentVMAFStop(workerID int)                            {}
+func (m *mockCallbacks) OnSegmentNewCandidate(workerID, qpCandidate int)             {}
+func (m *mockCallbacks) OnSegmentAnalysisStart(workerID int, duration time.Duration) {}
+func (m *mockCallbacks) OnSegmentAnalysisProgress(workerID int, stats ProgressStats) {}
+func (m *mockCallbacks) OnSegmentAnalysisStop(workerID int)                          {}
+func (m *mockCallbacks) OnSegmentEncodeStart(workerID int, totalFrames int)          {}
+func (m *mockCallbacks) OnSegmentEncodeProgress(workerID int, stats ProgressStats)   {}
+func (m *mockCallbacks) OnSegmentEncodeStop(workerID int)                            {}
+func (m *mockCallbacks) OnSegmentVMAFStart(workerID int, totalFrames int)            {}
+func (m *mockCallbacks) OnSegmentVMAFProgress(workerID int, stats ProgressStats)     {}
+func (m *mockCallbacks) OnSegmentVMAFStop(workerID int)                              {}
 
 func TestFindAllSegmentsQP_Convergence(t *testing.T) {
 	ctx := context.Background()
@@ -660,6 +678,47 @@ func TestFindAllSegmentsQP_ProbeStreamError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "probe failed") {
 		t.Errorf("expected error to contain 'probe failed', got %v", err)
+	}
+}
+
+func TestFindAllSegmentsQP_CountFramesError(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	encoder := &mockEncoder{
+		name:     "mock",
+		qpMin:    0,
+		qpMax:    51,
+		countErr: fmt.Errorf("count failed"),
+	}
+
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+
+	config := QPSearchConfig{
+		SegmentsPaths: []string{filepath.Join(tmpDir, "segment.mkv")},
+		Auditor:       auditor,
+		WorkingDir:    tmpDir,
+		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
+		Encoder:       encoder,
+	}
+
+	if err := os.WriteFile(config.SegmentsPaths[0], []byte("source"), 0644); err != nil {
+		t.Fatalf("failed to create source segment: %v", err)
+	}
+
+	_, err = FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
+	if err == nil {
+		t.Fatal("expected error when CountFrames fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "count failed") {
+		t.Errorf("expected error to contain 'count failed', got %v", err)
+	}
+	if len(encoder.encodeCalls) != 0 {
+		t.Errorf("expected no encode without a frame count, got %d", len(encoder.encodeCalls))
 	}
 }
 
@@ -1326,40 +1385,6 @@ func TestFindAllSegmentsQP_ZeroFrames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "frame count is 0 or negative") {
 		t.Errorf("expected frame count error, got %v", err)
-	}
-}
-
-func TestFindAllSegmentsQP_StatError(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-
-	encoder := &mockEncoder{
-		name:  "mock",
-		qpMin: 0,
-		qpMax: 51,
-	}
-
-	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
-	if err != nil {
-		t.Fatalf("failed to create auditor: %v", err)
-	}
-
-	// Use a non-existent path so os.Stat fails inside getStreamsInfosCF.
-	config := QPSearchConfig{
-		SegmentsPaths: []string{filepath.Join(tmpDir, "does_not_exist.mkv")},
-		Auditor:       auditor,
-		WorkingDir:    tmpDir,
-		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
-		Encoder:       encoder,
-	}
-
-	_, err = FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
-	if err == nil {
-		t.Fatal("expected error when segment file does not exist, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to stat") {
-		t.Errorf("expected stat error, got %v", err)
 	}
 }
 

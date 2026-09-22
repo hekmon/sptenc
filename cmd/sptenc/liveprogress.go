@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,9 +21,9 @@ import (
  * Master
  */
 
-func liveCountNbFrames(ctx context.Context, inputFilePath string, fileSize int64, debug bool) (
+func liveCountNbFrames(ctx context.Context, inputFilePath string, debug bool, dec ffmpeg.HWDecoderConfig) (
 	nbFrames int, codec string, duration time.Duration, err error) {
-	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, fileSize, debug)
+	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, debug, dec)
 	if err != nil {
 		return
 	}
@@ -33,57 +32,70 @@ func liveCountNbFrames(ctx context.Context, inputFilePath string, fileSize int64
 	return
 }
 
-// liveProbeVideoCF reads the whole file to return its video stream along with what can only be
-// known that way: its exact number of frames and how long they last.
-func liveProbeVideoCF(ctx context.Context, inputFilePath string, fileSize int64, debug bool) (
+// liveProbeVideoCF returns the video stream of the file along with what can only be known by
+// decoding it entirely (CF: count frames): its exact number of frames and how long they last.
+// Decoders incompatible with the codec of the file are ignored (software decode).
+func liveProbeVideoCF(ctx context.Context, inputFilePath string, debug bool, dec ffmpeg.HWDecoderConfig) (
 	videoInfos *ffmpeg.FFProbeBinaryStream, duration time.Duration, err error) {
-	// prepare live progress
-	analyzeBar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(fileSize)),
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Analyze | "
-		}),
-		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %s/%s",
-				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
-			)
-		}),
-	)
-	defer liveprogress.RemoveBar(analyzeBar)
-	analyzeProgress := func(n int) {
-		analyzeBar.CurrentAdd(uint64(n))
-	}
-	// exec ffprobe
-	mediaInfos, err := ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
-		GetStreamsInfosConfig: ffmpeg.GetStreamsInfosConfig{
-			// Input
-			Path: inputFilePath,
-			// Reporting
-			Debug: func(s string) {
-				if debug {
-					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
-				}
-			},
-			RuntimeError: func(err error) {
-				fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
-			},
-		},
-		ReadBytesReport: analyzeProgress,
-	})
+	mediaInfos, err := getStreamsInfos(ctx, inputFilePath, debug)
 	if err != nil {
 		return
 	}
 	duration = mediaInfos.Format.Duration
 	if videoInfos = mediaInfos.VideoTrack(); videoInfos == nil {
 		err = errors.New("input file has no video stream")
+		return
 	}
+	frames, err := liveCountFrames(ctx, inputFilePath, duration, debug, dec)
+	if err != nil {
+		return
+	}
+	videoInfos.SetReadFrames(frames)
 	return
+}
+
+func liveCountFrames(ctx context.Context, path string, duration time.Duration, debug bool, dec ffmpeg.HWDecoderConfig) (
+	frames ffmpeg.ReadFrames, err error) {
+	// prepare live progress
+	var currentStats ffmpeg.ProgressStats
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(duration)),
+		liveprogress.WithMultiplyRunes(),
+		// liveprogress.WithWidth(barsWidth),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "   Counting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | speed: %0.2fx",
+				currentStats.Speed,
+			)
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	progress := func(stats ffmpeg.ProgressStats) {
+		currentStats = stats
+		bar.CurrentSet(uint64(stats.Time))
+	}
+	// exec ffmpeg
+	return ffmpeg.CountFrames(ctx, ffmpeg.CountFramesConfig{
+		// Input
+		Path:            path,
+		HWDecoderConfig: dec,
+		// Reporting
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FFMPEGStatsReport: progress,
+	})
 }
 
 func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFrames int, debug bool, masterConfig ffmpeg.FFV1VideoMasterConfig) (err error) {
@@ -293,52 +305,6 @@ func getStreamsInfos(ctx context.Context, path string, debug bool) (stats ffmpeg
 	})
 }
 
-func getStreamsInfosCF(ctx context.Context, path string, debug bool) (stats ffmpeg.FFProbeStats, err error) {
-	// Prepare
-	fileInfos, err := os.Stat(path)
-	if err != nil {
-		err = fmt.Errorf("failed to stat the file: %w", err)
-		return
-	}
-	// Live Progress
-	bar := liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(fileInfos.Size())),
-		liveprogress.WithMultiplyRunes(),
-		// liveprogress.WithWidth(barsWidth),
-		liveprogress.WithSameAutoSizeInternalPadding(true, false),
-		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
-			return "    Analyze | "
-		}),
-		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %s/%s",
-				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
-			)
-		}),
-	)
-	defer liveprogress.RemoveBar(bar)
-	progress := func(n int) {
-		bar.CurrentAdd(uint64(n))
-	}
-	// Execute
-	return ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
-		GetStreamsInfosConfig: ffmpeg.GetStreamsInfosConfig{
-			// Input
-			Path: path,
-			// Reporting
-			Debug: func(s string) {
-				if debug {
-					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
-				}
-			},
-			RuntimeError: func(err error) {
-				fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
-			},
-		},
-		ReadBytesReport: progress,
-	})
-}
-
 // LiveQPSearch received and process search progress signals to translate them as terminal UI progress
 // it implements the core.QPSearchCallbacks interface required by core.FindAllSegmentsQP()
 type LiveQPSearch struct {
@@ -498,34 +464,29 @@ func (to *LiveQPSearch) OnSegmentNewCandidate(workerID, qpCandidate int) {
 	to.segmentsCandidatesAccess[workerID].Unlock()
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, fileSize int64) {
+func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, duration time.Duration) {
 	if to.analysisProgressBars[workerID] != nil {
 		liveprogress.RemoveBar(to.analysisProgressBars[workerID])
 		// no need to nullify we are about to reset it
 	}
 	to.analysisProgressBars[workerID] = liveprogress.AddBar(
-		liveprogress.WithTotal(uint64(fileSize)),
+		liveprogress.WithTotal(uint64(duration)),
 		liveprogress.WithMultiplyRunes(),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			if to.Concurrency > 1 {
-				return fmt.Sprintf(" [#%d]    Analyze | ", workerID)
+				return fmt.Sprintf(" [#%d]   Counting | ", workerID)
 			}
-			return "    Analyze | "
+			return "   Counting | "
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
-		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %s/%s",
-				cunits.ImportInBytes(float64(bar.Current())), cunits.ImportInBytes(float64(bar.Total())),
-			)
-		}),
 	)
 }
 
-func (to *LiveQPSearch) OnSegmentAnalysisProgress(workerID int, newRead int64) {
+func (to *LiveQPSearch) OnSegmentAnalysisProgress(workerID int, stats core.ProgressStats) {
 	if to.analysisProgressBars[workerID] != nil {
-		to.analysisProgressBars[workerID].CurrentAdd(uint64(newRead))
+		to.analysisProgressBars[workerID].CurrentSet(uint64(stats.Time))
 	}
 }
 

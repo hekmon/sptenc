@@ -165,51 +165,6 @@ var vmafCommand = &cli.Command{
 		 * Execute
 		 */
 
-		// Probe reference file for stream info and frame count
-		fmt.Fprintln(bypass, "Probing reference file...")
-		refStats, err := getStreamsInfosCF(ctx, referencePath, cmd.Bool(debugFlagName))
-		if err != nil {
-			return fmt.Errorf("failed to probe reference file: %w", err)
-		}
-		videoStream := refStats.VideoTrack()
-		if videoStream == nil {
-			return errors.New("reference file has no video stream")
-		}
-		if !videoStream.IsConstantFrameRate() {
-			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
-		}
-
-		// Probe distorted file and validate compatibility
-		fmt.Fprintln(bypass, "Probing distorted file...")
-		distStats, err := getStreamsInfosCF(ctx, distortedPath, cmd.Bool(debugFlagName))
-		if err != nil {
-			return fmt.Errorf("failed to probe distorted file: %w", err)
-		}
-		distVideoStream := distStats.VideoTrack()
-		if distVideoStream == nil {
-			return errors.New("distorted file has no video stream")
-		}
-		if !distVideoStream.IsConstantFrameRate() {
-			return errors.New("distorted file has variable frame rate (VFR): VMAF requires CFR for frame-exact alignment")
-		}
-
-		// Validate frame counts match
-		refFrames := videoStream.NbReadFrames
-		distFrames := distVideoStream.NbReadFrames
-		if refFrames != 0 && distFrames != 0 && refFrames != distFrames {
-			return fmt.Errorf("frame count mismatch: reference has %d frames, distorted has %d frames", refFrames, distFrames)
-		}
-
-		// Validate frame rates match (same -r will be forced on both inputs)
-		if videoStream.RFrameRate != distVideoStream.RFrameRate {
-			return fmt.Errorf("frame rate mismatch: reference is %s fps, distorted is %s fps", videoStream.RFrameRate, distVideoStream.RFrameRate)
-		}
-
-		totalFrames := refFrames
-		if totalFrames == 0 {
-			totalFrames = distFrames
-		}
-
 		// Build hardware decode config and warn on incompatible codecs
 		decoderCfg := ffmpeg.HWDecoderConfig{
 			NVDec:           cmd.Bool(nvdecFlagName),
@@ -235,6 +190,43 @@ var vmafCommand = &cli.Command{
 			if !referenceDec.NVDec && !referenceDec.VAAPIDec && !referenceDec.D3D12Dec && !referenceDec.VideoToolboxDec {
 				fmt.Fprintln(bypass, "WARNING: reference codec is not compatible with the requested hardware decoder, falling back to software decode for reference file")
 			}
+		}
+
+		// Probe reference file for stream info and frame count (incompatible decoders are ignored)
+		fmt.Fprintln(bypass, "Probing reference file...")
+		videoStream, _, err := liveProbeVideoCF(ctx, referencePath, cmd.Bool(debugFlagName), decoderCfg)
+		if err != nil {
+			return fmt.Errorf("failed to probe reference file: %w", err)
+		}
+		if !videoStream.IsConstantFrameRate() {
+			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+		}
+
+		// Probe distorted file and validate compatibility
+		fmt.Fprintln(bypass, "Probing distorted file...")
+		distVideoStream, _, err := liveProbeVideoCF(ctx, distortedPath, cmd.Bool(debugFlagName), decoderCfg)
+		if err != nil {
+			return fmt.Errorf("failed to probe distorted file: %w", err)
+		}
+		if !distVideoStream.IsConstantFrameRate() {
+			return errors.New("distorted file has variable frame rate (VFR): VMAF requires CFR for frame-exact alignment")
+		}
+
+		// Validate frame counts match
+		refFrames := videoStream.NbReadFrames
+		distFrames := distVideoStream.NbReadFrames
+		if refFrames != 0 && distFrames != 0 && refFrames != distFrames {
+			return fmt.Errorf("frame count mismatch: reference has %d frames, distorted has %d frames", refFrames, distFrames)
+		}
+
+		// Validate frame rates match (same -r will be forced on both inputs)
+		if videoStream.RFrameRate != distVideoStream.RFrameRate {
+			return fmt.Errorf("frame rate mismatch: reference is %s fps, distorted is %s fps", videoStream.RFrameRate, distVideoStream.RFrameRate)
+		}
+
+		totalFrames := refFrames
+		if totalFrames == 0 {
+			totalFrames = distFrames
 		}
 
 		// Compute VMAF with progress

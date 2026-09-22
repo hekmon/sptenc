@@ -149,15 +149,7 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		NoEnhancementGain: e.VMAFNeg,
 		VMAFCuda:          e.VMAFCUDA,
 		GPUID:             &e.NVIDIAGPUIndex,
-		HWDecoderConfig: ffmpeg.HWDecoderConfig{
-			NVDec:           e.Encoder == ffmpeg.HEVCEncoderNVEnc || e.Encoder == ffmpeg.AV1EncoderNVEnc,
-			NVDevice:        e.NVIDIAGPUIndex,
-			VAAPIDec:        e.Encoder == ffmpeg.HEVCEncoderVAAPI || e.Encoder == ffmpeg.AV1EncoderVAAPI,
-			VAAPIDevice:     e.VAAPIRendererPath,
-			D3D12Dec:        e.Encoder == ffmpeg.HEVCEncoderD3D12VA,
-			D3D12Device:     e.D3D12VAGPUIndex,
-			VideoToolboxDec: e.Encoder == ffmpeg.HEVCEncoderVideoToolbox,
-		},
+		HWDecoderConfig:   e.hwDecoderConfig(),
 		Debug:             debug,
 		RuntimeError:      runtimeError,
 		FFMPEGStatsReport: adaptProgress(progress),
@@ -180,18 +172,13 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 	}, nil
 }
 
-// ProbeStream extracts video stream information from a media file using ffprobe.
-func (e *EncoderAdapter) ProbeStream(ctx context.Context, path string, progress func(int64),
-	debug func(string), runtimeError func(error)) (core.VideoStream, error) {
-	stats, err := ffmpeg.GetStreamsInfosCF(ctx, ffmpeg.GetStreamsInfosCFConfig{
-		GetStreamsInfosConfig: ffmpeg.GetStreamsInfosConfig{
-			Path:         path,
-			Debug:        debug,
-			RuntimeError: runtimeError,
-		},
-		ReadBytesReport: func(bytesRead int) {
-			progress(int64(bytesRead))
-		},
+// ProbeStream extracts video stream information from a media file using ffprobe: metadata
+// only, no frame is decoded (see CountFrames).
+func (e *EncoderAdapter) ProbeStream(ctx context.Context, path string, debug func(string), runtimeError func(error)) (core.VideoStream, error) {
+	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
+		Path:         path,
+		Debug:        debug,
+		RuntimeError: runtimeError,
 	})
 	if err != nil {
 		return core.VideoStream{}, err
@@ -201,12 +188,42 @@ func (e *EncoderAdapter) ProbeStream(ctx context.Context, path string, progress 
 		return core.VideoStream{}, fmt.Errorf("no video track found in %s", path)
 	}
 	return core.VideoStream{
-		NbFrames:     video.NbFrames,
-		NbReadFrames: video.NbReadFrames,
-		RFrameRate:   video.RFrameRate,
-		Height:       video.Height,
-		Duration:     stats.Format.Duration,
+		NbFrames:   video.NbFrames,
+		RFrameRate: video.RFrameRate,
+		Height:     video.Height,
+		Duration:   stats.Format.Duration,
 	}, nil
+}
+
+// CountFrames decodes the whole video stream of a media file with ffmpeg to count its frames
+// exactly, with the hardware decoder matching the encoder when the codec of the file allows it.
+func (e *EncoderAdapter) CountFrames(ctx context.Context, path string, progress func(core.ProgressStats),
+	debug func(string), runtimeError func(error)) (int, error) {
+	frames, err := ffmpeg.CountFrames(ctx, ffmpeg.CountFramesConfig{
+		Path:              path,
+		HWDecoderConfig:   e.hwDecoderConfig(),
+		Debug:             debug,
+		RuntimeError:      runtimeError,
+		FFMPEGStatsReport: adaptProgress(progress),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return frames.Nb, nil
+}
+
+// hwDecoderConfig is the hardware decoder matching the encoder. Whether the input codec can be
+// decoded by it is checked by the ffmpeg functions it is given to.
+func (e *EncoderAdapter) hwDecoderConfig() ffmpeg.HWDecoderConfig {
+	return ffmpeg.HWDecoderConfig{
+		NVDec:           e.Encoder == ffmpeg.HEVCEncoderNVEnc || e.Encoder == ffmpeg.AV1EncoderNVEnc,
+		NVDevice:        e.NVIDIAGPUIndex,
+		VAAPIDec:        e.Encoder == ffmpeg.HEVCEncoderVAAPI || e.Encoder == ffmpeg.AV1EncoderVAAPI,
+		VAAPIDevice:     e.VAAPIRendererPath,
+		D3D12Dec:        e.Encoder == ffmpeg.HEVCEncoderD3D12VA,
+		D3D12Device:     e.D3D12VAGPUIndex,
+		VideoToolboxDec: e.Encoder == ffmpeg.HEVCEncoderVideoToolbox,
+	}
 }
 
 // adaptProgress converts a core.ProgressStats callback to an ffmpeg.ProgressStats callback.

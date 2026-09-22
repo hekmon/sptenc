@@ -470,8 +470,8 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Step 2 - Create the master for encoding
-		masterFile, sourceTotalFrames, _, err := createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"), inputInfos.Size(),
-			cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig())
+		masterFile, sourceTotalFrames, _, err := createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"),
+			cmd.Bool(debugFlagName), decoderCfg)
 		if err != nil {
 			return fmt.Errorf("failed to create the master file: %w", err)
 		}
@@ -678,7 +678,10 @@ var batchsearchCommand = &cli.Command{
 			err = fmt.Errorf("could not stat encoded output for frame count verification: %w", err)
 			return
 		}
-		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
+		// the encoded output can be decoded by the hardware of the search encoder, if any
+		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName),
+			ffmpeg.SelectDecoderForEncoder(ctx, encodedSegmentsMerged, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName)))
 		if err != nil {
 			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
 			return

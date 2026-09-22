@@ -97,6 +97,11 @@ func standardProgress(ffmpegOutput io.ReadCloser, progress func(stats ProgressSt
 				}
 				stats = ProgressStats{}
 			case "end":
+				// the last block is the final state (the last frame written, the total time):
+				// report it too, callers are not told otherwise that a bar reached its end
+				if progress != nil {
+					progress(stats)
+				}
 				return
 			default:
 				runtimeError(fmt.Errorf("error reading ffmpeg progress: unexpected progress value: %s", value))

@@ -345,7 +345,7 @@ var encodeCommand = &cli.Command{
 			// create master
 			var masterFile string
 			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"),
-				inputFileSize, cmd.Bool(debugFlagName), decoderCfg.ToFFV1MasterConfig()); err != nil {
+				cmd.Bool(debugFlagName), decoderCfg); err != nil {
 				return fmt.Errorf("failed to create the master file: %w", err)
 			}
 			// split
@@ -454,13 +454,8 @@ var encodeCommand = &cli.Command{
 		start = time.Now()
 		var sourceFrames, encodedFrames int
 		if inputInfos.IsDir() {
-			var sourceFileInfo os.FileInfo
-			sourceFileInfo, err = os.Stat(vmafSource)
-			if err != nil {
-				err = fmt.Errorf("could not stat source for frame count verification: %w", err)
-				return
-			}
-			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, sourceFileInfo.Size(), cmd.Bool(debugFlagName))
+			// merged FFV1 segments: no hardware decoder for this codec
+			sourceFrames, _, _, err = liveCountNbFrames(ctx, vmafSource, cmd.Bool(debugFlagName), ffmpeg.HWDecoderConfig{})
 			if err != nil {
 				err = fmt.Errorf("could not count frames in source for verification: %w", err)
 				return
@@ -469,12 +464,10 @@ var encodeCommand = &cli.Command{
 			// Reuse the exact frame count from createMaster instead of re-probing the source.
 			sourceFrames = sourceTotalFrames
 		}
-		var encodedFileInfo os.FileInfo
-		if encodedFileInfo, err = os.Stat(encodedSegmentsMerged); err != nil {
-			err = fmt.Errorf("could not stat encoded output for frame count verification: %w", err)
-			return
-		}
-		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, encodedFileInfo.Size(), cmd.Bool(debugFlagName))
+		// the encoded output can be decoded by the hardware of the encoder, if any
+		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName),
+			ffmpeg.SelectDecoderForEncoder(ctx, encodedSegmentsMerged, ffmpeg.Encoder(cmd.String(encoderFlagName)),
+				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName)))
 		if err != nil {
 			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
 			return
