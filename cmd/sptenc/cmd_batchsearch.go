@@ -34,8 +34,8 @@ const (
 	// # WHY A FLAG OF ITS OWN
 	//
 	// The search and the final encode do not run on the same hardware: --concurrent-segments is
-	// chosen for the search encoder, the number of sessions a GPU accepts most of the time. It
-	// says nothing about how many encodes the CPU can take. Reusing it for the final encode, as
+	// chosen for the search encoder, as many workers as the machine feeds a GPU with most of the
+	// time. It says nothing about how many encodes the CPU can take. Reusing it for the final encode, as
 	// is or through some rule (half of it, the number of cores...), would be a guess on a
 	// machine we know nothing about, with no way for the user to fix it.
 	finalConcurrentSegmentsFlagName = "final-concurrent-segments"
@@ -157,14 +157,14 @@ var batchsearchCommand = &cli.Command{
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
 		"each candidate encode (default: 1). The output is the same whatever the value, only the time it\n" +
 		"takes changes.\n" +
-		"  * GPU encoders often support multiple parallel sessions. Hard session limits vary by generation\n" +
-		"    and SKU (typically 1-3 on consumer cards), so verify your specific GPU's capabilities first.\n" +
-		"    Once confirmed, raising this value is highly encouraged for GPU-based searches: it can\n" +
-		"    significantly reduce total runtime for a process that is already long by nature.\n" +
+		"  * GPU encoders: the encoding engines of the card are not the limit, the CPU decoding the FFV1\n" +
+		"    intermediate for them is. Raise it until the CPU is saturated; the driver's encode session\n" +
+		"    limit is the hard stop.\n" +
 		"  * CPU encoders use every thread of the machine on their own, but a single encode does not keep\n" +
-		"    a many-core CPU fully busy. On a 16 cores / 32 threads CPU, libx265 at 1080p encoded 26% more\n" +
-		"    frames per second with 2 concurrent segments, and up to 46% more with 3 and --" + vmafCUDAFlagName + ".\n" +
-		"    Expect less with fewer cores or bigger pictures, and mind the memory with 4K content.\n" +
+		"    a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second,\n" +
+		"    more so with --" + vmafCUDAFlagName + ". Expect less with fewer cores or bigger pictures, and mind the\n" +
+		"    memory with 4K content.\n" +
+		"Measurements are in the README (Encoders). Measure on your machine.\n" +
 		"This flag only applies to the search: the final encode (--" + finalEncodeFlagName + ") has its own,\n" +
 		"--" + finalConcurrentSegmentsFlagName + ", as they do not run on the same hardware.\n\n" +
 		"FINAL ENCODE\n" +

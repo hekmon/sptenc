@@ -78,14 +78,14 @@ var encodeCommand = &cli.Command{
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel (default: 1).\n" +
 		"The output is the same whatever the value, only the time it takes changes.\n" +
-		"  * GPU encoders often support multiple parallel sessions. Hard session limits vary by\n" +
-		"    generation and SKU (typically 1-3 on consumer cards), so verify your specific GPU's\n" +
-		"    capabilities before raising this value.\n" +
+		"  * GPU encoders: the encoding engines of the card are not the limit, the CPU decoding the FFV1\n" +
+		"    intermediate for them is. Raise it until the CPU is saturated; the driver's encode session\n" +
+		"    limit is the hard stop.\n" +
 		"  * CPU encoders use every thread of the machine on their own, but a single encode does not\n" +
-		"    keep a many-core CPU fully busy. On a 16 cores / 32 threads CPU, libx265 at 1080p encoded\n" +
-		"    26% more frames per second with 2 concurrent segments, and up to 46% more with 3 and\n" +
-		"    --" + vmafCUDAFlagName + " (which takes VMAF away from the CPU). Expect less with fewer cores or bigger\n" +
-		"    pictures, and mind the memory with 4K content. Measure on your machine.\n" +
+		"    keep a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second,\n" +
+		"    more so with --" + vmafCUDAFlagName + " (which takes VMAF away from the CPU). Expect less with fewer\n" +
+		"    cores or bigger pictures, and mind the memory with 4K content.\n" +
+		"Measurements are in the README (Encoders). Measure on your machine.\n" +
 		"Segments started together can not learn from each other: a run with several concurrent\n" +
 		"segments needs a few more attempts at its beginning, a cost only visible on short inputs.\n\n" +
 		"SEGMENT LENGTH\n" +

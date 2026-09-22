@@ -1,6 +1,6 @@
 # Split Encoder
 
-`sptenc` (Split Encoder) is a scene-aware, [VMAF](https://github.com/Netflix/vmaf)-driven video transcoder for enthusiasts who want every scene of their encodes to meet a measured quality target, at the smallest size that still meets it, and are willing to trade encoding speed for that.
+`sptenc` (Split Encoder) is a scene-aware, [VMAF](https://github.com/Netflix/vmaf)-driven video transcoder for enthusiasts who want every scene of their encodes to meet a measured quality target, at the smallest size that still meets it, and accept to pay for that in encoding time with a CPU encoder, or in file size with a GPU one.
 
 It splits the input into scene-aligned segments, encodes each one independently, and validates the result against configurable VMAF thresholds before accepting it.
 Failed segments are automatically re-encoded at a lower QP until all thresholds are met.
@@ -8,7 +8,7 @@ A final, complete VMAF comparison between the encoded output and original source
 
 This approach gives each scene the highest QP, so the smallest size, that still passes the quality target defined by the VMAF profile.
 
-> **Trade-off:** Achieving both smaller file size AND guaranteed quality comes at a cost: encoding time will be significantly longer than standard single-pass encoding, as multiple QP values are tested on each segment until all VMAF thresholds are met. This is not the same as a single CRF pass with a whole-file VMAF check — that approach only validates an average, so one complex scene in an otherwise steady movie can be destroyed while the overall result still looks acceptable. sptenc enforces its quality floor on every single scene independently.
+> **Trade-off:** several QP values are tested on every segment and each one is measured with VMAF, so an encode costs a few passes of the chosen encoder where a CRF encode costs one. What that costs depends on the encoder: a larger file with a GPU encoder, which searches faster than realtime once several segments run in parallel, hours and the smallest file with a CPU one (measured in [Encoder selection vs file size](#encoder-selection-vs-file-size)). The floor is the same either way, and it is not what a single CRF pass with a whole-file VMAF check gives: that only validates an average, so one complex scene in an otherwise steady movie can be destroyed while the overall score still looks fine. sptenc enforces its quality floor on every single scene independently.
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding, and the VMAF perceptual quality models that power it. This project is built for power users encoding on their own hardware, not for streaming-scale infrastructure.
 
@@ -31,7 +31,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🎬 **Scene-aware segmentation** - Segments are cut on scene changes, so the quality floor is enforced per scene, never averaged across a whole file
 - 📊 **Multi-metric validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25) and worst frame; every enabled threshold must pass
 - 🧠 **Adaptive QP search** - Each segment converges on the highest QP that still passes in a few attempts, and stats kept from previous runs make the next ones start closer (see [Adaptive QP Search](#adaptive-qp-search))
-- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU, encode the final file small on the CPU (see [Encoders](#encoders))
+- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU and encode the final file small on the CPU, or keep the GPU encode when time matters more than size: the floor is proven the same way (see [Encoders](#encoders))
 - 🚀 **Hardware acceleration wherever it helps** - CUDA VMAF, GPU decoding even alongside a CPU encoder, and several segments searched in parallel: same output, less time
 - 🔬 **Automatic scene threshold search** - `batchsearch` tries several scene detection thresholds and keeps the one that produces the smallest passing file
 - 📋 **A file you can trust** - Audio, subtitles and color metadata are carried over (PCM audio losslessly compressed to FLAC), and the final whole-file VMAF result is written into the output's metadata tags
@@ -51,14 +51,14 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 
 | | Av1an (Target Quality) | sptenc |
 |---|---|---|
-| Purpose | Encode faster by running several encoder processes in parallel; Target Quality is one of its modes | Enforce a quality floor on every scene; speed is what is traded for it |
+| Purpose | Encode faster by running several encoder processes in parallel; Target Quality is one of its modes | Enforce a quality floor on every scene; time (CPU encoder) or size (GPU encoder) is what is traded for it |
 | What is promised for a scene | A score to aim at: a limited number of probes (4 by default), and the probe closest to the target is used if none reached it | A floor: no limit on attempts, a segment is only accepted once it passes, or is flagged as best effort when even the lowest QP of the encoder can not pass |
 | What is measured | Probes, by default faster and lower resolution encodes than the final one, which is then not measured (`--probe-slow` makes the probes real encodes) | The segments ending up in the output file, always |
 | Quality gate | One statistic of one metric (mean, harmonic mean, a percentile, minimum...) | Any combination of 8 statistics, all having to pass |
 | Metrics | VMAF, SSIMULACRA2, Butteraugli, XPSNR | VMAF only |
 | Dial | CRF / CQ, the rate control of the encoder stays in charge | Constant QP (see [why](#why-qp-instead-of-crf)) |
 | Encoders | Software: aomenc, SVT-AV1, rav1e, vpxenc, x264, x265, with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox), with fixed opinionated parameters |
-| GPU | Decoding (DGDecNV) and some metrics | Encoding, to search fast then encode the final file on CPU (`batchsearch --final-encode`), and VMAF (CUDA) |
+| GPU | Decoding (DGDecNV) and some metrics | Encoding, to search fast then encode the final file on CPU (`batchsearch --final-encode`) or as the final encoder, and VMAF (CUDA) |
 | Scene cuts | av-scenechange, frame exact chunks piped through VapourSynth, no intermediate file needed | ffmpeg `scdet`, frame exact cuts of a lossless intermediate (large: count on disk space), and a search of the scene threshold itself (`batchsearch`) |
 | Verification | Optional VMAF plot of the result | Frame counts of every segment and of the final file, final VMAF of the whole file embedded in its tags |
 | Learning | None between runs | QP statistics of previous encodes kept to start the next searches closer |
@@ -140,7 +140,7 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 ### Fast VMAF profile prototyping with NVENC on the second GPU
 ```bash
 ./sptenc encode video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --nvidia-gpu-index 1 --vmaf-mean 93
-# Once happy with the profile, re-run with the default libx265 for the final smaller encode
+# Once happy with the profile, re-run with the default libx265 for a smaller file, or keep this one
 ```
 
 ### CPU encode with the GPU decoding on the side
@@ -329,15 +329,33 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 > **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `libsvtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc check` to see which encoders your ffmpeg build supports.
 
+> **Untested encoders:** `av1_vaapi` and `hevc_d3d12va` are implemented but have not been validated end to end (`hevc_vaapi` was, on Linux with an Intel iGPU). `hevc_d3d12va` targets Intel and AMD GPUs on Windows, which the author does not have: NVIDIA users should use `hevc_nvenc` and `av1_nvenc`, not D3D12VA. Feedback from Intel or AMD hardware is welcome.
+
 ### Encoder selection vs file size
 
 | | CPU encoders (`libx265`, `libsvtav1`) | GPU encoders (`*_nvenc`, `*_vaapi`) |
 |---|---|---|
-| Output file size | ✅ Optimal | ❌ ~1.5–2× larger |
-| Speed | Slower | ✅ Much faster |
-| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search |
+| Output file size | ✅ Smallest | ❌ Larger: 1.4× on the episode measured below |
+| Speed | Hours | ✅ Faster than realtime at 1080p, with several segments searched in parallel (`-C`, see below) |
+| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than the last third of the size |
 
-> **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes. With a GPU encoder, raise it up to the number of encoding sessions your card accepts (typically 1–3 on consumer cards). With a CPU encoder a single encode already uses every thread of the machine, but does not keep a many-core CPU fully busy: on a 16 cores / 32 threads CPU, `libx265` at 1080p encoded 26% more frames per second with 2 concurrent segments (VMAF computed on CPU), and up to 46% more with 3 and `--vmaf-cuda`, which takes VMAF away from the CPU. Expect less with fewer cores or bigger pictures (+21% with 2 encodes at 2160p), mind the memory with 4K content, and measure on your machine. Segments started together can not learn from each other, so a few more attempts are needed at the beginning of a run: a cost only visible on short inputs. For the fastest workflow, `batchsearch --final-encode` searches the scene threshold on GPU then encodes the final file with the CPU equivalent: `-C` then only applies to the search, the final encode has its own `--final-concurrent-segments` as they do not run on the same hardware.
+Same 26 min 1080p Blu-ray remux episode, same threshold (163 segments), cold cache, VMAF harmonic mean 93, on an RTX 5090 with a 16 cores / 32 threads CPU and `--vmaf-cuda`.:
+
+| | `hevc_nvenc`, `-C 6` | `libx265` preset slow, `-C 3` |
+|---|---|---|
+| QP search | 10m40s | 52m42s |
+| Video stream | 175.7 MiB | 124.9 MiB |
+| Attempts per segment | 3.79 | 3.88 |
+
+One episode is one data point: the size ratio depends on the content, and the times on the machine. The GPU search was bound by the CPU, which decodes the lossless FFV1 intermediate twice per attempt (once for the encode, once as the VMAF reference), not by the GPU (NVENC engines at 18%, CUDA at 25%): a smaller GPU with the same CPU would be close, the same GPU with a smaller CPU would not.
+
+> **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes. <!-- libvmaf_cuda non-determinism: revert to the plain claim when --vmaf-cuda is removed (VMAF v1 has no CUDA kernels, v0.2.0) -->The one exception is `--vmaf-cuda`: `libvmaf_cuda` scores move in the last decimals between runs, so a segment sitting exactly on a threshold can be kept one QP apart by two runs of the same search (observed once in 163 segments on a 26 min episode, 0.1 MiB on the file).
+>
+> **With a GPU encoder**, the number of encoding engines on the card is not the limit: a worker only feeds the encoder while it encodes and waits for VMAF the rest of the time, and the frames come from the CPU decoding the FFV1 intermediate, as measured above. The same search on the RTX 5090 (three NVENC engines) took 14m7s with `-C 3` and 10m40s with `-C 6`, the CPU going from 52% to 90%: raise it until the CPU is saturated, the driver's encode session limit being the hard stop (an encode then fails to open its session).
+>
+> **With a CPU encoder**, a single encode already uses every thread of the machine, but does not keep a many-core CPU fully busy: on a 16 cores / 32 threads CPU, `libx265` at 1080p encoded 26% more frames per second with 2 concurrent segments (VMAF computed on CPU), and up to 46% more with 3 and `--vmaf-cuda`, which takes VMAF away from the CPU. Expect less with fewer cores or bigger pictures (+21% with 2 encodes at 2160p), mind the memory with 4K content, and measure on your machine.
+>
+> Segments started together can not learn from each other, so a few more attempts are needed at the beginning of a run: a cost only visible on short inputs. For the fastest workflow, `batchsearch --final-encode` searches the scene threshold on GPU then encodes the final file with the CPU equivalent: `-C` then only applies to the search, the final encode has its own `--final-concurrent-segments` as they do not run on the same hardware.
 
 ### GPU selection flags
 
@@ -363,12 +381,9 @@ This typically requires only 3–5 encode attempts per segment, compared to a br
 
 ### Persistent stats from previous runs
 
-After each encode job finishes, sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments. A `batchsearch` run only stores its winning candidate (plus the final CPU encode with `--final-encode`, on that encoder's own cache): the other candidates are the same content encoded again and would over-represent that file. Within the run though, every candidate starts from the QPs the previous candidates found: the same content is the best prior there is, so only the first candidate pays the learning cost. This further accelerates convergence on subsequent runs:
+After each encode job finishes, sptenc stores QP statistics **per encoder and VMAF profile** (i.e. the combination of encoder, enabled metrics, and their target values), weighted by the number of segments. A `batchsearch` run only stores its winning candidate (plus the final CPU encode with `--final-encode`, on that encoder's own cache): the other candidates are the same content encoded again and would over-represent that file. Within the run though, every candidate starts from the QPs the previous candidates found: the same content is the best prior there is, so only the first candidate pays the learning cost.
 
-| Encode job | Cold start | With cached stats |
-|---|---|---|
-| Small episode | ~7h30 | ~4h |
-| Film | ~85h | ~60h |
+What is at stake is the number of encodes per segment. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, a cold cache cost 3.9 attempts per segment with `libx265` and 3.8 with `hevc_nvenc`, the run's own ephemeral statistics doing the learning from the first segments on. A segment can not take fewer than two, the QP kept and the next one failing, so what a warm cache can save is bounded by that: it has not been measured on that content yet.
 
 The cache provides:
 - **Mean QP** — a better-informed starting point than the encoder midpoint
