@@ -146,22 +146,8 @@ var splitCommand = &cli.Command{
 				return ctx, fmt.Errorf("failed to access output directory: %w", err)
 			}
 		}
-		// Validate that at most one hardware decode flag is set
-		var hwDecFlags int
-		if cmd.Bool(nvdecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(vaapiDecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(d3d12DecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(videoToolboxDecFlagName) {
-			hwDecFlags++
-		}
-		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapi-dec, --d3d12va-dec, --videotoolbox-dec)")
+		if _, err = hwDecodeFlags(cmd); err != nil {
+			return ctx, err
 		}
 		return ctx, nil
 	},
@@ -180,6 +166,7 @@ var splitCommand = &cli.Command{
 		bypass := liveprogress.Bypass()
 
 		// handle modes and master preparation
+		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
 		fileToProcess := inputFilePath
 		var stats ffmpeg.FFProbeStats
 		if stats, err = ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
@@ -241,13 +228,9 @@ var splitCommand = &cli.Command{
 				fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
 			}
 			// build optional hw decode config
-			decoderCfg := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
-				cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
-				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-			)
-			if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
-				!decoderCfg.NVDec && !decoderCfg.VAAPIDec && !decoderCfg.D3D12Dec && !decoderCfg.VideoToolboxDec {
-				fmt.Fprintln(bypass, "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
+			decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)
+			if requestedDecoder.Enabled() && !decoderCfg.Enabled() {
+				fmt.Fprintf(bypass, "WARNING: input codec is not compatible with %s decoding, falling back to software decode\n", requestedDecoder.Name())
 			}
 			// create the master within
 			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, filepath.Join(workingDir, "master.mkv"),
@@ -265,16 +248,9 @@ var splitCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
-		scenesConfig := ffmpeg.ScenesDetectionConfig{
-			NVDec:           cmd.Bool(nvdecFlagName),
-			NVDevice:        cmd.Int(nvidiaGPUIndexFlagName),
-			VAAPIDec:        cmd.Bool(vaapiDecFlagName),
-			VAAPIDevice:     cmd.String(vaapiRendererPathFlagName),
-			D3D12Dec:        cmd.Bool(d3d12DecFlagName),
-			D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
-			VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
-		}
-		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName), scenesConfig)
+		// (the master, when made, is FFV1: ScenesDetection falls back to software decode by itself)
+		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName),
+			requestedDecoder.ToScenesDetectionConfig())
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}

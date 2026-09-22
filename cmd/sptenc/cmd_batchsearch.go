@@ -132,11 +132,27 @@ var batchsearchCommand = &cli.Command{
 		"Lower values make the search more aggressive; higher values let the search ride out more\n" +
 		"consecutive non-improving candidates in hope of a later meaningful drop, at the cost of\n" +
 		"additional full encode passes.\n\n" +
-		"ENCODERS\n" +
-		"Use --" + encoderFlagName + " to choose the encoder for the search loop. The default is " + string(ffmpeg.HEVCEncoderNVEnc) + "\n" +
-		"(GPU-based). GPU encoders are strongly recommended for speed. If available, also enable CUDA\n" +
-		"VMAF acceleration (--" + vmafCUDAFlagName + ") to avoid bottlenecking the search on CPU-side\n" +
-		"quality validation.\n\n" +
+		"HARDWARE: USE EVERYTHING YOU HAVE\n" +
+		"A search is many full encodes, each one checked frame by frame with VMAF: decoding and scoring\n" +
+		"compete with the encoder for your CPU. Whatever a GPU can take over is time saved for the\n" +
+		"exact same result, so sptenc takes it by itself whenever it knows it can:\n" +
+		"  * Search with a hardware encoder. The default, " + string(ffmpeg.HEVCEncoderNVEnc) + ", is one; " + string(ffmpeg.HEVCEncoderVAAPI) + ", " + string(ffmpeg.HEVCEncoderD3D12VA) + ",\n" +
+		"    " + string(ffmpeg.HEVCEncoderVideoToolbox) + ", " + string(ffmpeg.AV1EncoderNVEnc) + " and " + string(ffmpeg.AV1EncoderVAAPI) + " are the others. It decodes with the same GPU,\n" +
+		"    nothing to set, and so does the final encode (--" + finalEncodeFlagName + "): the GPU that ran the search\n" +
+		"    keeps decoding, the CPU encoder gets the power it takes.\n" +
+		"  * --" + vmafCUDAFlagName + " scores VMAF on an NVIDIA GPU and decodes with it (NVDEC). It is the biggest\n" +
+		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg).\n" +
+		"  * Searching with a CPU encoder (" + string(ffmpeg.HEVCEncoderLibx265) + ", " + string(ffmpeg.AV1EncoderSVTAV1) + ") is possible but long. If there is a GPU\n" +
+		"    in the machine anyway, an integrated one or Apple silicon included, hand it the decoding:\n" +
+		"    --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + " (Windows) or\n" +
+		"    --" + videoToolboxDecFlagName + " (macOS). Same result, more CPU left for the encoder.\n" +
+		"  * --" + concurrentSegmentsFlagName + " (-C) works on several segments at once, see CONCURRENT ENCODING.\n" +
+		"You can not get it wrong. Decoding on a GPU does not change a single pixel (the decoders of\n" +
+		"H.264, HEVC, VP9 and AV1 are exact by specification), only who spends the time. A decoder\n" +
+		"that does not support your source codec falls back to software with a warning. A decode flag\n" +
+		"contradicting the encoder or --" + vmafCUDAFlagName + " is refused before anything starts. The only decoding\n" +
+		"no GPU can take is the lossless intermediate sptenc works from (FFV1): everything else goes.\n" +
+		"Run 'sptenc check' to see the encoders and filters available in your ffmpeg build.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
 		"each candidate encode (default: 1). The output is the same whatever the value, only the time it\n" +
@@ -157,7 +173,8 @@ var batchsearchCommand = &cli.Command{
 		"the final encode with the discovered threshold. CPU encoders produce smaller files for an equivalent\n" +
 		"quality compared to GPU encoders, which are optimized for speed rather than compression efficiency.\n" +
 		"The GPU-found threshold is usually close enough for the CPU pass to be worth the speedup,\n" +
-		"though it may not be exactly optimal.\n\n" +
+		"though it may not be exactly optimal. The GPU of the search keeps decoding for the CPU pass\n" +
+		"(see HARDWARE above).\n\n" +
 		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op: the search\n" +
 		"result already comes from the encoder of the final file.\n\n" +
 		"The final encode searches one segment at a time by default. --" + finalConcurrentSegmentsFlagName + " raises\n" +
@@ -255,6 +272,10 @@ var batchsearchCommand = &cli.Command{
 		requestedEncoder := cmd.String(encoderFlagName)
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
+		}
+		// Check the decode flags against the encoder and VMAF on CUDA
+		if _, err = encodeHWDecoder(cmd, ffmpeg.Encoder(requestedEncoder)); err != nil {
+			return ctx, err
 		}
 		// A final encode concurrency without any final encode to come is a mistake: better
 		// to say so now than to let the user believe it has been taken into account
@@ -376,6 +397,10 @@ var batchsearchCommand = &cli.Command{
 			return fmt.Errorf("%s must be greater than %s", maxThresholdFlagName, minThresholdFlagName)
 		}
 
+		// Hardware decoder of the run (validated in Before), see ffmpeg.ResolveHWDecoder. The
+		// final encode phase uses it too: it is resolved from the search encoder, not from the
+		// CPU encoder of that phase (the GPU is still there).
+		hwDecoder, _ := encodeHWDecoder(cmd, ffmpeg.Encoder(cmd.String(encoderFlagName)))
 		// Prepare the encoder adapter (used for cache creation and segment encoding)
 		encoderAdapter := &pipeline.EncoderAdapter{
 			Encoder:           ffmpeg.Encoder(cmd.String(encoderFlagName)),
@@ -384,6 +409,7 @@ var batchsearchCommand = &cli.Command{
 			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
 			VMAFNeg:           cmd.Bool(vmafNegFlagName),
 			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
+			HWDecoder:         hwDecoder,
 		}
 
 		/*
@@ -412,10 +438,11 @@ var batchsearchCommand = &cli.Command{
 		}
 		fmt.Fprintf(bypass, "\nEach segment will have to validate the following VMAF profile:\n\n%s\n", vmafAuditor)
 
-		// Build decoder config independently so scene detection can run on the source before the master is created.
-		decoderCfg := ffmpeg.SelectDecoderForEncoder(ctx, inputPath, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-		)
+		// Decoder of the source (scene detection, frame count, master)
+		decoderCfg := hwDecoder.CompatibleWith(ctx, inputPath)
+		if hwDecoder.Enabled() && !decoderCfg.Enabled() {
+			fmt.Fprintf(bypass, "WARNING: input codec is not compatible with %s decoding, falling back to software decode\n", hwDecoder.Name())
+		}
 
 		// Get source duration for progress reporting
 		sourceStats, err := getStreamsInfos(ctx, inputPath, cmd.Bool(debugFlagName))
@@ -630,6 +657,7 @@ var batchsearchCommand = &cli.Command{
 				D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
 				VMAFNeg:           cmd.Bool(vmafNegFlagName),
 				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
+				HWDecoder:         hwDecoder, // the one of the search, see above
 			}
 			finalQPMin, finalQPMax, finalQPFound := finalEncoderAdapter.QPRange()
 			if !finalQPFound {
@@ -678,10 +706,7 @@ var batchsearchCommand = &cli.Command{
 			err = fmt.Errorf("could not stat encoded output for frame count verification: %w", err)
 			return
 		}
-		// the encoded output can be decoded by the hardware of the search encoder, if any
-		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName),
-			ffmpeg.SelectDecoderForEncoder(ctx, encodedSegmentsMerged, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-				cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName)))
+		encodedFrames, _, _, err = liveCountNbFrames(ctx, encodedSegmentsMerged, cmd.Bool(debugFlagName), hwDecoder)
 		if err != nil {
 			err = fmt.Errorf("could not count frames in encoded output for verification: %w", err)
 			return
@@ -698,6 +723,7 @@ var batchsearchCommand = &cli.Command{
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
 			results.TotalSegmentsFrames, cmd.Int(nvidiaGPUIndexFlagName), cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName),
+			hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)

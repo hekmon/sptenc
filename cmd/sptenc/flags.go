@@ -35,11 +35,19 @@ type hwAccelScope int
 const (
 	hwAccelScopeDecode hwAccelScope = iota // decode-only commands (master, split, thresholds)
 	hwAccelScopeVMAF                       // vmaf command (decode toggles + cuda)
-	hwAccelScopeEncode                     // encode commands (device selectors + cuda + concurrency)
+	hwAccelScopeEncode                     // encode commands (decode toggles + cuda + concurrency)
 )
 
-// hardwareAccelFlags returns hardware acceleration flags under a single category.
+// hardwareAccelFlags returns hardware acceleration flags under a single category. The device
+// selectors and the decode toggles are common to every scope: the encoding commands decode
+// too, and a CPU encoder does not mean there is no accelerator (see ffmpeg.ResolveHWDecoder).
 func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
+	// the encoding commands decode with the GPU of a hardware encoder (or of VMAF on CUDA) by
+	// themselves: the decode flags are for a CPU encoder, say so where the user reads them
+	var decodeUsageSuffix string
+	if scope == hwAccelScopeEncode {
+		decodeUsageSuffix = " with a CPU encoder (a hardware encoder or --" + vmafCUDAFlagName + " decodes on its GPU by itself)"
+	}
 	flags = []cli.Flag{
 		&cli.IntFlag{
 			Name:     nvidiaGPUIndexFlagName,
@@ -63,38 +71,36 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 			Category: hardwareAccelerationCategoryName,
 		},
 	}
-	if scope == hwAccelScopeDecode || scope == hwAccelScopeVMAF {
-		flags = append(flags,
-			&cli.BoolFlag{
-				Name:     nvdecFlagName,
-				Usage:    "Use NVDEC hardware decoding",
-				Value:    false,
-				OnlyOnce: true,
-				Category: hardwareAccelerationCategoryName,
-			},
-			&cli.BoolFlag{
-				Name:     vaapiDecFlagName,
-				Usage:    "Use VA-API hardware decoding",
-				Value:    false,
-				OnlyOnce: true,
-				Category: hardwareAccelerationCategoryName,
-			},
-			&cli.BoolFlag{
-				Name:     d3d12DecFlagName,
-				Usage:    "Use D3D12VA hardware decoding",
-				Value:    false,
-				OnlyOnce: true,
-				Category: hardwareAccelerationCategoryName,
-			},
-			&cli.BoolFlag{
-				Name:     videoToolboxDecFlagName,
-				Usage:    "Use VideoToolbox hardware decoding",
-				Value:    false,
-				OnlyOnce: true,
-				Category: hardwareAccelerationCategoryName,
-			},
-		)
-	}
+	flags = append(flags,
+		&cli.BoolFlag{
+			Name:     nvdecFlagName,
+			Usage:    "Use NVDEC hardware decoding" + decodeUsageSuffix,
+			Value:    false,
+			OnlyOnce: true,
+			Category: hardwareAccelerationCategoryName,
+		},
+		&cli.BoolFlag{
+			Name:     vaapiDecFlagName,
+			Usage:    "Use VA-API hardware decoding" + decodeUsageSuffix,
+			Value:    false,
+			OnlyOnce: true,
+			Category: hardwareAccelerationCategoryName,
+		},
+		&cli.BoolFlag{
+			Name:     d3d12DecFlagName,
+			Usage:    "Use D3D12VA hardware decoding" + decodeUsageSuffix,
+			Value:    false,
+			OnlyOnce: true,
+			Category: hardwareAccelerationCategoryName,
+		},
+		&cli.BoolFlag{
+			Name:     videoToolboxDecFlagName,
+			Usage:    "Use VideoToolbox hardware decoding" + decodeUsageSuffix,
+			Value:    false,
+			OnlyOnce: true,
+			Category: hardwareAccelerationCategoryName,
+		},
+	)
 	if scope == hwAccelScopeVMAF || scope == hwAccelScopeEncode {
 		flags = append(flags,
 			&cli.BoolFlag{
@@ -120,6 +126,41 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 		)
 	}
 	return
+}
+
+// hwDecodeFlags returns the hardware decoder requested with the decode flags, along with the
+// devices of the device flags. No decode flag means software decode, more than one is an error.
+func hwDecodeFlags(cmd *cli.Command) (dec ffmpeg.HWDecoderConfig, err error) {
+	dec = ffmpeg.HWDecoderConfig{
+		NVDec:           cmd.Bool(nvdecFlagName),
+		NVDevice:        cmd.Int(nvidiaGPUIndexFlagName),
+		VAAPIDec:        cmd.Bool(vaapiDecFlagName),
+		VAAPIDevice:     cmd.String(vaapiRendererPathFlagName),
+		D3D12Dec:        cmd.Bool(d3d12DecFlagName),
+		D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
+		VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
+	}
+	var nbFlags int
+	for _, set := range []bool{dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec} {
+		if set {
+			nbFlags++
+		}
+	}
+	if nbFlags > 1 {
+		err = fmt.Errorf("only one hardware decode flag can be set at a time (--%s, --%s, --%s, --%s)",
+			nvdecFlagName, vaapiDecFlagName, d3d12DecFlagName, videoToolboxDecFlagName)
+	}
+	return
+}
+
+// encodeHWDecoder returns the hardware decoder of an encoding run (see ffmpeg.ResolveHWDecoder)
+// out of the encoder, the VMAF CUDA flag and the decode flags of the command.
+func encodeHWDecoder(cmd *cli.Command, encoder ffmpeg.Encoder) (dec ffmpeg.HWDecoderConfig, err error) {
+	requested, err := hwDecodeFlags(cmd)
+	if err != nil {
+		return
+	}
+	return ffmpeg.ResolveHWDecoder(encoder, cmd.Bool(vmafCUDAFlagName), requested)
 }
 
 func validateConcurrentSegments(v int) error {

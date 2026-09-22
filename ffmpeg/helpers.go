@@ -80,21 +80,78 @@ func SelectCompatibleDecoders(ctx context.Context, inputPath string, wantNVDec, 
 	return
 }
 
-// SelectDecoderForEncoder infers hardware decode preferences from the chosen
-// encoder and returns an HWDecoderConfig filtered by input compatibility.
-func SelectDecoderForEncoder(ctx context.Context, inputPath string, encoder Encoder, nvidiaGPUIndex int, vaapiDevice string, d3d12GPUIndex int) HWDecoderConfig {
-	var wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec bool
+// CompatibleWith returns the same decoder when it can decode the codec of the file (see
+// SelectCompatibleDecoders), a software decode configuration otherwise.
+func (dec HWDecoderConfig) CompatibleWith(ctx context.Context, inputPath string) HWDecoderConfig {
+	return SelectCompatibleDecoders(ctx, inputPath, dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec,
+		dec.NVDevice, dec.VAAPIDevice, dec.D3D12Device)
+}
+
+// Enabled reports whether a hardware decoder is selected (software decode otherwise).
+func (dec HWDecoderConfig) Enabled() bool {
+	return dec.NVDec || dec.VAAPIDec || dec.D3D12Dec || dec.VideoToolboxDec
+}
+
+// Name returns the name of the selected hardware decoder, "software" when none is.
+func (dec HWDecoderConfig) Name() string {
+	switch {
+	case dec.NVDec:
+		return "NVDEC"
+	case dec.VAAPIDec:
+		return "VA-API"
+	case dec.D3D12Dec:
+		return "D3D12VA"
+	case dec.VideoToolboxDec:
+		return "VideoToolbox"
+	default:
+		return "software"
+	}
+}
+
+// DecoderForEncoder returns the hardware decoder matching a hardware encoder (the same GPU),
+// none for a CPU encoder. Whether the input codec can be decoded by it is not checked here,
+// see CompatibleWith.
+func DecoderForEncoder(encoder Encoder, nvidiaGPUIndex int, vaapiDevice string, d3d12GPUIndex int) (dec HWDecoderConfig) {
+	dec = HWDecoderConfig{NVDevice: nvidiaGPUIndex, VAAPIDevice: vaapiDevice, D3D12Device: d3d12GPUIndex}
 	switch encoder {
 	case HEVCEncoderNVEnc, AV1EncoderNVEnc:
-		wantNVDec = true
+		dec.NVDec = true
 	case HEVCEncoderVAAPI, AV1EncoderVAAPI:
-		wantVAAPIDec = true
+		dec.VAAPIDec = true
 	case HEVCEncoderD3D12VA:
-		wantD3D12Dec = true
+		dec.D3D12Dec = true
 	case HEVCEncoderVideoToolbox:
-		wantVideoToolboxDec = true
+		dec.VideoToolboxDec = true
 	}
-	return SelectCompatibleDecoders(ctx, inputPath, wantNVDec, wantVAAPIDec, wantD3D12Dec, wantVideoToolboxDec, nvidiaGPUIndex, vaapiDevice, d3d12GPUIndex)
+	return
+}
+
+// ResolveHWDecoder picks the hardware decoder of an encoding run, by order of precedence:
+//
+//  1. the one matching the encoder when it is a hardware one (the same GPU is used both ways)
+//  2. NVDEC when VMAF is computed on CUDA (the frames go to the GPU anyway)
+//  3. the one explicitly requested, if any: a CPU encoder is chosen for its file size, not
+//     because the machine has no accelerator, and every decode it does not do itself can be
+//     taken away from the CPU it needs
+//
+// The devices always come from requested (they are the device flags). An explicit request
+// contradicting the two first levels is an error: it can not be honored, better to say so than
+// to decode with a hardware the user did not ask for.
+func ResolveHWDecoder(encoder Encoder, vmafCUDA bool, requested HWDecoderConfig) (dec HWDecoderConfig, err error) {
+	var origin string
+	switch derived := DecoderForEncoder(encoder, requested.NVDevice, requested.VAAPIDevice, requested.D3D12Device); {
+	case derived.Enabled():
+		dec, origin = derived, fmt.Sprintf("the %s encoder", encoder)
+	case vmafCUDA:
+		dec, origin = derived, "VMAF on CUDA" // derived carries the devices only
+		dec.NVDec = true
+	default:
+		return requested, nil
+	}
+	if requested.Enabled() && requested.Name() != dec.Name() {
+		err = fmt.Errorf("%s decoding was requested but %s implies %s decoding", requested.Name(), origin, dec.Name())
+	}
+	return
 }
 
 // ToFFV1MasterConfig copies decoder settings into an FFV1VideoMasterConfig.

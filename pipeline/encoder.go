@@ -17,6 +17,9 @@ type EncoderAdapter struct {
 	D3D12VAGPUIndex   int
 	VMAFNeg           bool
 	VMAFCUDA          bool
+	// Hardware decoder of the run (see ffmpeg.ResolveHWDecoder): applied by the ffmpeg functions
+	// to every input whose codec it can decode, software decode for the others (FFV1 segments).
+	HWDecoder ffmpeg.HWDecoderConfig
 }
 
 // Name returns the encoder identifier.
@@ -149,7 +152,7 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		NoEnhancementGain: e.VMAFNeg,
 		VMAFCuda:          e.VMAFCUDA,
 		GPUID:             &e.NVIDIAGPUIndex,
-		HWDecoderConfig:   e.hwDecoderConfig(),
+		HWDecoderConfig:   e.HWDecoder,
 		Debug:             debug,
 		RuntimeError:      runtimeError,
 		FFMPEGStatsReport: adaptProgress(progress),
@@ -196,12 +199,12 @@ func (e *EncoderAdapter) ProbeStream(ctx context.Context, path string, debug fun
 }
 
 // CountFrames decodes the whole video stream of a media file with ffmpeg to count its frames
-// exactly, with the hardware decoder matching the encoder when the codec of the file allows it.
+// exactly, with the hardware decoder of the run when the codec of the file allows it.
 func (e *EncoderAdapter) CountFrames(ctx context.Context, path string, progress func(core.ProgressStats),
 	debug func(string), runtimeError func(error)) (int, error) {
 	frames, err := ffmpeg.CountFrames(ctx, ffmpeg.CountFramesConfig{
 		Path:              path,
-		HWDecoderConfig:   e.hwDecoderConfig(),
+		HWDecoderConfig:   e.HWDecoder,
 		Debug:             debug,
 		RuntimeError:      runtimeError,
 		FFMPEGStatsReport: adaptProgress(progress),
@@ -210,20 +213,6 @@ func (e *EncoderAdapter) CountFrames(ctx context.Context, path string, progress 
 		return 0, err
 	}
 	return frames.Nb, nil
-}
-
-// hwDecoderConfig is the hardware decoder matching the encoder. Whether the input codec can be
-// decoded by it is checked by the ffmpeg functions it is given to.
-func (e *EncoderAdapter) hwDecoderConfig() ffmpeg.HWDecoderConfig {
-	return ffmpeg.HWDecoderConfig{
-		NVDec:           e.Encoder == ffmpeg.HEVCEncoderNVEnc || e.Encoder == ffmpeg.AV1EncoderNVEnc,
-		NVDevice:        e.NVIDIAGPUIndex,
-		VAAPIDec:        e.Encoder == ffmpeg.HEVCEncoderVAAPI || e.Encoder == ffmpeg.AV1EncoderVAAPI,
-		VAAPIDevice:     e.VAAPIRendererPath,
-		D3D12Dec:        e.Encoder == ffmpeg.HEVCEncoderD3D12VA,
-		D3D12Device:     e.D3D12VAGPUIndex,
-		VideoToolboxDec: e.Encoder == ffmpeg.HEVCEncoderVideoToolbox,
-	}
 }
 
 // adaptProgress converts a core.ProgressStats callback to an ffmpeg.ProgressStats callback.

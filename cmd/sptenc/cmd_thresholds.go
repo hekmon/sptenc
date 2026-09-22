@@ -101,22 +101,8 @@ var thresholdsCommand = &cli.Command{
 		if !fileInfos.Mode().IsRegular() {
 			return ctx, errors.New("input file must be a regular file")
 		}
-		var hwDecFlags int
-		if cmd.Bool(nvdecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(vaapiDecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(d3d12DecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(videoToolboxDecFlagName) {
-			hwDecFlags++
-		}
-		if hwDecFlags > 1 {
-			return ctx, fmt.Errorf("only one hardware decode flag can be set at a time (--%s, --%s, --%s, --%s)",
-				nvdecFlagName, vaapiDecFlagName, d3d12DecFlagName, videoToolboxDecFlagName)
+		if _, err = hwDecodeFlags(cmd); err != nil {
+			return ctx, err
 		}
 		if cmd.Float64(minThresholdFlagName) >= cmd.Float64(maxThresholdFlagName) {
 			return ctx, fmt.Errorf("--%s must be strictly less than --%s", minThresholdFlagName, maxThresholdFlagName)
@@ -169,18 +155,10 @@ var thresholdsCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
-		scenesConfig := ffmpeg.ScenesDetectionConfig{
-			NVDec:           cmd.Bool(nvdecFlagName),
-			NVDevice:        cmd.Int(nvidiaGPUIndexFlagName),
-			VAAPIDec:        cmd.Bool(vaapiDecFlagName),
-			VAAPIDevice:     cmd.String(vaapiRendererPathFlagName),
-			D3D12Dec:        cmd.Bool(d3d12DecFlagName),
-			D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
-			VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
-		}
+		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
 		start := time.Now()
 		scenes, err := liveDetectScenes(ctx, cmd.StringArg("inputfile"), cmd.Float64(minThresholdFlagName),
-			stats.Format.Duration, cmd.Bool(debugFlagName), scenesConfig)
+			stats.Format.Duration, cmd.Bool(debugFlagName), requestedDecoder.ToScenesDetectionConfig())
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}

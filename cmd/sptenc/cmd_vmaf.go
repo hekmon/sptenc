@@ -94,22 +94,9 @@ var vmafCommand = &cli.Command{
 		if !distInfo.Mode().IsRegular() {
 			return ctx, errors.New("distorted file must be a regular file")
 		}
-		// Validate that at most one hardware decode flag is set
-		var hwDecFlags int
-		if cmd.Bool(nvdecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(vaapiDecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(d3d12DecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(videoToolboxDecFlagName) {
-			hwDecFlags++
-		}
-		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapi-dec, --d3d12va-dec, --videotoolbox-dec)")
+		// The decode flags must not contradict VMAF on CUDA (see ffmpeg.ResolveHWDecoder)
+		if _, err := encodeHWDecoder(cmd, ""); err != nil {
+			return ctx, err
 		}
 		// Check CUDA VMAF support if requested
 		if cmd.Bool(vmafCUDAFlagName) {
@@ -165,30 +152,16 @@ var vmafCommand = &cli.Command{
 		 * Execute
 		 */
 
-		// Build hardware decode config and warn on incompatible codecs
-		decoderCfg := ffmpeg.HWDecoderConfig{
-			NVDec:           cmd.Bool(nvdecFlagName),
-			NVDevice:        cmd.Int(nvidiaGPUIndexFlagName),
-			VAAPIDec:        cmd.Bool(vaapiDecFlagName),
-			VAAPIDevice:     cmd.String(vaapiRendererPathFlagName),
-			D3D12Dec:        cmd.Bool(d3d12DecFlagName),
-			D3D12Device:     cmd.Int(d3d12vaGPUIndexFlagName),
-			VideoToolboxDec: cmd.Bool(videoToolboxDecFlagName),
-		}
-		if decoderCfg.NVDec || decoderCfg.VAAPIDec || decoderCfg.D3D12Dec || decoderCfg.VideoToolboxDec {
-			distortedDec := ffmpeg.SelectCompatibleDecoders(ctx, distortedPath,
-				decoderCfg.NVDec, decoderCfg.VAAPIDec, decoderCfg.D3D12Dec, decoderCfg.VideoToolboxDec,
-				decoderCfg.NVDevice, decoderCfg.VAAPIDevice, decoderCfg.D3D12Device,
-			)
-			referenceDec := ffmpeg.SelectCompatibleDecoders(ctx, referencePath,
-				decoderCfg.NVDec, decoderCfg.VAAPIDec, decoderCfg.D3D12Dec, decoderCfg.VideoToolboxDec,
-				decoderCfg.NVDevice, decoderCfg.VAAPIDevice, decoderCfg.D3D12Device,
-			)
-			if !distortedDec.NVDec && !distortedDec.VAAPIDec && !distortedDec.D3D12Dec && !distortedDec.VideoToolboxDec {
-				fmt.Fprintln(bypass, "WARNING: distorted codec is not compatible with the requested hardware decoder, falling back to software decode for distorted file")
+		// Hardware decoder: NVDEC with VMAF on CUDA, the decode flags otherwise (validated in
+		// Before). Warn when a file can not be decoded by it, the ffmpeg functions fall back by
+		// themselves.
+		decoderCfg, _ := encodeHWDecoder(cmd, "")
+		if decoderCfg.Enabled() {
+			if !decoderCfg.CompatibleWith(ctx, distortedPath).Enabled() {
+				fmt.Fprintf(bypass, "WARNING: distorted codec is not compatible with %s decoding, falling back to software decode for distorted file\n", decoderCfg.Name())
 			}
-			if !referenceDec.NVDec && !referenceDec.VAAPIDec && !referenceDec.D3D12Dec && !referenceDec.VideoToolboxDec {
-				fmt.Fprintln(bypass, "WARNING: reference codec is not compatible with the requested hardware decoder, falling back to software decode for reference file")
+			if !decoderCfg.CompatibleWith(ctx, referencePath).Enabled() {
+				fmt.Fprintf(bypass, "WARNING: reference codec is not compatible with %s decoding, falling back to software decode for reference file\n", decoderCfg.Name())
 			}
 		}
 

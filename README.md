@@ -35,6 +35,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 - 🧠 **Adaptive QP search with persistent stats** - Learns from previous encodes to reduce QP search iterations for future encodings (see below)
 - ⚡ **Multi-encoder support** - HEVC (`libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va`, `hevc_videotoolbox`) and AV1 (`libsvtav1`, `av1_nvenc`, `av1_vaapi`). Use GPU encoders for fast VMAF profile prototyping, CPU encoders for the smallest final file size.
 - 🖥️ **VMAF-CUDA** - Optional CUDA-accelerated VMAF computation (requires libvmaf with CUDA support) with the `--vmaf-cuda` flag. NVDEC hardware decoding is automatically enabled alongside it when the source codec is compatible.
+- 🎞️ **Hardware decoding, even with a CPU encoder** - A hardware encoder decodes with its own GPU, `--vmaf-cuda` implies NVDEC, and `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec` bring an accelerator to a CPU encode: every decode taken away from the CPU is left to the encoder and VMAF.
 - 🚀 **Optional concurrent segment encoding** - Several segments can be searched in parallel via `--concurrent-segments` (`-C`), for the same output in less time: as many as your GPU accepts encoding sessions, or a few on a many-core CPU.
 - 🎵 **Automatic FLAC compression** - If all audio tracks are PCM, they are losslessly re-encoded to FLAC during remux to reduce file size without quality loss
 - 🎨 **Container color metadata preservation** - `color_range`, `colorspace`, `color_trc`, and `color_primaries` are probed from the source and re-injected into the output container (HDR metadata handling is still being validated)
@@ -147,6 +148,13 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 # Once happy with the profile, re-run with the default libx265 for the final smaller encode
 ```
 
+### CPU encode with the GPU decoding on the side
+```bash
+# libx265 runs on the CPU: scene detection, the master, the frame counts and the distorted side
+# of VMAF are decoded by NVDEC instead (a hardware encoder does this by itself)
+./sptenc encode video.mkv output.mkv --nvdec --vmaf-mean 93
+```
+
 ### Pre-segmented directory
 ```bash
 ./sptenc encode ./gop_dir/ output.mkv --original-file original_with_audio.mkv --vmaf-mean 95
@@ -184,7 +192,7 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 
 > Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (0–100, default 14): higher values detect fewer scenes, lower values detect more.
 >
-> Both `master`, `split`, and `vmaf` support hardware-accelerated decoding via `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec` to speed up processing.
+> **Use everything you have.** A hardware encoder decodes with its own GPU and `--vmaf-cuda` decodes with NVDEC: nothing to set. With a CPU encoder (the smallest files, out of the CPU alone), hand the decoding to whatever GPU is in the machine, integrated or Apple silicon included: `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec`. Same file out, more CPU left for the encoder. The same flags serve `master`, `split`, `thresholds` and `vmaf`. You can not get it wrong: an unsupported source codec falls back to software with a warning, a flag contradicting the encoder is refused. Only the lossless FFV1 intermediate has no hardware decoder.
 
 ## Scene Detection and Threshold Selection
 
@@ -346,7 +354,7 @@ When using a GPU encoder, you can target a specific device:
 | `--vaapi-renderer-path` | `/dev/dri/renderD128` | `hevc_vaapi`, `av1_vaapi` |
 | `--d3d12va-gpu-index` | `0` | `hevc_d3d12va` |
 
-> These flags select the GPU device for **encoding**. For hardware-accelerated **decoding** during `master`, `split`, or `vmaf`, use `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec` instead. The corresponding GPU selection flags (`--nvidia-gpu-index`, `--vaapi-renderer-path`, `--d3d12va-gpu-index`) also apply when decoding.
+> These flags select the GPU device for **encoding**, and for **decoding** as well: a hardware encoder decodes with the same device. For hardware-accelerated decoding with a CPU encoder, or during `master`, `split`, `thresholds` or `vmaf`, use `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec`; the device flags above apply to them. A decode flag contradicting the hardware encoder (or NVDEC implied by `--vmaf-cuda`) is rejected.
 
 ## Adaptive QP Search
 

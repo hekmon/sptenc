@@ -78,22 +78,8 @@ var masterCommand = &cli.Command{
 		if inputFilePath == outputFilePath {
 			return ctx, errors.New("input file and output file must be different paths")
 		}
-		// Validate that at most one hardware decode flag is set
-		var hwDecFlags int
-		if cmd.Bool(nvdecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(vaapiDecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(d3d12DecFlagName) {
-			hwDecFlags++
-		}
-		if cmd.Bool(videoToolboxDecFlagName) {
-			hwDecFlags++
-		}
-		if hwDecFlags > 1 {
-			return ctx, errors.New("only one hardware decode flag can be set at a time (--nvdec, --vaapi-dec, --d3d12va-dec, --videotoolbox-dec)")
+		if _, err := hwDecodeFlags(cmd); err != nil {
+			return ctx, err
 		}
 		return ctx, nil
 	},
@@ -123,13 +109,10 @@ var masterCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		// build optional hw decode config
-		decoderCfg := ffmpeg.SelectCompatibleDecoders(ctx, inputFilePath,
-			cmd.Bool(nvdecFlagName), cmd.Bool(vaapiDecFlagName), cmd.Bool(d3d12DecFlagName), cmd.Bool(videoToolboxDecFlagName),
-			cmd.Int(nvidiaGPUIndexFlagName), cmd.String(vaapiRendererPathFlagName), cmd.Int(d3d12vaGPUIndexFlagName),
-		)
-		if (cmd.Bool(nvdecFlagName) || cmd.Bool(vaapiDecFlagName) || cmd.Bool(d3d12DecFlagName) || cmd.Bool(videoToolboxDecFlagName)) &&
-			!decoderCfg.NVDec && !decoderCfg.VAAPIDec && !decoderCfg.D3D12Dec && !decoderCfg.VideoToolboxDec {
-			fmt.Fprintln(liveprogress.Bypass(), "WARNING: input codec is not compatible with the requested hardware decoder, falling back to software decode")
+		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
+		decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)
+		if requestedDecoder.Enabled() && !decoderCfg.Enabled() {
+			fmt.Fprintf(liveprogress.Bypass(), "WARNING: input codec is not compatible with %s decoding, falling back to software decode\n", requestedDecoder.Name())
 		}
 		// create master
 		var outputFile string
