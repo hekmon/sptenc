@@ -71,6 +71,44 @@ func NewPredictor(existingResults map[int]VMAFStats, qpMin, qpMax int, debug fun
 	return
 }
 
+// Predictor forecasts, for a QP that was not encoded, the VMAF stats record the auditor would
+// see: one monotone curve per statistic, fitted on the QPs already encoded for this segment.
+//
+// # WHY THIS EXISTS
+//
+// Once the search has bracketed the threshold (one QP known to pass, a higher one known to
+// fail), it has to pick which QP inside the bracket to encode next. Without a forecast that
+// is a blind walk. With one, interpolateCandidate asks for every untested QP of the bracket,
+// from the failing side down, and encodes the first one forecast to pass every enabled
+// threshold.
+//
+// The gain over bisecting the bracket is modest and content-dependent: the 2024 benchmark
+// below measured 30% fewer attempts on one clip, 2% to 6% fewer on two others, and 18% more
+// on a fourth searched from a cold start. It was kept because it won on the clips searched
+// with a cache, which is the production case.
+//
+// # WHAT A FORECAST IS NOT
+//
+// A forecast is a candidate, never a result. The QP it names is encoded and measured like
+// any other, and it is only kept once the next higher QP has been encoded and found failing.
+// No QP reaches the output on a prediction: the per-segment floor sptenc promises is always
+// a measured one. Do not "trust" a forecast to skip an encode.
+//
+// # WHY ONE CURVE PER STATISTIC
+//
+// The auditor validates a full record (min, percentiles, median, harmonic mean, mean) against
+// whichever thresholds the profile enables. Each statistic has its own curve against QP, so
+// each gets its own interpolator, and the forecast is validated as a whole by the same
+// auditor as a real result. No distance or score is computed: every enabled threshold must
+// pass on its own.
+//
+// # EDGE CASES
+//
+//   - Fewer than two encoded QPs: no curve can be fitted, NewPredictor fails and the search
+//     keeps walking in stddev steps instead.
+//   - Values are clamped to [0, 100] after interpolation, then adapted for the VMAF ceiling:
+//     when a known point sits at 100 the curve must not forecast the same for a lower QP as a
+//     mere plateau, see adaptCeilingValues.
 type Predictor struct {
 	qps                 []float64
 	mins                []float64
@@ -220,6 +258,46 @@ func clampVMAF(value float64) float64 {
 }
 
 /*
+	SEARCH METHOD BENCHMARK (September 2024: superseded totals, valid method choice)
+
+	What it was: a harness (search_methods.go, removed since; see commits 7962b10, cf876d2 and
+	7cad665) ran every search method on every segment of a clip, with real encodes and real
+	VMAF, and summed per method the QPs tested ("attempts", one encode plus its VMAF
+	computation) and the frames those encodes produced. Every method started from the same QP,
+	the persistent cache mean, and differed in what it did next:
+	  - quicksearch: bisect until the threshold is bracketed, then keep bisecting.
+	  - split_interpolation: jump to the range extremes to bracket, then interpolate.
+	  - quick_interpolation: bisect until bracketed, then interpolate.
+	  - stddev_quick: walk from the mean in cache-stddev steps until bracketed, then bisect.
+	  - stddev_interpolation: walk in stddev steps until bracketed, then interpolate. This is
+	    the production algorithm (see findSegmentQP), with Predictor doing the interpolation.
+	The first table is an earlier stage of the same harness: the interpolation algorithms
+	compared with each other, under two bracketing strategies ("full" and "quick"); the clip
+	and the exact strategies were not recorded.
+
+	What was held fixed: the start point. The persistent cache was read once per clip, before
+	the first segment, and every segment of the clip started from that same mean and stddev.
+	"No data for stddev" means an empty cache: mean 26, stddev 13, the same cold start as
+	today's coldStartStats. The per-segment learning of EphemeralStatsCache did not exist, so
+	nothing moved the start point from one segment to the next.
+
+	What to keep from it: the method. Fritsch-Butland needed the fewest attempts of the four
+	interpolation algorithms. A stddev start beat bisection from the same mean on all three
+	Dawn clips, cold start included. Interpolation inside the bracket beat bisection on the two
+	clips searched with a cache (492 vs 502, 839 vs 893 attempts) and lost on the cold one
+	(543 vs 459).
+
+	What not to read into it: the totals. They include what a bad start point costs on every
+	segment, which the ephemeral cache now removes after the first few segments of a run. The
+	"Manual start QP" lines are an oracle, computed after the fact by replaying the results
+	from every possible fixed start. Measured in 2026 with the ephemeral learning, the
+	production pipeline takes about 3.9 attempts per segment from a cold cache (see the
+	README).
+
+	-------------------------------------------------------------------------------
+	Interpolation algorithms compared (clip not recorded)
+	-------------------------------------------------------------------------------
+
 	Method quick_search: 1313 attempts
 	Method full_interpolation_AkimaSpline: 1365 attempts
 	Method full_interpolation_ClampedCubic: 1546 attempts

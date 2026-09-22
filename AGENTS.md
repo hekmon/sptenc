@@ -34,7 +34,7 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 - **`cmd/sptenc/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes live progress UI and statistical decision logic.
 - **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.
-- **`core/predictor.go`** — Monotonic interpolation with empirical ceiling adaptation. Contains benchmark data in comments proving method selection.
+- **`core/predictor.go`** — Forecasts the VMAF record of an untested QP from the encoded ones, so the search picks its next encode inside the bracket instead of walking blind. A forecast is never accepted as a result. The 2024 benchmark in its comments proves the choice of Fritsch-Butland; its attempt totals predate the ephemeral cache and are not the current cost.
 - **`core/cache_persistent.go`** and **`core/cache_ephemeral.go`** — Persistent QP history with profile isolation, plus in-memory ephemeral stats for the current encode run.
 - **`pipeline/encoder.go`** — The **adapter** that maps `core.SegmentEncoder` to concrete ffmpeg encoder invocations. Contains the explicit per-encoder switch.
 - **`ffmpeg/hevc.go` and `ffmpeg/av1.go`** — Encoder wrappers for libx265, NVENC, VAAPI, D3D12VA, VideoToolbox, SVT-AV1. `libaom-av1` exists in the adapter but is blocked from CLI selection as too slow for iterative QP search.
@@ -67,7 +67,7 @@ Segments are encoded **sequentially by default**, but **optional concurrency** i
 
 Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `core/qpsearch.go`, with worker-scoped callbacks so the UI can attribute progress to individual workers.
 
-**Implication:** The default remains sequential: the right value depends on the hardware (GPU session limits, CPU cores, memory) and is the user's to pick. Naive goroutine-per-segment approaches would fail on hardware limits. Segments searched together can not learn from each other through the ephemeral cache: the first ones of a run need a few more attempts, a fixed cost. `batchsearch` pays it once rather than once per candidate: it wraps the persistent cache in a `core.EphemeralStatsCache` for the whole run, every candidate search wraps that one and feeds it back its QPs, so a candidate starts from what the previous ones found on this very content. Only the winner reaches the persistent cache.
+**Implication:** The default remains sequential: the right value depends on the hardware (GPU session limits, CPU cores, memory) and is the user's to pick. Naive goroutine-per-segment approaches would fail on hardware limits. Segments searched together can not learn from each other through the ephemeral cache: the first wave of a search starts from the seed alone, a fixed cost paid while the seed is wrong. In `batchsearch` only the first candidate pays it: the command wraps the persistent cache in a `core.EphemeralStatsCache` for the whole run, every candidate search wraps that one and feeds it back its QPs, so the next candidates start from what the previous ones found on this very content (see Cache layering below). Only the winner reaches the persistent cache.
 
 ### Explicit per-encoder switches
 
@@ -101,15 +101,19 @@ Variable frame rate (VFR) content is rejected because VMAF requires frame-exact 
 
 ### Cache isolation
 
-Stats are stored per `(encoder, vmaf_profile, optional_cache_profile)`. The filename is a Base64 encoding of all threshold values + encoder + profile name. This is unambiguous and filesystem-safe across Windows/Linux/macOS.
+Stats are stored per `(encoder, vmaf_model, vmaf_profile, optional_cache_profile)`. The filename is the encoder name, the VMAF model (4K and NEG variants have their own), a Base64 encoding of all threshold values, and the optional profile name. This is unambiguous and filesystem-safe across Windows/Linux/macOS.
 
 Changing any VMAF threshold value by even 0.1 starts a fresh cache. This is correct — different thresholds require fundamentally different QP distributions.
 
 ### Cache layering: one persistent cache, ephemeral caches on top
 
-Two cache types live in `core/`, and the ephemeral one is instantiated in two different places. Read this before touching any of them: the layering is not visible from any single file.
+Two cache types live in `core/`, and the ephemeral one is instantiated in two different places. Read this before touching any of them: the layering is not visible from any single file, and neither is the loop it forms with the search.
 
-**`core.StatsCacheHistory`** (`core/cache_persistent.go`) is the on-disk cache described above. It holds one entry per past encode job (mean QP, stddev, weight = number of segments), deduplicated, and aggregates them as runs weighted by their segment count. It is written once per job by `cmd/`: `encode` stores its results, `batchsearch` stores only the winning candidate (the other candidates are the same content encoded again and would over-represent that file), plus the final CPU encode on that encoder's own cache. Nothing in `core/` writes to it.
+**The cache and the search are one feedback loop.** The search reads two numbers when it starts a segment: it encodes the mean first, then walks away from it in stddev-sized steps until it has bracketed the threshold (one QP passing, a higher one failing), then lets the predictor pick which QP inside the bracket to encode next. Every stddev of error in the mean is one more encode before the bracket closes. When the segment is done, its final QP goes back into the cache and moves both numbers for the next segment: the mean at once, the stddev from the second QP on (the base's spread and the spread of the run's own QPs, averaged with the same weights as the mean). So the search is only as good as the mean it starts from, and the mean is only right if it tracks this file rather than history. That is the whole reason for the seeding rule below.
+
+A worked example, with the step logic of `findSegmentQP`. A segment needs QP 22 (22 passes, 23 fails). Starting from history, mean 30 and stddev 4: 30 fails, 26 fails, 22 passes, the bracket [22, 26] is closed after three encodes, then one or two forecast-picked encodes (24 then 23, or 23 directly) confirm that 23 fails. Four or five attempts. Starting from a run cache that already learned this file, mean 23 and stddev 3: 23 fails, 20 passes, the bracket [20, 23] is closed after two, one forecast-picked encode lands on 22 and 23 is already known to fail. Three attempts. The difference is paid on every segment for as long as the mean is wrong, which is why the mean must be the file's within a few segments.
+
+**`core.StatsCacheHistory`** (`core/cache_persistent.go`) is the on-disk cache described above. It holds one entry per past encode job (mean QP, stddev, weight = number of segments), deduplicated, and aggregates them as runs weighted by their segment count. It is written once per job by `cmd/`: `encode` stores its results, `batchsearch` stores only the winning candidate (the other candidates are the same content encoded again and would over-represent that file), plus the final CPU encode on that encoder's own cache. The search itself never writes to it: `FindAllSegmentsQP` only reads.
 
 **`core.EphemeralStatsCache`** (`core/cache_ephemeral.go`) is in-memory only and wraps any `StatsCache`, itself included. It appears at two levels:
 
@@ -118,16 +122,16 @@ Two cache types live in `core/`, and the ephemeral one is instantiated in two di
 
 **The seeding rule: a base weighs one ghost segment, whatever it holds.** When an ephemeral cache is created, its base's `Snapshot` (mean, stddev) counts as a single segment in the ephemeral statistics, be the base a persistent cache of thousands of segments or another ephemeral cache. The base is a starting point, not knowledge about this content: the persistent cache aggregates other files, whose mean is theirs. The run's own segments are the only measurement of this file, so they must take over as soon as they exist: after one segment the mean is halfway to it, after nine the base is noise.
 
-This was measured (2026-09-23, real `FindAllSegmentsQP` over synthetic segments with curved responses, 5 seeds, concurrency 1 and 6) after a first design seeded the base with its real weight:
+This was measured (2026-09-22, real `FindAllSegmentsQP` over synthetic segments with curved responses, 5 seeds, concurrency 1 and 6) after a first design seeded the base with its real weight:
 - Cache mean 6 QP away from the file's: seeding with the base's weight cost +0.7 attempt per segment (up to +2.1 at 12 QP away, +67% with a tight cache stddev). A weight of one cost +0.02 over a cold start.
 - Cache mean matching the file: all weights within 0.03 attempt per segment; the base's full weight gained 0.07 at most.
-- What the persistent cache buys over a cold start is a fixed cost on the first segments (and on the whole first wave with `-C`): about one attempt on each of the first three or four segments when the content sits far from the QP range midpoint, nothing when it sits near it. On a 160-segment episode that is around 2% of the attempts, on a 6-segment clip 20% to 30%.
+- What the persistent cache buys over a cold start is a fixed cost on the first segments (and on the whole first wave with `-C`): about one attempt on each of the first three or four segments when the content sits far from the QP range midpoint, nothing when it sits near it. On a 160-segment episode that is around 2% of the attempts, on a 6-segment clip up to a third.
 
 **Implications:**
 - `StatsCache.Snapshot` returns no weight, on purpose: nothing may read one. Do not add it back to give a "solid" cache more say, that is the rejected design.
 - The between-run weighting inside the persistent file (runs weighted by segment count) is a different thing and stays: it is how files are averaged with each other on disk, not how history is weighed against the current run.
 - Do not invest in richer persistent statistics expecting large gains: the file overrides them within a handful of segments. The persistent cache is cheap insurance for the first segments, and its main value is being a better guess than the range midpoint.
-- Segments searched concurrently can not learn from each other until they finish: the first `-C` segments all start from the seed. This is the fixed cost mentioned in the concurrency section, and why `batchsearch` pays it once per run rather than once per candidate.
+- Segments searched concurrently can not learn from each other until they finish: the first `-C` segments all start from the seed. That costs attempts only while the seed is wrong. The first candidate of a `batchsearch` pays it on its first wave; the next candidates seed from the run cache, already on this content, so their first wave starts in the right place.
 
 ### Decoupling architecture
 
