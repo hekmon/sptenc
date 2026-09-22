@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hekmon/sptenc/core"
@@ -350,8 +351,9 @@ type LiveQPSearch struct {
 	segmentsStatusLine       []*liveprogress.CustomLine
 	segmentsCandidates       [][]string
 	segmentsCandidatesAccess []sync.Mutex
-	// File analysis
+	// File analysis (the bar is in time, the frames counted so far are shown next to it)
 	analysisProgressBars []*liveprogress.Bar
+	analysisFrames       []atomic.Int64
 	// Encode
 	encodeProgressBars []*liveprogress.Bar
 	// VMAF
@@ -364,6 +366,7 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 	to.segmentsCandidates = make([][]string, to.Concurrency)
 	to.segmentsCandidatesAccess = make([]sync.Mutex, to.Concurrency)
 	to.analysisProgressBars = make([]*liveprogress.Bar, to.Concurrency)
+	to.analysisFrames = make([]atomic.Int64, to.Concurrency)
 	to.encodeProgressBars = make([]*liveprogress.Bar, to.Concurrency)
 	to.vmafProgressBars = make([]*liveprogress.Bar, to.Concurrency)
 	to.globalProgressBar = liveprogress.SetMainLineAsBar(
@@ -496,6 +499,7 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, duration time.Durat
 		liveprogress.RemoveBar(to.analysisProgressBars[workerID])
 		// no need to nullify we are about to reset it
 	}
+	to.analysisFrames[workerID].Store(0)
 	to.analysisProgressBars[workerID] = liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(duration)),
 		liveprogress.WithMultiplyRunes(),
@@ -509,13 +513,14 @@ func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, duration time.Durat
 		}),
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" | %d frames", bar.Current())
+			return fmt.Sprintf(" | %d frames", to.analysisFrames[workerID].Load())
 		}),
 	)
 }
 
 func (to *LiveQPSearch) OnSegmentAnalysisProgress(workerID int, stats core.ProgressStats) {
 	if to.analysisProgressBars[workerID] != nil {
+		to.analysisFrames[workerID].Store(int64(stats.CurrentFrame))
 		to.analysisProgressBars[workerID].CurrentSet(uint64(stats.Time))
 	}
 }
