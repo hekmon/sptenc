@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -166,17 +167,15 @@ func (sch *StatsCacheHistory) AddRun(qps []int) (mean, stddev float64, err error
 	return
 }
 
-// LoadRunStats reads a cache file from disk and returns the decoded run statistics.
+// LoadRunStats reads a cache file from disk and returns the decoded run statistics, the way an
+// encode reads it (see decodeRunStats).
 func LoadRunStats(path string) ([]RunStats, error) {
-	data, err := os.ReadFile(path)
+	fd, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	var runs []RunStats
-	if err := json.Unmarshal(data, &runs); err != nil {
-		return nil, err
-	}
-	return runs, nil
+	defer fd.Close()
+	return decodeRunStats(fd)
 }
 
 // LoadStats reads the cache from disk. A missing file is treated as an empty cache.
@@ -190,7 +189,19 @@ func (sch *StatsCacheHistory) loadStats() (err error) {
 		return
 	}
 	defer fd.Close()
-	return json.NewDecoder(fd).Decode(&sch.stats)
+	sch.stats, err = decodeRunStats(fd)
+	return
+}
+
+// decodeRunStats decodes the content of a cache file. Every reader of cache files goes through it:
+// the cache command tells the user which files an encode can not use (LoadRunStats), it must
+// agree with the encode (loadStats) on what is readable. Only the first JSON value is read,
+// anything after it is ignored, then dropped by the next save.
+func decodeRunStats(r io.Reader) (runs []RunStats, err error) {
+	if err = json.NewDecoder(r).Decode(&runs); errors.Is(err, io.EOF) {
+		err = errors.New("empty cache file")
+	}
+	return
 }
 
 // SaveStats writes the current cache to disk as indented JSON atomically.

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -358,6 +359,55 @@ func TestStatsCacheHistory_FileCorruption(t *testing.T) {
 	_, err = NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
 	if err == nil {
 		t.Fatal("expected error loading corrupted cache file, got nil")
+	}
+}
+
+// TestLoadRunStats_AgreesWithEncode checks that LoadRunStats, which the cache command uses to tell
+// the user which cache files an encode can not use, reads every file the way an encode does.
+func TestLoadRunStats_AgreesWithEncode(t *testing.T) {
+	profile, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, 93, VMAFOffValue)
+	if err != nil {
+		t.Fatalf("failed to create profile: %v", err)
+	}
+	tests := []struct {
+		name     string
+		content  string
+		wantErr  string // empty when both must load it
+		wantRuns int
+	}{
+		{name: "valid", content: `[{"mean":30,"stddev":4,"weight":10}]`, wantRuns: 1},
+		// A save interrupted by another writer, before saves went through a temporary file
+		{name: "trailing data", content: `[{"mean":30,"stddev":4,"weight":10}]` + "\n" + `,"weight":12}]`, wantRuns: 1},
+		{name: "null", content: `null`},
+		{name: "empty", content: ``, wantErr: "empty cache file"},
+		{name: "whitespace only", content: "\n", wantErr: "empty cache file"},
+		{name: "truncated", content: `[{"mean": 30,`, wantErr: "unexpected EOF"},
+		{name: "not json", content: `not json`, wantErr: "invalid character"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, computeCacheStatsFileName("mockenc", "", profile, ""))
+			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
+				t.Fatalf("failed to write cache file: %v", err)
+			}
+			runs, listErr := LoadRunStats(path)
+			sch, encodeErr := NewStatsCacheHistory(tmpDir, "mockenc", 0, 51, "", profile, "")
+			for name, err := range map[string]error{"LoadRunStats": listErr, "NewStatsCacheHistory": encodeErr} {
+				if tt.wantErr == "" && err != nil {
+					t.Errorf("%s: unexpected error: %v", name, err)
+				}
+				if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+					t.Errorf("%s: error = %v, want one containing %q", name, err, tt.wantErr)
+				}
+			}
+			if tt.wantErr == "" {
+				if len(runs) != tt.wantRuns || len(sch.stats) != tt.wantRuns {
+					t.Errorf("LoadRunStats read %d runs, NewStatsCacheHistory %d, want %d", len(runs), len(sch.stats), tt.wantRuns)
+				}
+			}
+		})
 	}
 }
 

@@ -94,7 +94,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | `remux` | `r` | Tooling | Replace the video track of a file with a new one without re-encoding |
 | `vmaf` | `v` | Tooling | Compute VMAF between a reference and a distorted video |
 | `thresholds` | `t` | Tooling | Preview candidate thresholds and their scene distributions without encoding |
-| `cache` | — | Tooling | Inspect and clear persistent QP statistics cache |
+| `cache` | — | Tooling | List the persistent QP statistics cache entries and delete them by index |
 | `batchsearch` | `bs` | Advanced | Search for the scene threshold that yields the smallest passing file by encoding multiple candidates |
 
 ## Input Requirements
