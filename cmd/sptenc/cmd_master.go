@@ -21,14 +21,19 @@ var masterCommand = &cli.Command{
 	Aliases:  []string{"m"},
 	Category: "Tooling",
 	Usage:    "Create an intermediate lossless video master that can be cut at any frame",
-	Description: "Most video files use Group of Pictures (GoP) encoding, which mixes I, P, and B frames.\n\n" +
+	Description: "Most video files use Group of Pictures (GoP) encoding: only the keyframes (I-frames) are\n" +
+		"self-contained, P and B frames are stored as differences from the frames they reference.\n\n" +
 		"THE PROBLEM\n" +
-		"  * Cuts can only happen on I-frames (keyframes).\n" +
-		"  * Open GoPs make things worse: some B and P frames depend on data outside their own group,\n" +
-		"    so cutting at an I-frame can still silently drop surrounding frames.\n\n" +
+		"  * Without re-encoding, a video can only be cut on a keyframe: a scene boundary falling between\n" +
+		"    two keyframes can not be cut where it is.\n" +
+		"  * Open GoPs make things worse: some frames reference frames of another group, which a cut, even\n" +
+		"    on a keyframe, can leave in a different segment. These frames can not be decoded anymore and\n" +
+		"    are dropped at decoding: every cut shortens the video a little more, a drift that accumulates\n" +
+		"    (against the audio, for instance).\n\n" +
 		"THE SOLUTION\n" +
 		"This command re-encodes the source into a lossless all-intra master using the FFV1 codec.\n" +
-		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss.\n\n" +
+		"Every frame becomes self-contained, so you can cut precisely at any frame with no quality loss\n" +
+		"and no dropped frame.\n\n" +
 		"PIXEL FORMAT\n" +
 		"FFV1 is mathematically lossless, but the master is stored as 10-bit 4:2:0, the pixel format of\n" +
 		"every sptenc output. For 8-bit and 10-bit 4:2:0 sources, by far the most common ones, the master\n" +

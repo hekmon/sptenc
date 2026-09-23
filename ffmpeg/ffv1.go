@@ -33,6 +33,8 @@ type FFV1VideoMasterConfig struct {
 
 // FFV1VideoMaster encodes the input video file to FFV1 with intra frames and 10-bit YUV420P.
 // Only the first video stream is kept; all other streams are dropped.
+// Intra frames only is what lets Segment cut at any frame: see Segment for why the source can
+// not be cut directly.
 func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err error) {
 	// Validate inputs
 	if config.InputFilePath == "" {

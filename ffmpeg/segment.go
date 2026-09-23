@@ -35,8 +35,14 @@ type SegmentConfig struct {
 }
 
 // Segment splits a video into segments at the provided frames using ffmpeg's segment muxer.
-// A cut can only happen on a keyframe (the muxer waits for the next one otherwise): cuts are
-// exact on an all-intra master, where every frame is a keyframe.
+// It stream copies, so the input must be an all-intra master (see FFV1VideoMaster): every frame
+// is a keyframe there, and every cut is exact. Cutting the source directly fails two ways:
+//   - a cut can only happen on a keyframe: the muxer waits for the next one otherwise;
+//   - with open GOPs, even a cut on a keyframe loses frames: some frames reference frames of
+//     another group, which the cut can leave in a different segment, so the decoder drops them
+//     and every cut shortens the video a little more, a drift against the audio that
+//     accumulates (measured with ffmpeg on x265 and x264 open GOP clips: up to 4 frames lost
+//     per cut, 0.66 s after 4 cuts once the x265 segments were re-encoded and merged).
 func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
