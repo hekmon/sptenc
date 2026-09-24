@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 
 	"al.essio.dev/pkg/shellescape"
@@ -192,8 +193,15 @@ var vmafCommand = &cli.Command{
 			return fmt.Errorf("frame count mismatch: reference has %d frames, distorted has %d frames", refFrames, distFrames)
 		}
 
-		// Validate frame rates match (same -r will be forced on both inputs)
-		if videoStream.RFrameRate != distVideoStream.RFrameRate {
+		// Validate frame rates match (the reference's -r is forced on both inputs). They are
+		// compared up to Matroska's rounding: sptenc's output of a 59.94 fps source that is not
+		// Matroska declares 19001/317 where the source declares 60000/1001, the same rate (see
+		// core.SameFrameRate), and refusing it made its own output impossible to check.
+		sameRate, err := core.SameFrameRate(videoStream.RFrameRate, distVideoStream.RFrameRate)
+		if err != nil {
+			return fmt.Errorf("failed to compare the frame rates: %w", err)
+		}
+		if !sameRate {
 			return fmt.Errorf("frame rate mismatch: reference is %s fps, distorted is %s fps", videoStream.RFrameRate, distVideoStream.RFrameRate)
 		}
 
