@@ -12,6 +12,7 @@ import (
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/hekmon/sptenc/core"
+	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/urfave/cli/v3"
 )
 
@@ -139,6 +140,7 @@ var concatCommand = &cli.Command{
 			totalSize         int64
 			totalDuration     time.Duration
 			segmentsDurations = make([]time.Duration, len(segmentsPaths))
+			segmentsStats     = make([]ffmpeg.FFProbeStats, len(segmentsPaths))
 		)
 		fmt.Fprintln(bypass, "Counting the frames of each file...")
 		for i, path := range segmentsPaths {
@@ -151,6 +153,7 @@ var concatCommand = &cli.Command{
 			if probeErr != nil {
 				return fmt.Errorf("failed to probe %s: %w", shellescape.Quote(filepath.Base(path)), probeErr)
 			}
+			segmentsStats[i] = stats
 			videoStream := stats.VideoTrack()
 			if videoStream == nil {
 				return fmt.Errorf("no video stream found in %s", shellescape.Quote(filepath.Base(path)))
@@ -170,10 +173,15 @@ var concatCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\t%d video files with a total duration of %s and a total size of %s\n",
 			len(segmentsPaths), totalDuration.Round(time.Millisecond), cunits.ImportInBytes(float64(totalSize)),
 		)
+		// The video timestamps are snapped to the frame grid when the files allow it
+		frameRate, whyNotSnapped := concatSnapFrameRate(segmentsPaths, segmentsStats)
+		if whyNotSnapped != "" {
+			fmt.Fprintf(bypass, "\tVideo timestamps not snapped to a frame grid: %s\n", whyNotSnapped)
+		}
 
 		// concat
 		start := time.Now()
-		if err = liveConcatDuration(ctx, workingDir, outputPath, segmentsPaths, segmentsDurations, totalDuration, cmd.Bool(debugFlagName)); err != nil {
+		if err = liveConcatDuration(ctx, workingDir, outputPath, segmentsPaths, segmentsDurations, frameRate, totalDuration, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to concatenate segments: %w", err)
 		}
 		duration := time.Since(start)
@@ -192,4 +200,52 @@ var concatCommand = &cli.Command{
 
 		return
 	},
+}
+
+// concatSnapFrameRate returns the frame rate the video timestamps of files concatenated in
+// that order can be snapped to (see ffmpeg.Concat), or why they can not be.
+//
+// # WHY THE CONCAT COMMAND DOES NOT ALWAYS SNAP
+//
+// The snap moves every video frame onto one frame grid starting at 0. The encode pipeline
+// knows its segments are on one: cut from the same master, at the same frame rate, video only.
+// The concat command is given any files, and for two kinds of them the snap corrupts the
+// output instead of fixing it (both measured):
+//   - Files at different frame rates have no grid in common: a 23.976 fps file followed by a
+//     25 fps one got frames sharing the same timestamp.
+//   - A file whose video starts after its other streams is placed by its first stream: its
+//     frames are off the grid by the gap, and the snap moved them by up to half a frame
+//     against the audio (20 ms for a video starting 22 ms after its audio).
+//
+// Such files are merged as the demuxer places them, as before the snap existed: frames up to
+// 1 ms off.
+//
+// # EDGE CASES
+//
+//   - A start time ffprobe can not give (N/A) can not be compared: no snap.
+//   - A file whose frames do not follow its declared frame rate is not detected, no frame is
+//     decoded here. Its duration is already wrong in that case: it is computed from its
+//     number of frames and its declared frame rate.
+func concatSnapFrameRate(paths []string, stats []ffmpeg.FFProbeStats) (frameRate, whyNot string) {
+	for i := range stats {
+		name := shellescape.Quote(filepath.Base(paths[i]))
+		videoStream := stats[i].VideoTrack()
+		if videoStream == nil {
+			return "", fmt.Sprintf("%s has no video stream", name)
+		}
+		if i == 0 {
+			frameRate = videoStream.RFrameRate
+		} else if videoStream.RFrameRate != frameRate {
+			return "", fmt.Sprintf("%s is at %s fps, %s at %s fps",
+				shellescape.Quote(filepath.Base(paths[0])), frameRate, name, videoStream.RFrameRate)
+		}
+		var fileStart string
+		if stats[i].Format != nil {
+			fileStart = stats[i].Format.StartTime
+		}
+		if videoStream.StartTime == "" || videoStream.StartTime == "N/A" || videoStream.StartTime != fileStart {
+			return "", fmt.Sprintf("the video of %s starts at %s s, the file at %s s", name, videoStream.StartTime, fileStart)
+		}
+	}
+	return
 }
