@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -85,6 +86,20 @@ type QPSearchConfig struct {
 	// encodes on many-core machines (a single encode does not keep them fully busy), at the
 	// cost of memory.
 	NbConcurrentSegments int
+	// SourceFrameRate is the frame rate of the file the segments were cut from (through its
+	// master), as ffprobe writes it, when known. Empty, the rate the segments declare is used.
+	// Every segment must declare the same rate up to Matroska's rounding (see SameFrameRate),
+	// and the results carry the source's. The segments are Matroska files: at 59.94 fps (and at
+	// any rate whose exact fraction has a term above 30000) they declare an approximation,
+	// 19001/317 for 60000/1001, whose grid drifts from the exact one by 0.19 ms per hour, while
+	// a master made from a source that is not Matroska is numbered at the exact rate. Concat
+	// durations and timestamps built on the approximation put some frames 1 ms off the master
+	// (one in 60 from the start at 59.94 fps, measured), the ones built on the source's rate
+	// put none. The encoders keep numbering frames at the rate they read: within a segment the
+	// grids drift apart by 0.9 ns per frame at 59.94 fps and 3.2 ns at 119.88 (0.19 and 1.4 ms
+	// per hour), which the snap of the concat corrects while it stays under half a frame (8.3
+	// and 4.2 ms), along with the frames rounding the other way.
+	SourceFrameRate string
 
 	// ephemeral holds the in-memory stats accumulator for this encode.
 	// It is set internally by FindAllSegmentsQP and discarded after the search.
@@ -101,8 +116,10 @@ type QPSearchResults struct {
 	// EncodedSegmentsPaths): the source segment was decoded to count them, and its encode
 	// was checked to hold as many.
 	SegmentsFrames []int
-	// FrameRate is the frame rate declared by the segments, as ffprobe writes it ("24000/1001").
-	// All the segments have the same one: the search fails on the first that differs.
+	// FrameRate is the frame rate of the segments, as ffprobe writes it ("24000/1001"): the
+	// source's when QPSearchConfig.SourceFrameRate is given, the one the segments declare
+	// otherwise. All the segments declare the same one: the search fails on the first that
+	// differs.
 	FrameRate string
 	// GlobalWeightedQP is the average QP across all segments, weighted by each segment's frame count.
 	GlobalWeightedQP float64
@@ -196,6 +213,50 @@ func FramesDuration(frames int, frameRate string) (duration time.Duration, err e
 	return time.Duration(micros) * time.Microsecond, nil
 }
 
+// frameRateTolerance is how far apart, relatively, two frame rates can be and still be the
+// same one, see SameFrameRate.
+const frameRateTolerance = 1e-4
+
+// SameFrameRate reports whether a and b, written as ffprobe writes r_frame_rate ("24000/1001",
+// "25"), are the same frame rate up to what Matroska does to it.
+//
+// # WHY NOT EQUALITY
+//
+// Matroska stores the frame duration in whole nanoseconds, and ffmpeg reads it back as the
+// closest fraction whose terms do not exceed 30000: a rate whose exact fraction has a larger
+// term comes back approximated. 60000/1001 (59.94 fps) comes back as 19001/317, 120000/1001
+// (119.88 fps) as 29011/242, 30 fps written as 1000000/33333 as 30/1 (measured). The master
+// and the segments are Matroska files: from a source that is not, they declare the
+// approximation while the source declares the exact rate. The two are the same rate, and the
+// source's is the right one (see QPSearchConfig.SourceFrameRate).
+//
+// # WHY 1e-4
+//
+// The tolerance must accept Matroska's approximations and reject the closest distinct usual
+// rates. A fraction with terms up to 30000 lies within about 1/60000 of any rate, relatively
+// (1.7e-5; 1.0e-5 measured for 1000000/33333 read as 30/1, which 1e-5 refused), and the
+// closest distinct usual rates are 1000/1001 apart (23.976 and 24 fps: 1e-3). 1e-4 leaves a
+// factor 6 on one side and 10 on the other.
+//
+// # EDGE CASES
+//
+//   - Below 5 fps and from 1000 fps, ffmpeg does not take the frame rate of a Matroska file
+//     from its frame duration but guesses it from the timestamps: the segments of a 5000/1001
+//     source declared 15000/1001 (measured). Not the same rate: the search refuses them when
+//     given the source's rate, where it used to produce a broken output.
+func SameFrameRate(a, b string) (same bool, err error) {
+	aNum, aDen, err := parseFrameRateFraction(a)
+	if err != nil {
+		return false, fmt.Errorf("invalid frame rate %q: %w", a, err)
+	}
+	bNum, bDen, err := parseFrameRateFraction(b)
+	if err != nil {
+		return false, fmt.Errorf("invalid frame rate %q: %w", b, err)
+	}
+	aRate, bRate := float64(aNum)/float64(aDen), float64(bNum)/float64(bDen)
+	return math.Abs(aRate-bRate) <= frameRateTolerance*bRate, nil
+}
+
 // parseFrameRateFraction parses a frame rate written as "num/den" or "num" (den 1) into
 // positive integers.
 func parseFrameRateFraction(s string) (num, den int64, err error) {
@@ -245,6 +306,12 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	if config.Encoder == nil {
 		err = fmt.Errorf("Encoder is nil")
 		return
+	}
+	if config.SourceFrameRate != "" {
+		if _, _, err = parseFrameRateFraction(config.SourceFrameRate); err != nil {
+			err = fmt.Errorf("invalid source frame rate %q: %w", config.SourceFrameRate, err)
+			return
+		}
 	}
 	// Prepare
 	var (
@@ -353,6 +420,10 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	if err = workers.Wait(); err != nil {
 		return
 	}
+	if config.SourceFrameRate != "" {
+		// every segment was checked against it (findSegmentQP)
+		results.FrameRate = config.SourceFrameRate
+	}
 	results.GlobalWeightedQP = float64(segmentWeights) / float64(results.TotalSegmentsFrames)
 	return
 }
@@ -369,6 +440,20 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	}
 	duration = videoTrack.Duration
 	frameRate = videoTrack.RFrameRate
+	// Before any encode: a segment whose frame rate is not its source's is refused here (a
+	// Matroska file below 5 fps, whose rate ffmpeg guesses, a directory mixing segments of
+	// different files)
+	if config.SourceFrameRate != "" {
+		var same bool
+		if same, err = SameFrameRate(config.SourceFrameRate, frameRate); err != nil {
+			return
+		}
+		if !same {
+			err = fmt.Errorf("the segment declares a frame rate of %s while its source is at %s: its frames can not be put back on the source's frame grid",
+				frameRate, config.SourceFrameRate)
+			return
+		}
+	}
 	// Abort if frame count is 0 or negative
 	totalFrames := videoTrack.NbReadFrames
 	if totalFrames <= 0 {

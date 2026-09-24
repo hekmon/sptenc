@@ -554,7 +554,7 @@ var batchsearchCommand = &cli.Command{
 
 			// Step 3.C - QP search on this candidate scenes
 			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(
-				ctx, segmentsPaths, candidateWorkdir, totalDuration, vmafAuditor, runCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+				ctx, segmentsPaths, candidateWorkdir, totalDuration, videoStream.RFrameRate, vmafAuditor, runCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("candidate %s: %w", candidateStr, err)
 			}
@@ -681,7 +681,7 @@ var batchsearchCommand = &cli.Command{
 			// Run QP search with final encoder
 			// Not --concurrent-segments: see finalConcurrentSegmentsFlagName
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
-				vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Int(finalConcurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+				videoStream.RFrameRate, vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Int(finalConcurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}

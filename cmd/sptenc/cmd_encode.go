@@ -322,6 +322,7 @@ var encodeCommand = &cli.Command{
 			totalDuration     time.Duration
 			videoStream       *ffmpeg.FFProbeBinaryStream
 			sourceTotalFrames int
+			sourceFrameRate   string // see core.QPSearchConfig.SourceFrameRate
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
@@ -345,6 +346,7 @@ var encodeCommand = &cli.Command{
 			if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 				return
 			}
+			sourceFrameRate = videoStream.RFrameRate
 			totalDuration = sourceStats.Format.Duration
 			// Detect scenes on the original file to take advantage of hw decoding
 			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
@@ -412,6 +414,23 @@ var encodeCommand = &cli.Command{
 				err = fmt.Errorf("Failed to probe segment file: %w", err)
 				return
 			}
+			// The segments take the frame rate of the original file when it is theirs up to
+			// Matroska's rounding (see core.QPSearchConfig.SourceFrameRate). The original can
+			// also be another version of the content, only there for its audio and subtitles
+			// (segments cut from a copy converted to another frame rate): its rate is not used
+			// then, as before.
+			if segmentVideoStream := sourceStats.VideoTrack(); segmentVideoStream != nil {
+				originalStats, probeErr := getStreamsInfos(ctx, cmd.String(originalFileFlagName), cmd.Bool(debugFlagName))
+				if probeErr == nil && originalStats.VideoTrack() != nil {
+					originalFrameRate := originalStats.VideoTrack().RFrameRate
+					if same, _ := core.SameFrameRate(originalFrameRate, segmentVideoStream.RFrameRate); same {
+						sourceFrameRate = originalFrameRate
+					} else if cmd.Bool(debugFlagName) {
+						fmt.Fprintf(bypass, "DEBUG: the original file is at %s fps, the segments at %s fps: the segments' frame rate is kept\n",
+							originalFrameRate, segmentVideoStream.RFrameRate)
+					}
+				}
+			}
 			// Calculate total duration of all segments for accurate progress bar
 			fmt.Fprintln(bypass, "Calculating total duration of segments...")
 			if totalDuration, err = getSegmentsTotalDuration(ctx, segmentsPaths, cmd.Bool(debugFlagName)); err != nil {
@@ -444,7 +463,7 @@ var encodeCommand = &cli.Command{
 
 		// Step 2 - Process segments
 		results, encodedSegmentsMerged, err := processSegments(ctx, segmentsPaths, workingDir, totalDuration,
-			vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+			sourceFrameRate, vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to encode segments: %w", err)
 			return
@@ -604,7 +623,7 @@ var encodeCommand = &cli.Command{
 
 // processSegments runs QP search on the given segments and concatenates the encoded results.
 func processSegments(ctx context.Context, segmentsPaths []string, workingDir string, totalDuration time.Duration,
-	vmafAuditor core.VMAFChecker, statsCache core.StatsCache, encoder core.SegmentEncoder, concurrency int, debug bool) (
+	sourceFrameRate string, vmafAuditor core.VMAFChecker, statsCache core.StatsCache, encoder core.SegmentEncoder, concurrency int, debug bool) (
 	results core.QPSearchResults, encodedSegmentsMerged string, err error) {
 	bypass := liveprogress.Bypass()
 	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
@@ -631,6 +650,7 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 			KeepInvalidQP:        debug,
 			Encoder:              encoder,
 			NbConcurrentSegments: concurrency,
+			SourceFrameRate:      sourceFrameRate,
 		},
 	)
 	if err != nil {

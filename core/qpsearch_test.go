@@ -34,6 +34,7 @@ type mockEncoder struct {
 	probeCallIdx  int
 	countErr      error
 	counts        map[string]int // what CountFrames returns for each file, recorded by ProbeStream
+	frameRate     string         // declared by the default probe result (24/1 when empty)
 	validateQP    bool
 }
 
@@ -113,6 +114,9 @@ func (m *mockEncoder) ProbeStream(_ context.Context, path string, _ func(string)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	res := VideoStream{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "24/1", Height: 1080, Duration: time.Minute}
+	if m.frameRate != "" {
+		res.RFrameRate = m.frameRate
+	}
 	switch {
 	case m.probeCallIdx < len(m.probeResults):
 		res = m.probeResults[m.probeCallIdx]
@@ -1968,5 +1972,119 @@ func TestFindAllSegmentsQP_FrameRateMismatch(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "frame rate") {
 		t.Fatalf("expected a frame rate mismatch error, got %v", err)
+	}
+}
+
+func TestSameFrameRate(t *testing.T) {
+	tests := []struct {
+		a, b    string
+		same    bool
+		wantErr bool
+	}{
+		{"24000/1001", "24000/1001", true, false},
+		{"25", "25/1", true, false},
+		// what Matroska gives back for 59.94 and 119.88 fps, and for 30 fps written in
+		// microseconds (measured): 5e-8, 4e-7 and 1.0e-5 away
+		{"60000/1001", "19001/317", true, false},
+		{"120000/1001", "29011/242", true, false},
+		{"1000000/33333", "30/1", true, false},
+		// the worst readback found in a scan of the rates: 1.7e-5 away
+		{"10000000/17123", "29785/51", true, false},
+		// the closest distinct usual rates
+		{"24000/1001", "24/1", false, false},
+		{"30000/1001", "30/1", false, false},
+		{"60000/1001", "60/1", false, false},
+		{"25/1", "24/1", false, false},
+		{"24000/1001", "", false, true},
+		{"23.976", "24000/1001", false, true},
+	}
+	for _, tt := range tests {
+		same, err := SameFrameRate(tt.a, tt.b)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("SameFrameRate(%q, %q) error = %v, wantErr %t", tt.a, tt.b, err, tt.wantErr)
+			continue
+		}
+		if same != tt.same {
+			t.Errorf("SameFrameRate(%q, %q) = %t, want %t", tt.a, tt.b, same, tt.same)
+		}
+	}
+}
+
+// sourceFrameRateSearch runs a two segments search whose segments declare segmentsRate,
+// cut from a source at sourceRate, with concurrency workers.
+func sourceFrameRateSearch(t *testing.T, segmentsRate, sourceRate string, concurrency int) (*mockEncoder, QPSearchResults, error) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	segments := []string{filepath.Join(tmpDir, "segment0.mkv"), filepath.Join(tmpDir, "segment1.mkv")}
+	for _, seg := range segments {
+		if err := os.WriteFile(seg, []byte("source"), 0644); err != nil {
+			t.Fatalf("failed to create source segment: %v", err)
+		}
+	}
+	vmafResults := make(map[int]VMAFStats)
+	for qp := 0; qp <= 51; qp++ {
+		vmafResults[qp] = linearVMAF(qp)
+	}
+	encoder := &mockEncoder{name: "mock", qpMin: 0, qpMax: 51, vmafResults: vmafResults, frameRate: segmentsRate}
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 85)
+	if err != nil {
+		t.Fatalf("failed to create auditor: %v", err)
+	}
+	results, err := FindAllSegmentsQP(context.Background(), &mockCallbacks{}, QPSearchConfig{
+		SegmentsPaths:        segments,
+		Auditor:              auditor,
+		WorkingDir:           tmpDir,
+		StatsCache:           &mockStatsCache{mean: 26, stddev: 13},
+		Encoder:              encoder,
+		NbConcurrentSegments: concurrency,
+		SourceFrameRate:      sourceRate,
+	})
+	return encoder, results, err
+}
+
+func TestFindAllSegmentsQP_SourceFrameRate(t *testing.T) {
+	// Matroska segments declaring 19001/317, cut from a 60000/1001 source: the results carry
+	// the source's rate, and so do the durations built on them
+	_, results, err := sourceFrameRateSearch(t, "19001/317", "60000/1001", 1)
+	if err != nil {
+		t.Fatalf("FindAllSegmentsQP failed: %v", err)
+	}
+	if results.FrameRate != "60000/1001" {
+		t.Errorf("expected the source's frame rate 60000/1001, got %q", results.FrameRate)
+	}
+	durations, err := results.SegmentsDurations()
+	if err != nil {
+		t.Fatalf("SegmentsDurations failed: %v", err)
+	}
+	// 1000 frames at 60000/1001: 16.683333 s (at 19001/317 it would be 16.683332 s)
+	for i, duration := range durations {
+		if duration != 16683333*time.Microsecond {
+			t.Errorf("segment %d: expected 16.683333s, got %s", i, duration)
+		}
+	}
+	// Without a source, the rate the segments declare
+	if _, results, err = sourceFrameRateSearch(t, "19001/317", "", 1); err != nil || results.FrameRate != "19001/317" {
+		t.Errorf("expected the segments' frame rate 19001/317 without a source, got %q (error %v)", results.FrameRate, err)
+	}
+}
+
+func TestFindAllSegmentsQP_SourceFrameRateMismatch(t *testing.T) {
+	// Segments at 24/1 given a 25 fps source: refused before any encode, whatever the
+	// number of workers
+	for _, concurrency := range []int{1, 2} {
+		encoder, _, err := sourceFrameRateSearch(t, "24/1", "25/1", concurrency)
+		if err == nil || !strings.Contains(err.Error(), "24/1") || !strings.Contains(err.Error(), "25/1") {
+			t.Fatalf("%d workers: expected an error naming both frame rates, got %v", concurrency, err)
+		}
+		if len(encoder.encodeCalls) != 0 {
+			t.Errorf("%d workers: expected no encode, got %d", concurrency, len(encoder.encodeCalls))
+		}
+	}
+	// A source frame rate that can not be read is refused before anything
+	if encoder, _, err := sourceFrameRateSearch(t, "24/1", "23.976", 1); err == nil {
+		t.Error("expected an error with an invalid source frame rate")
+	} else if encoder.probeCallIdx != 0 {
+		t.Errorf("expected no probe with an invalid source frame rate, got %d", encoder.probeCallIdx)
 	}
 }

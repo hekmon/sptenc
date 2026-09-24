@@ -112,9 +112,9 @@ type ConcatConfig struct {
 	ConcatListPath ConcatListPath
 	ConcatUnsafe   bool
 	OutputPath     string
-	// FrameRate the video frames were numbered at, as ffprobe writes r_frame_rate ("24000/1001",
-	// "25"): the video timestamps are snapped to its frame grid, see Concat. Empty, they are
-	// copied as the demuxer computes them.
+	// FrameRate of the video, as ffprobe writes r_frame_rate ("24000/1001", "25"): the video
+	// timestamps are snapped to its frame grid, see Concat (and frameGridSnap for which rate).
+	// Empty, they are copied as the demuxer computes them.
 	FrameRate string
 	// Reporting
 	Debug             func(msg string)
@@ -263,13 +263,15 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 //   - A timestamp already exact (25 fps, or a file snapped before) comes out unchanged.
 //   - The computation is done in double precision, the order of the operations keeps it
 //     exact however far into the file, halves included (see TestFrameGridSnap_Exact).
-//   - The frame rate must be the one the frames were numbered at: the rate read from the
-//     segments, which their encoder used. A 59.94 fps Matroska file reads as 19001/317, not
-//     60000/1001 (Matroska stores the frame duration in whole nanoseconds). A master written
-//     from a 59.94 fps source that is not Matroska keeps the source's exact timestamps while
-//     its segments are encoded at 19001/317: the output is 1 ms before the master on the
-//     frames at half a millisecond, one in 60 (measured), more as the two rates drift apart
-//     (0.19 ms per hour).
+//   - The frame rate must be the exact one of the frames, the master's, which is not always
+//     the one the segments declare: a 59.94 fps Matroska file reads as 19001/317, not
+//     60000/1001 (see core.SameFrameRate), while a master made from a source that is not
+//     Matroska is numbered at the exact rate. Snapped at 19001/317, the output was 1 ms before
+//     that master on one frame in 60 (measured), more as the two rates drift apart (0.19 ms
+//     per hour). The pipeline gives the source's rate (see core.QPSearchConfig.SourceFrameRate),
+//     and the snap puts back the frames the encoders numbered at the approximation: within a
+//     segment the two grids drift apart by 0.9 ns per frame at 59.94 fps and 3.2 ns at 119.88,
+//     corrected while under half a frame (8.3 and 4.2 ms).
 func frameGridSnap(frameRate string) (bsf string, err error) {
 	num, den, err := frameRateFraction(frameRate)
 	if err != nil {
