@@ -36,7 +36,8 @@ type ConcatListPath string
 // segments times a third of a millisecond (46 ms measured at the end of a 163 segments
 // episode, a quarter of a second on a film cut in 800). With a duration line the demuxer
 // uses that value instead, and the callers compute it from what they know exactly: the
-// frame count of each file and the frame rate.
+// frame count of each file and the frame rate. The start it computes out of them is still
+// rounded to the time base of the stream: see Concat for what that does to the frames.
 //
 // # WHY NOT KEEPING THE SEGMENTS' ORIGINAL TIMESTAMPS
 //
@@ -108,13 +109,61 @@ type ConcatConfig struct {
 	ConcatListPath ConcatListPath
 	ConcatUnsafe   bool
 	OutputPath     string
+	// FrameRate the video frames were numbered at, as ffprobe writes r_frame_rate ("24000/1001",
+	// "25"): the video timestamps are snapped to its frame grid, see Concat. Empty, they are
+	// copied as the demuxer computes them.
+	FrameRate string
 	// Reporting
 	Debug             func(msg string)
 	RuntimeError      func(err error) // non fatal errors
 	FFMPEGStatsReport func(stats ProgressStats)
 }
 
-// Concat runs ffmpeg to concatenate segments using the provided config.
+// Concat runs ffmpeg to concatenate segments using the provided config. When config.FrameRate
+// is given, the video timestamps of the output are snapped to its frame grid (see
+// frameGridSnap).
+//
+// # WHY THE TIMESTAMPS ARE SNAPPED
+//
+// The duration lines of the list (see GenerateConcatList) give the demuxer the exact start
+// of every file, but it rounds that start to the time base of the stream, the millisecond
+// in Matroska, and adds it to timestamps that were already rounded from the file's own
+// start: an encoder does not keep the timestamps of the segment it is given, it numbers the
+// frames from 0 at the frame rate and the muxer rounds each of them to the millisecond.
+// Rounded twice, a frame lands up to 1 ms away from its exact time, where a single rounding
+// (the master's) keeps it within half a millisecond. At 23.976 fps, take a segment from
+// frame 26 to 76: it starts at 1084.417 ms, rounded to 1084, and its last frame comes
+// 2085.417 ms later, rounded to 2085. That frame is written at 3169 ms, where the master has
+// it at 3170 (3169.833 ms rounded once), and the next segment starts at 3211.542 ms, rounded
+// to 3212: the frame lasts 43 ms instead of 41 or 42. FFProbeBinaryStream.IsConstantFrameRate
+// then reports a variable frame rate: `sptenc vmaf` refused sptenc's own outputs, and so did
+// `sptenc master` when given one back. With the segment lengths of real content it hits most
+// files (about 94% of simulated 23.976 fps episodes of 163 segments); 29.97 and 59.94 fps
+// are hit the same way, 25 and 50 fps never are, their frames lasting whole milliseconds.
+//
+// Snapping moves every timestamp to the exact time of its frame rounded once, where the
+// master has it. The duration lines are needed all the same: the snap only finds the right
+// frame for a timestamp less than half a frame away from it, and without them the offsets
+// drift at every boundary (about 0.3 ms at 23.976 fps, 46 ms over 163 segments).
+//
+// # WHY NOT A LARGER TOLERANCE IN THE CHECK INSTEAD
+//
+// The check is right: the file is not what a single rounding of the master gives, and sptenc
+// promises the frames back with their timing. A tolerance letting a 43 ms frame through would
+// let a mix of 24 and 25 fps through as well: its frames last from 40 to 42 ms, the same
+// 2 ms spread (see IsConstantFrameRate).
+//
+// # WHY NOT KEEPING EXACT TIMESTAMPS IN THE SEGMENTS INSTEAD
+//
+// Two ways were measured exact with software encoders, but both move the fix from the one
+// place where the segments meet to every encode:
+//   - Encoded segments stored in a container whose time base is the frame duration (NUT,
+//     MP4) keep exact timestamps, only the final Matroska mux rounds them, once. Every tool
+//     reading the segments changes with them, MP4 needs edit lists for B-frames, and an
+//     interrupted MP4 encode leaves an unreadable file.
+//   - Encodes keeping the source timestamps (-copyts), with duration lines computed from the
+//     actual first timestamp of each segment. Every encoder has to honor it, hardware ones
+//     included, which was not tested.
 func Concat(ctx context.Context, config ConcatConfig) (err error) {
 	// Validate inputs
 	if config.ConcatListPath == "" {
@@ -122,6 +171,12 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 	}
 	if config.OutputPath == "" {
 		return errors.New("output path cannot be empty")
+	}
+	var snap string
+	if config.FrameRate != "" {
+		if snap, err = frameGridSnap(config.FrameRate); err != nil {
+			return
+		}
 	}
 	// Prepare args
 	var args []string
@@ -135,8 +190,11 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 	args = append(args,
 		"-i", string(config.ConcatListPath),
 		"-c", "copy",
-		config.OutputPath,
 	)
+	if snap != "" {
+		args = append(args, "-bsf:v", snap)
+	}
+	args = append(args, config.OutputPath)
 	// Prepare command
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Concat segments with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
@@ -177,6 +235,67 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 	if err = cmd.Wait(); err != nil {
 		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
 		return
+	}
+	return
+}
+
+// frameGridSnap returns the setts bitstream filter snapping the pts and dts of a video stream
+// numbered at frameRate (as ffprobe writes r_frame_rate: "24000/1001", "25") to its frame
+// grid: each timestamp becomes the index of the nearest frame, then the exact time of that
+// frame rounded to the stream time base (TB), halves away from zero as ffmpeg's rescaling
+// does, the one that wrote the master's timestamps. setts has no frame rate variable: the
+// rate is written into the expression.
+//
+// # EDGE CASES
+//
+//   - The grid starts at 0, where the first frame of the first segment is: segments are cut
+//     with their timestamps reset and encoded from 0.
+//   - Decode timestamps (starting before 0 with B-frames) are snapped by the same function,
+//     which never swaps two timestamps: they stay increasing and never after their
+//     presentation timestamp.
+//   - setts evaluates every packet, the ones without a timestamp too: a missing timestamp
+//     (NOPTS, the lowest int64, not a time) is kept missing instead of being computed with.
+//     This takes commas, which separate the filters of a bitstream filter list: each
+//     expression is quoted.
+//   - A timestamp already exact (25 fps, or a file snapped before) comes out unchanged.
+//   - The computation is done in double precision, the order of the operations keeps it
+//     exact however far into the file, halves included (see TestFrameGridSnap_Exact).
+//   - The frame rate must be the one the frames were numbered at: the rate read from the
+//     segments, which their encoder used. A 59.94 fps Matroska file reads as 19001/317, not
+//     60000/1001 (Matroska stores the frame duration in whole nanoseconds). A master written
+//     from a 59.94 fps source that is not Matroska keeps the source's exact timestamps while
+//     its segments are encoded at 19001/317: the output is 1 ms before the master on the
+//     frames at half a millisecond, one in 60 (measured), more as the two rates drift apart
+//     (0.19 ms per hour).
+func frameGridSnap(frameRate string) (bsf string, err error) {
+	num, den, err := frameRateFraction(frameRate)
+	if err != nil {
+		return "", fmt.Errorf("invalid frame rate %q: %w", frameRate, err)
+	}
+	snap := func(timestamp string) string {
+		// index of the nearest frame, then the time of that frame in TB units
+		return fmt.Sprintf("'if(eq(%[1]s,NOPTS),NOPTS,round(round(%[1]s*TB*%[2]d/%[3]d)*%[3]d/TB/%[2]d))'",
+			timestamp, num, den)
+	}
+	return "setts=pts=" + snap("PTS") + ":dts=" + snap("DTS"), nil
+}
+
+// frameRateFraction parses a frame rate written as ffprobe writes r_frame_rate, "num/den" or
+// "num" (den 1), into positive integers. It accepts what core.FramesDuration accepts: both
+// are given the same QPSearchResults.FrameRate.
+func frameRateFraction(frameRate string) (num, den int64, err error) {
+	numStr, denStr, isFraction := strings.Cut(frameRate, "/")
+	if !isFraction {
+		denStr = "1"
+	}
+	if num, err = strconv.ParseInt(strings.TrimSpace(numStr), 10, 64); err != nil {
+		return 0, 0, fmt.Errorf("invalid numerator %q: %w", numStr, err)
+	}
+	if den, err = strconv.ParseInt(strings.TrimSpace(denStr), 10, 64); err != nil {
+		return 0, 0, fmt.Errorf("invalid denominator %q: %w", denStr, err)
+	}
+	if num <= 0 || den <= 0 {
+		return 0, 0, fmt.Errorf("frame rate %d/%d is not positive", num, den)
 	}
 	return
 }

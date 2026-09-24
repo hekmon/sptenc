@@ -706,7 +706,7 @@ func liveVMAF(ctx context.Context, config ffmpeg.VMAFComputeConfig, totalFrames 
 	return ffmpeg.VMAFCompute(ctx, config)
 }
 
-func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, segmentsDurations []time.Duration, totalFrames int, debug bool) (err error) {
+func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, segmentsDurations []time.Duration, frameRate string, totalFrames int, debug bool) (err error) {
 	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments, segmentsDurations)
 	if err != nil {
 		err = fmt.Errorf("failed to generate concat list file: %w", err)
@@ -735,6 +735,7 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 		ConcatListPath: concatList,
 		ConcatUnsafe:   true,
 		OutputPath:     outputFile,
+		FrameRate:      frameRate,
 		Debug: func(s string) {
 			if debug {
 				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)

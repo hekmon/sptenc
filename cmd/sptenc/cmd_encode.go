@@ -469,7 +469,7 @@ var encodeCommand = &cli.Command{
 				err = fmt.Errorf("failed to compute the source segments durations: %w", err)
 				return
 			}
-			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, segmentsDurations, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
+			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, segmentsDurations, results.FrameRate, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("failed to concat source segments: %w", err)
 				return
 			}
@@ -679,7 +679,7 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 		err = fmt.Errorf("failed to compute the encoded segments durations: %w", err)
 		return
 	}
-	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, segmentsDurations, results.TotalSegmentsFrames, debug); err != nil {
+	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, segmentsDurations, results.FrameRate, results.TotalSegmentsFrames, debug); err != nil {
 		err = fmt.Errorf("failed to concat encoded segments: %w", err)
 		return
 	}

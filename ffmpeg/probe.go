@@ -343,6 +343,10 @@ const FrameDurationTolerance = time.Millisecond
 //   - A constant frame rate stream with a hole (a frame dropped by a capture device: one
 //     duration twice as long as the others) is reported as variable. It is on purpose: nothing
 //     here knows how to keep that hole, every frame after it would be shifted.
+//   - A stream whose timestamps were rounded twice is reported as variable: files put
+//     together at exact starts rounded to the millisecond have frames of 43 ms at 23.976 fps.
+//     sptenc's own concat snaps its output for that reason (see Concat). Raising the
+//     tolerance to accept them would accept a mix of 24 and 25 fps as well.
 //   - Not enough durations measured (no CountFrames run, a single frame, a format without frame
 //     timestamps such as AVI): the declared frame rates are compared, as before. Both values
 //     are metadata-level estimates, so unparseable or missing ones are treated as variable.
