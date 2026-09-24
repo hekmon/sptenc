@@ -465,8 +465,7 @@ var encodeCommand = &cli.Command{
 		results, encodedSegmentsMerged, err := processSegments(ctx, segmentsPaths, workingDir, totalDuration,
 			sourceFrameRate, vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 		if err != nil {
-			err = fmt.Errorf("failed to encode segments: %w", err)
-			return
+			return // processSegments says which step failed
 		}
 		if _, _, err := statsCache.AddRun(results.QPs); err != nil {
 			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
