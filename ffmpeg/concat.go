@@ -30,11 +30,14 @@ type ConcatListPath string
 // The concat demuxer starts each file where the previous one ends, and takes that point
 // from the previous file's duration. Without a duration line, that duration is the one the
 // container declares, which for a Matroska file is its last timestamp plus its last frame
-// duration, both rounded to the millisecond: at 23.976 fps every file claims up to half a
-// millisecond more than its frames last, always in the same direction. The excess adds up
-// at every boundary, and the video drifts behind the other tracks by the number of
-// segments times a third of a millisecond (46 ms measured at the end of a 163 segments
-// episode, a quarter of a second on a film cut in 800). With a duration line the demuxer
+// duration, both rounded to the millisecond. At 23.976 fps the last frame always counts for
+// 42 ms instead of 41.708: an encoded segment claims 0.3 ms more than its frames last on
+// average, from 0.17 ms less to 0.79 ms more depending on how its last timestamp was rounded
+// (measured on every length: a 20 frames segment declares 834 ms for 834.167 ms of frames,
+// a 13 frames one 543 ms for 542.208 ms). The excess is never compensated: it adds up at
+// every boundary, and the video drifts behind the other tracks by about 0.3 ms per segment
+// (46 ms measured at the end of a 163 segments episode, a quarter of a second on a film cut
+// in 800). With a duration line the demuxer
 // uses that value instead, and the callers compute it from what they know exactly: the
 // frame count of each file and the frame rate. The start it computes out of them is still
 // rounded to the time base of the stream: see Concat for what that does to the frames.

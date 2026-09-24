@@ -146,10 +146,12 @@ func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
 // The segments are concatenated by the ffmpeg concat demuxer, which places each file after
 // the previous one at the previous one's duration. Left to itself, it takes that duration
 // from the container: for a Matroska file it is the last frame's timestamp plus that frame's
-// duration, both rounded to the millisecond, so a 23.976 fps segment declares itself up to
-// half a millisecond longer than its frames really last. That excess is never negative and
-// never compensated: it adds up at every boundary, and the video ends 46 ms behind its
-// audio on an episode of 163 segments (measured), a quarter of a second on a film of 800.
+// duration, both rounded to the millisecond, so a 23.976 fps segment declares itself 0.3 ms
+// longer than its frames really last on average (its last frame counts for 42 ms instead of
+// 41.708; the rounding of its last timestamp takes that from 0.17 ms shorter to 0.79 ms
+// longer). That excess is never compensated: it adds up at every boundary, and the video
+// ends 46 ms behind its audio on an episode of 163 segments (measured), a quarter of a
+// second on a film of 800.
 // The concat list can state a duration per file, which the demuxer uses instead: the
 // sptenc pipeline knows the truth, the frame count of each segment (decoded and checked
 // against its encode) and the constant frame rate the source was verified to have.
