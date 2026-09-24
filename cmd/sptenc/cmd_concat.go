@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,8 +24,23 @@ var concatCommand = &cli.Command{
 	Usage:    "Concatenate video files from a directory into a single file",
 	Description: "Reads all video files (.mkv, .mp4) from the input directory, sorts them alphabetically, and\n" +
 		"concatenates them into a single output file using ffmpeg's concat demuxer.\n\n" +
-		"This is useful for merging segments produced by the split command without re-encoding.",
+		"This is useful for merging segments produced by the split command without re-encoding.\n\n" +
+		"ORIGINAL FILE\n" +
+		"--" + originalFileFlagName + " is optional, and without it the difference is minimal: give it the file the\n" +
+		"segments were cut from if you want their timestamps exactly on its frames. Matroska stores the\n" +
+		"frame duration in whole nanoseconds, and some frame rates come back from it approximated:\n" +
+		"59.94 fps reads as 19001/317 instead of 60000/1001. Merged at that rate, the segments of a source\n" +
+		"that was not a Matroska file have some frames about a millisecond off (one in 60 at 59.94 fps,\n" +
+		"more over hours), far below anything anyone can see or hear. With the original file its exact\n" +
+		"rate is used instead: only its frame rate is read, and it must be the segments' one up to that\n" +
+		"rounding.",
 	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:     originalFileFlagName,
+			Aliases:  []string{"f"},
+			Usage:    "Original media file the segments were cut from, for their exact frame rate (optional, see ORIGINAL FILE)",
+			OnlyOnce: true,
+		},
 		&cli.StringFlag{
 			Name:             tmpDirFlagName,
 			Aliases:          []string{"t"},
@@ -73,6 +89,16 @@ var concatCommand = &cli.Command{
 		}
 		if inputDir == outputPath {
 			return ctx, errors.New("input directory and output file must be different paths")
+		}
+		// Validate the original file, when given
+		if originalPath := cmd.String(originalFileFlagName); originalPath != "" {
+			originalInfos, err := os.Stat(originalPath)
+			if err != nil {
+				return ctx, fmt.Errorf("failed to access the original file: %w", err)
+			}
+			if !originalInfos.Mode().IsRegular() {
+				return ctx, errors.New("the original file must be a regular file")
+			}
 		}
 		return ctx, nil
 	},
@@ -129,6 +155,21 @@ var concatCommand = &cli.Command{
 			return errors.New("no video files found in input directory")
 		}
 
+		// With the original file, its frame rate: exact where the files may declare Matroska's
+		// approximation of it (see ORIGINAL FILE in the description)
+		var originalFrameRate string
+		if originalPath := cmd.String(originalFileFlagName); originalPath != "" {
+			originalStats, probeErr := getStreamsInfos(ctx, originalPath, cmd.Bool(debugFlagName))
+			if probeErr != nil {
+				return fmt.Errorf("failed to probe the original file: %w", probeErr)
+			}
+			originalVideoStream := originalStats.VideoTrack()
+			if originalVideoStream == nil {
+				return errors.New("no video stream found in the original file")
+			}
+			originalFrameRate = originalVideoStream.RFrameRate
+		}
+
 		// Calculate total duration and size
 		// The concat demuxer places each file at the end of the previous one, and takes
 		// that end from the duration the container declares, rounded to its time base: the
@@ -158,13 +199,26 @@ var concatCommand = &cli.Command{
 			if videoStream == nil {
 				return fmt.Errorf("no video stream found in %s", shellescape.Quote(filepath.Base(path)))
 			}
-			if segmentsDurations[i], err = core.FramesDuration(videoStream.NbReadPackets, videoStream.RFrameRate); err != nil {
+			fileFrameRate := videoStream.RFrameRate
+			if originalFrameRate != "" {
+				same, sameErr := core.SameFrameRate(originalFrameRate, fileFrameRate)
+				if sameErr != nil {
+					return fmt.Errorf("failed to compare the frame rate of %s with the original file's: %w",
+						shellescape.Quote(filepath.Base(path)), sameErr)
+				}
+				if !same {
+					return fmt.Errorf("%s declares a frame rate of %s, not the original file's %s",
+						shellescape.Quote(filepath.Base(path)), fileFrameRate, originalFrameRate)
+				}
+				fileFrameRate = originalFrameRate
+			}
+			if segmentsDurations[i], err = core.FramesDuration(videoStream.NbReadPackets, fileFrameRate); err != nil {
 				return fmt.Errorf("failed to compute the duration of %s: %w", shellescape.Quote(filepath.Base(path)), err)
 			}
 			totalDuration += segmentsDurations[i]
 			if cmd.Bool(debugFlagName) {
 				fmt.Fprintf(bypass, "DEBUG: %s %d frames at %s fps, %s (%s), container declares %s\n",
-					shellescape.Quote(path), videoStream.NbReadPackets, videoStream.RFrameRate,
+					shellescape.Quote(path), videoStream.NbReadPackets, fileFrameRate,
 					segmentsDurations[i], cunits.ImportInBytes(float64(fileInfo.Size())),
 					stats.Format.Duration,
 				)
@@ -174,9 +228,14 @@ var concatCommand = &cli.Command{
 			len(segmentsPaths), totalDuration.Round(time.Millisecond), cunits.ImportInBytes(float64(totalSize)),
 		)
 		// The video timestamps are snapped to the frame grid when the files allow it
-		frameRate, whyNotSnapped := concatSnapFrameRate(segmentsPaths, segmentsStats)
+		frameRate, whyNotSnapped := concatSnapFrameRate(segmentsPaths, segmentsStats, originalFrameRate)
 		if whyNotSnapped != "" {
 			fmt.Fprintf(bypass, "\tVideo timestamps not snapped to a frame grid: %s\n", whyNotSnapped)
+		} else if originalFrameRate == "" {
+			if usualRate, found := matroskaApproximatedRate(frameRate); found {
+				fmt.Fprintf(bypass, "\tThe files declare %s fps, which is %s fps up to Matroska's rounding: if they come from a %s fps file that is not Matroska, --%s puts their timestamps exactly on its frames (without it, some frames are about a millisecond off)\n",
+					frameRate, usualRate, usualRate, originalFileFlagName)
+			}
 		}
 
 		// concat
@@ -203,7 +262,10 @@ var concatCommand = &cli.Command{
 }
 
 // concatSnapFrameRate returns the frame rate the video timestamps of files concatenated in
-// that order can be snapped to (see ffmpeg.Concat), or why they can not be.
+// that order can be snapped to (see ffmpeg.Concat), or why they can not be. With the frame
+// rate of the original file (empty without it), every file has been checked to be at it up to
+// Matroska's rounding (core.SameFrameRate): the snap uses it, whatever approximation of it the
+// files declare.
 //
 // # WHY THE CONCAT COMMAND DOES NOT ALWAYS SNAP
 //
@@ -226,18 +288,21 @@ var concatCommand = &cli.Command{
 //   - A file whose frames do not follow its declared frame rate is not detected, no frame is
 //     decoded here. Its duration is already wrong in that case: it is computed from its
 //     number of frames and its declared frame rate.
-func concatSnapFrameRate(paths []string, stats []ffmpeg.FFProbeStats) (frameRate, whyNot string) {
+func concatSnapFrameRate(paths []string, stats []ffmpeg.FFProbeStats, originalFrameRate string) (frameRate, whyNot string) {
+	frameRate = originalFrameRate
 	for i := range stats {
 		name := shellescape.Quote(filepath.Base(paths[i]))
 		videoStream := stats[i].VideoTrack()
 		if videoStream == nil {
 			return "", fmt.Sprintf("%s has no video stream", name)
 		}
-		if i == 0 {
-			frameRate = videoStream.RFrameRate
-		} else if videoStream.RFrameRate != frameRate {
-			return "", fmt.Sprintf("%s is at %s fps, %s at %s fps",
-				shellescape.Quote(filepath.Base(paths[0])), frameRate, name, videoStream.RFrameRate)
+		if originalFrameRate == "" { // otherwise checked against the original's while counting the frames
+			if i == 0 {
+				frameRate = videoStream.RFrameRate
+			} else if videoStream.RFrameRate != frameRate {
+				return "", fmt.Sprintf("%s is at %s fps, %s at %s fps",
+					shellescape.Quote(filepath.Base(paths[0])), frameRate, name, videoStream.RFrameRate)
+			}
 		}
 		var fileStart string
 		if stats[i].Format != nil {
@@ -248,4 +313,24 @@ func concatSnapFrameRate(paths []string, stats []ffmpeg.FFProbeStats) (frameRate
 		}
 	}
 	return
+}
+
+// matroskaApproximatedRate returns the usual frame rate that frameRate is up to Matroska's
+// rounding without being it, if any: 60000/1001 for 19001/317. The usual rates are the whole
+// ones and the multiples of 1000/1001, up to 1000 fps: they are at least 1000/1001 apart, so
+// at most one of them is within the rounding of any rate (see core.SameFrameRate). Nothing is
+// decided on it: it only tells the user that --original-file can make the timestamps exact.
+func matroskaApproximatedRate(frameRate string) (usualRate string, found bool) {
+	declared, ok := new(big.Rat).SetString(frameRate)
+	if !ok || declared.Sign() <= 0 {
+		return "", false
+	}
+	for n := int64(1); n <= 1000; n++ {
+		for _, usual := range []*big.Rat{big.NewRat(n, 1), big.NewRat(n*1000, 1001)} {
+			if same, _ := core.SameFrameRate(usual.RatString(), frameRate); same {
+				return usual.RatString(), usual.Cmp(declared) != 0
+			}
+		}
+	}
+	return "", false
 }
