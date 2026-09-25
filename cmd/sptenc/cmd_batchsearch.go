@@ -819,16 +819,29 @@ var batchsearchCommand = &cli.Command{
 		}
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
+		// Both sizes are the merged video stream, before the remux: comparable as is.
+		// A larger final encode is reported too: the CPU encoder is searched on its own and nothing
+		// guarantees it beats the GPU one on every content, silence would hide it.
 		if finalEncoder != "" {
 			finalSize := encodedFileInfo.Size()
 			gpuBestSize := batch.sizes[bestIndex]
-			if finalSize < gpuBestSize {
+			if finalSize <= gpuBestSize {
 				saved := gpuBestSize - finalSize
-				fmt.Fprintf(bypass, "Final encode with %s: %s (saved %s, %s smaller than GPU search result).\n",
+				fmt.Fprintf(bypass, "Final encode with %s: %s (saved %s, %s smaller than the best %s candidate).\n",
 					finalEncoder,
 					cunits.ImportInBytes(float64(finalSize)),
 					cunits.ImportInBytes(float64(saved)),
 					formatPercent(float64(saved)/float64(gpuBestSize)*100),
+					encoderAdapter.Name(),
+				)
+			} else {
+				lost := finalSize - gpuBestSize
+				fmt.Fprintf(bypass, "Final encode with %s: %s (%s more, %s larger than the best %s candidate).\n",
+					finalEncoder,
+					cunits.ImportInBytes(float64(finalSize)),
+					cunits.ImportInBytes(float64(lost)),
+					formatPercent(float64(lost)/float64(gpuBestSize)*100),
+					encoderAdapter.Name(),
 				)
 			}
 		}
