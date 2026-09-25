@@ -173,13 +173,6 @@ When evaluating changes, compare against:
 - **Single-pass CRF + VMAF spot-checking** — sptenc guarantees per-segment floors; CRF guarantees averages
 - **Commercial archival solutions** — compare feature sets and quality guarantees; sptenc targets the same niche with an open-source, locally-run model
 
-## About this codebase
-
-- 2+ years of active development
-- Deep empirical knowledge of ffmpeg, VMAF, encoder behavior, and hardware acceleration matrices
-- Values correctness over speed; willing to accept compute cost for provable results
-- The author has re-audited the encoder paths and search algorithm multiple times
-
 ## Final note
 
 A change that looks like a small refactor (+10/-5 lines) can invalidate months of empirical tuning. If you are modifying the closed-loop workflow (QP search, threshold validation, scene splitting strategy, cache behavior, interpolation logic), read the critical files listed above first. Good changes start with understanding.
