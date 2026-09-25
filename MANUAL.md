@@ -266,7 +266,7 @@ The output is always Matroska (`.mkv`) because it is the most permissive contain
 
 Every stream of the source other than video (audio, subtitles, attachments, data) is copied into the output. When every audio track is 16 or 24-bit little-endian PCM (`pcm_s16le`, `pcm_s24le`, as in MKV remuxes of Blu-ray discs), they are losslessly compressed to FLAC; otherwise audio is copied as is.
 
-Color metadata (`color_range`, `colorspace`, `color_trc` and `color_primaries`) is probed from the source and re-injected into the output container. HDR metadata handling is still being validated.
+Color metadata (`colorspace`, `color_trc` and `color_primaries`) is probed from the source and re-injected into the output container. The color range (`color_range`) is the exception: the output declares the range of the encoded video, and a full range ("PC") source comes out in limited range ("TV"), converted when the master is written (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)). Tested with libx265, hevc_nvenc, libsvtav1 and av1_nvenc, on 8-bit and 10-bit full range sources. HDR metadata handling is still being validated.
 
 You specify the output path explicitly as the final positional argument for file-producing commands (`encode`, `batchsearch`, `remux`, `master`, `concat`). Directory-producing commands (`split`) take an output directory in the same way.
 

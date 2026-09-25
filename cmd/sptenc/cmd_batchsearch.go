@@ -794,7 +794,7 @@ var batchsearchCommand = &cli.Command{
 		duration = time.Since(start)
 		fmt.Fprintf(bypass, "\tMKV statistics tags regenerated in %s\n", duration.Round(time.Second))
 		// Verify container-level color metadata
-		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
+		verifyColorMetadata(ctx, outputPath, videoStream, encodedSegmentsMerged, cmd.Bool(debugFlagName))
 
 		// Step 7 - done
 		fmt.Fprintln(bypass)

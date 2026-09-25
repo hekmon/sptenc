@@ -73,8 +73,10 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 	// the original file and passing output-side -color_* flags we override the
 	// mapped stream's codecpar with the original's authoritative values. This does
 	// not affect or create bitstream-level SEIs.
+	// The color range is the exception: it is taken from the new video (see RemuxColorRange).
 	var (
-		colorRange     string
+		originalVideo  *FFProbeBinaryStream
+		newVideo       *FFProbeBinaryStream
 		colorSpace     string
 		colorTransfer  string
 		colorPrimaries string
@@ -84,15 +86,24 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 		Debug:        config.Debug,
 		RuntimeError: config.RuntimeError,
 	}); err == nil {
-		if video := originalStats.VideoTrack(); video != nil {
-			colorRange = video.ColorRange
-			colorSpace = video.ColorSpace
-			colorTransfer = video.ColorTransfer
-			colorPrimaries = video.ColorPrimaries
+		if originalVideo = originalStats.VideoTrack(); originalVideo != nil {
+			colorSpace = originalVideo.ColorSpace
+			colorTransfer = originalVideo.ColorTransfer
+			colorPrimaries = originalVideo.ColorPrimaries
 		}
 	} else if config.RuntimeError != nil {
 		config.RuntimeError(fmt.Errorf("failed to probe original file for color metadata: %w", err))
 	}
+	if newStats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{
+		Path:         config.NewVideoFile,
+		Debug:        config.Debug,
+		RuntimeError: config.RuntimeError,
+	}); err == nil {
+		newVideo = newStats.VideoTrack()
+	} else if config.RuntimeError != nil {
+		config.RuntimeError(fmt.Errorf("failed to probe the new video file for its color range: %w", err))
+	}
+	colorRange := RemuxColorRange(originalVideo, newVideo)
 	// Prepare
 	args := []string{
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
@@ -182,4 +193,60 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 		return
 	}
 	return
+}
+
+// RemuxColorRange returns the color range RemuxSwapVideo declares for the video it takes from the
+// new video file, given the video streams of both files (nil when a file has none or could not be
+// probed): the range of the new video when it declares one, the range of the original's otherwise.
+//
+// # WHY THE NEW VIDEO'S RANGE, NOT THE ORIGINAL'S
+//
+// The range tells how to read the pixel values: limited ("tv": black at 64, white at 940 in
+// 10 bits) or full ("pc": 0 and 1023). It describes a stream, and the stream is the new video's,
+// whose pixels are not always in the original's range: a full range source is converted to limited
+// range when the master is written, ffmpeg's FFV1 encoder declaring limited range only
+// (color_ranges in libavcodec/ffv1enc.c). The encodes of the master are limited range, their first
+// decoded frame says so, and declaring the original's range wrote "pc" in the container over them
+// (measured with ffmpeg 9.0.2 on 8-bit H.264, 8-bit HEVC and 10-bit HEVC full range sources, with
+// libx265, hevc_nvenc, libsvtav1 and av1_nvenc).
+//
+// Only the container is wrong then, the video stream is the same, and what it misleads depends on
+// what reads it. ffmpeg's HEVC and AV1 decoders take the range from the stream (for HEVC, limited
+// by default when the stream declares none, as with hevc_nvenc): they rendered those outputs the
+// same either way, while MediaInfo (24.01) reported them as full range. ffmpeg's H.264 decoder
+// takes it from the container when the stream declares none: a limited range H.264 video grafted
+// onto a full range original by the remux command was rendered washed out, the luma of the
+// rendered picture spanning 26 to 217 instead of 15 to 228 (out of 255).
+//
+// Writing limited range whenever the original is full range was rejected: read from the new video,
+// the range is right whatever the new video went through. The segments of a pre-split directory
+// were not necessarily cut from a master, the remux command is given any new video, and ffmpeg
+// versions before 7.1, in which the FFV1 encoder declares no range, were not checked.
+//
+// # WHY THE FULL RANGE IS NOT KEPT INSTEAD
+//
+// Keeping a full range source in full range down to the output, which would have kept the
+// original's range right, was not attempted: it changes the frames every encoder and every VMAF
+// computation are given, not the remux. The conversion loses nothing from 8 bits (each level of
+// the source gets a 10-bit level of its own), and little from 10 bits (the 1024 luma levels of the
+// source share the 877 of the limited range).
+//
+// # EDGE CASES
+//
+//   - The new video declares no range: the original's is declared, as before. ffprobe reports the
+//     range of the container, else the one of the stream, so it takes a stream without any range
+//     in a container without any, such as H.264 without video signal type (HEVC without it is
+//     read as limited range, its default, and AV1 always carries one). The encodes of the master
+//     declare one with the four encoders above: ffmpeg declares the master limited range even
+//     when the source declares no range.
+//   - The remux command is given any new video: a full range one grafted onto a limited range
+//     original is declared full range, as its stream is, where the original's range used to be.
+func RemuxColorRange(originalVideo, newVideo *FFProbeBinaryStream) string {
+	if newVideo != nil && (newVideo.ColorRange == "tv" || newVideo.ColorRange == "pc") {
+		return newVideo.ColorRange
+	}
+	if originalVideo != nil {
+		return originalVideo.ColorRange
+	}
+	return ""
 }

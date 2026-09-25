@@ -614,7 +614,7 @@ var encodeCommand = &cli.Command{
 		// Colour elements we explicitly injected.
 		// If this fails (e.g. due to an ffmpeg muxer regression), a future
 		// fallback could use mkvpropedit to fix the container tags.
-		verifyColorMetadata(ctx, outputPath, videoStream, cmd.Bool(debugFlagName))
+		verifyColorMetadata(ctx, outputPath, videoStream, encodedSegmentsMerged, cmd.Bool(debugFlagName))
 
 		// Done
 		fmt.Fprintf(bypass, "Complete split encoding took %s\n", time.Since(globalStart).Round(time.Second))

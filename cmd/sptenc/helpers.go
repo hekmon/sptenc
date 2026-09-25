@@ -235,9 +235,11 @@ func formatPercent(v float64) string {
 	return s + "%"
 }
 
-// verifyColorMetadata probes the output file and warns via liveprogress.Bypass
-// if any container-level color metadata does not match the source video stream.
-func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *ffmpeg.FFProbeBinaryStream, debug bool) {
+// verifyColorMetadata probes the output file and warns via liveprogress.Bypass if its
+// container-level color metadata is not what ffmpeg.RemuxSwapVideo writes: the color range of the
+// encoded video when it declares one (see ffmpeg.RemuxColorRange), the values of the source video
+// stream for the rest.
+func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *ffmpeg.FFProbeBinaryStream, encodedPath string, debug bool) {
 	bypass := liveprogress.Bypass()
 	outputStats, err := getStreamsInfos(ctx, outputPath, debug)
 	if err != nil {
@@ -249,8 +251,18 @@ func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *f
 		fmt.Fprintf(bypass, "WARNING: output file has no video stream, can not verify color metadata\n")
 		return
 	}
-	if sourceStream.ColorRange != "" && outStream.ColorRange != sourceStream.ColorRange {
-		fmt.Fprintf(bypass, "WARNING: output color_range (%s) does not match source (%s)\n", outStream.ColorRange, sourceStream.ColorRange)
+	var encodedStream *ffmpeg.FFProbeBinaryStream
+	if encodedStats, err := getStreamsInfos(ctx, encodedPath, debug); err == nil {
+		encodedStream = encodedStats.VideoTrack()
+	} else {
+		fmt.Fprintf(bypass, "WARNING: could not probe the encoded video for its color range: %s\n", err)
+	}
+	if expectedRange := ffmpeg.RemuxColorRange(sourceStream, encodedStream); expectedRange != "" && outStream.ColorRange != expectedRange {
+		origin := "encoded video"
+		if expectedRange == sourceStream.ColorRange {
+			origin = "source" // same value, or the encoded video declares none
+		}
+		fmt.Fprintf(bypass, "WARNING: output color_range (%s) does not match the %s (%s)\n", outStream.ColorRange, origin, expectedRange)
 	}
 	if sourceStream.ColorSpace != "" && outStream.ColorSpace != sourceStream.ColorSpace {
 		fmt.Fprintf(bypass, "WARNING: output colorspace (%s) does not match source (%s)\n", outStream.ColorSpace, sourceStream.ColorSpace)
