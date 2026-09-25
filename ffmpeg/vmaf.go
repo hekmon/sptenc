@@ -49,6 +49,12 @@ const (
 	VMAFModelUHDHFR    VMAFModel = "vmaf_v1.0.16_hfr_1d5h_2160"
 	VMAFModelPhoneHFR  VMAFModel = "vmaf_v1.0.16_hfr_5d0h"
 	VMAFModelUHDFarHFR VMAFModel = "vmaf_v1.0.16_hfr_3d0h_2160"
+	// The v0 models sptenc v0.1.0 selected, never selected anymore: named for the messages of
+	// a run that forces one (see VMAFV0Models).
+	VMAFModelV0FHD    VMAFModel = "vmaf_v0.6.1"
+	VMAFModelV0FHDNEG VMAFModel = "vmaf_v0.6.1neg"
+	VMAFModelV0UHD    VMAFModel = "vmaf_4k_v0.6.1"
+	VMAFModelV0UHDNEG VMAFModel = "vmaf_4k_v0.6.1neg"
 )
 
 // VMAFModels lists the models sptenc selects, from the height of the source (see
@@ -63,6 +69,22 @@ var VMAFModels = []VMAFModel{VMAFModelFHD, VMAFModelUHD}
 // Netflix's words "an area of active improvement". Forcing one is the user's call.
 var VMAFForcedModels = []VMAFModel{VMAFModelPhone, VMAFModelUHDFar,
 	VMAFModelFHDHFR, VMAFModelUHDHFR, VMAFModelPhoneHFR, VMAFModelUHDFarHFR}
+
+// VMAFV0Models lists the v0 models, which sptenc v0.1.0 selected and libvmaf still builds in
+// (the 4K NEG one since 3.0). sptenc never selects them: they measure luma only and do not see
+// banding (their NEG variants barely do). Forcing one scores like the published VMAF anchors
+// were measured, or like a v0.1.0 encode.
+var VMAFV0Models = []VMAFModel{VMAFModelV0FHD, VMAFModelV0FHDNEG, VMAFModelV0UHD, VMAFModelV0UHDNEG}
+
+// IsV0 reports whether the model is one of the v0 models (see VMAFV0Models).
+func (m VMAFModel) IsV0() bool {
+	for _, candidate := range VMAFV0Models {
+		if m == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 // vmafModelNameRe is what a model name may be made of: it is written into an ffmpeg filter
 // graph, where ':', '=', ',' or ';' would be read as options or filters.
@@ -99,6 +121,14 @@ func (m VMAFModel) Description() string {
 		return "phone (1080p) at 5 picture heights, ~50/60 fps"
 	case VMAFModelUHDFarHFR:
 		return "2160p display at 3 picture heights, ~50/60 fps, scored up to 110"
+	case VMAFModelV0FHD:
+		return "1080p display at 3 picture heights"
+	case VMAFModelV0FHDNEG:
+		return "1080p display at 3 picture heights, no enhancement gain"
+	case VMAFModelV0UHD:
+		return "2160p display at 1.5 picture heights"
+	case VMAFModelV0UHDNEG:
+		return "2160p display at 1.5 picture heights, no enhancement gain"
 	default:
 		return ""
 	}
@@ -108,9 +138,11 @@ func (m VMAFModel) Description() string {
 // 1080 for the others (the phone ones included), 0 for a model sptenc does not know.
 func (m VMAFModel) displayHeight() int {
 	switch m {
-	case VMAFModelUHD, VMAFModelUHDFar, VMAFModelUHDHFR, VMAFModelUHDFarHFR:
+	case VMAFModelUHD, VMAFModelUHDFar, VMAFModelUHDHFR, VMAFModelUHDFarHFR,
+		VMAFModelV0UHD, VMAFModelV0UHDNEG:
 		return Height4K
-	case VMAFModelFHD, VMAFModelPhone, VMAFModelFHDHFR, VMAFModelPhoneHFR:
+	case VMAFModelFHD, VMAFModelPhone, VMAFModelFHDHFR, VMAFModelPhoneHFR,
+		VMAFModelV0FHD, VMAFModelV0FHDNEG:
 		return 1080
 	default:
 		return 0
@@ -135,7 +167,7 @@ func (m VMAFModel) ResolutionMismatch(height int) string {
 	if display := m.displayHeight(); display == 0 || display == expected.displayHeight() {
 		return ""
 	}
-	return fmt.Sprintf("%s predicts a %s but the source is %dp, %s is the model of this resolution",
+	return fmt.Sprintf("%s (%s) is made for another display than this %dp source, %s is the model of this resolution",
 		m, m.Description(), height, expected)
 }
 
@@ -459,6 +491,7 @@ func (vr VMAFReport) GetStats() (vs VMAFStats) {
 	vs.Maximum = vr.PooledMetrics.VMAF.Max
 	vs.CAMBIMean = vr.PooledMetrics.CAMBI.Mean
 	vs.CAMBIMax = vr.PooledMetrics.CAMBI.Max
+	vs.HasCAMBI = vr.PooledMetrics.HasCAMBI
 	// Compute the missing ones
 	sort.Sort(vr.Frames)
 	vs.Percentile1 = vr.Frames.VMAFPercentile(vmafPercentile1)
@@ -569,6 +602,9 @@ func (m *VMAFFrameMetrics) UnmarshalJSON(data []byte) error {
 type VMAFPooledMetrics struct {
 	VMAF  VMAFPooledMetric
 	CAMBI VMAFPooledMetric
+	// HasCAMBI reports whether the model has CAMBI among its features: the v1 models do, a v0
+	// one forced with the model flag does not, and its zero would read as "no banding".
+	HasCAMBI bool
 }
 
 // UnmarshalJSON picks the score and the CAMBI feature among the pooled metrics of a report.
@@ -587,6 +623,7 @@ func (m *VMAFPooledMetrics) UnmarshalJSON(data []byte) error {
 	}
 	m.VMAF = raw[vmafKey]
 	m.CAMBI = raw[cambiKey] // zero when absent
+	m.HasCAMBI = cambiKey != ""
 	return nil
 }
 
@@ -613,11 +650,13 @@ type VMAFStats struct {
 	Maximum      float64 `json:"max"`
 	CAMBIMean    float64 `json:"cambi_mean"`
 	CAMBIMax     float64 `json:"cambi_max"`
+	HasCAMBI     bool    `json:"-"` // see VMAFPooledMetrics
 }
 
 // String renders the VMAF statistics as an aligned plain-text table, followed by the banding
-// diagnostic. CAMBI is already part of the score: it is shown for diagnosis, never gated. It
-// rates the banding of the encoded picture, the source's included (see core.VMAFStats).
+// diagnostic when the model has one. CAMBI is already part of the score: it is shown for
+// diagnosis, never gated. It rates the banding of the encoded picture, the source's included
+// (see core.VMAFStats).
 func (vs VMAFStats) String() string {
 	var tableBuffer strings.Builder
 	table := tablewriter.NewTable(&tableBuffer,
@@ -662,10 +701,12 @@ func (vs VMAFStats) String() string {
 		strconv.FormatFloat(vs.Maximum, 'f', -1, float64Precision),
 	})
 	table.Render()
-	fmt.Fprintf(&tableBuffer, "\nBanding (CAMBI, 0 = none, ~5 = slightly annoying, 17 = ceiling): mean %s, max %s\n",
-		strconv.FormatFloat(vs.CAMBIMean, 'f', -1, float64Precision),
-		strconv.FormatFloat(vs.CAMBIMax, 'f', -1, float64Precision),
-	)
+	if vs.HasCAMBI {
+		fmt.Fprintf(&tableBuffer, "\nBanding (CAMBI, 0 = none, ~5 = slightly annoying, 17 = ceiling): mean %s, max %s\n",
+			strconv.FormatFloat(vs.CAMBIMean, 'f', -1, float64Precision),
+			strconv.FormatFloat(vs.CAMBIMax, 'f', -1, float64Precision),
+		)
+	}
 	return tableBuffer.String()
 }
 

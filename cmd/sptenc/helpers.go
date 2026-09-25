@@ -70,8 +70,9 @@ func checkSourceVideo(stats ffmpeg.FFProbeStats) (videoStream *ffmpeg.FFProbeBin
 // resolveVMAFModel returns the VMAF model of a run and tells the user which one and why: the
 // one forced with the model flag, warned about when it is made for another display than the
 // one of the source resolution (it is the point of forcing it: a 1440p source judged as 4K, 4K
-// content meant for 1080p screens), and said unknown when sptenc does not know it (a model
-// newer than sptenc); the one of the source resolution otherwise (see ffmpeg.SelectVMAFModel).
+// content meant for 1080p screens), said unknown when sptenc does not know it (a model newer
+// than sptenc), and warned about when it is a v0 one (see ffmpeg.VMAFV0Models); the one of the
+// source resolution otherwise (see ffmpeg.SelectVMAFModel).
 func resolveVMAFModel(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBinaryStream) ffmpeg.VMAFModel {
 	if forced := cmd.String(vmafModelFlagName); forced != "" {
 		model := ffmpeg.VMAFModel(forced)
@@ -83,6 +84,9 @@ func resolveVMAFModel(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBin
 				model, vmafModelFlagName)
 		default:
 			fmt.Fprintf(out, "VMAF model %s forced by --%s (%s)\n", model, vmafModelFlagName, model.Description())
+		}
+		if model.IsV0() {
+			fmt.Fprintf(out, "WARNING: %s is a VMAF v0 model: it measures luma only and does not see banding (see MANUAL.md, What VMAF sees)\n", model)
 		}
 		return model
 	}

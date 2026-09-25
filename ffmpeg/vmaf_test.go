@@ -40,15 +40,23 @@ func TestVMAFModel(t *testing.T) {
 			t.Errorf("%s has no description", model)
 		}
 	}
-	// any name libvmaf may know is valid, a v0 or a future model included: whether libvmaf
-	// knows it is for the probe to tell
-	for _, name := range []string{"vmaf_v0.6.1", "vmaf_4k_v0.6.1neg", "vmaf_v1.0.17_3d0h"} {
-		if !VMAFModel(name).Valid() {
-			t.Errorf("%q should be valid", name)
+	// the v0 models are described, and told apart
+	for _, model := range VMAFV0Models {
+		if !model.Valid() || model.Description() == "" || !model.IsV0() {
+			t.Errorf("%s should be a valid, described v0 model", model)
 		}
-		if description := VMAFModel(name).Description(); description != "" {
-			t.Errorf("%q should not be described, got %q", name, description)
-		}
+	}
+	if VMAFModelFHD.IsV0() {
+		t.Errorf("%s is not a v0 model", VMAFModelFHD)
+	}
+	// any name libvmaf may know is valid, a future model included: whether libvmaf knows it
+	// is for the probe to tell
+	future := VMAFModel("vmaf_v1.0.17_3d0h")
+	if !future.Valid() {
+		t.Errorf("%q should be valid", future)
+	}
+	if description := future.Description(); description != "" {
+		t.Errorf("%q should not be described, got %q", future, description)
 	}
 	// what the filter graph would read as options or filters is not a name
 	for _, name := range []string{"", "vmaf_v1.0.16_3d0h:log_path=/tmp/x", "a=b", "a,b", "a;b", "a b", "a'b", "a[b]", "../a"} {
@@ -102,6 +110,9 @@ func TestSelectVMAFModel(t *testing.T) {
 		{VMAFModelFHDHFR, 2160, true},
 		{VMAFModelUHDFar, 1080, true},
 		{VMAFModelUHDHFR, 1440, true},
+		{VMAFModelV0FHD, 1080, false},
+		{VMAFModelV0UHDNEG, 2160, false},
+		{VMAFModelV0UHD, 1080, true},
 		{VMAFModel("vmaf_v1.0.17_3d0h"), 2160, false}, // unknown to sptenc: nothing to compare
 	} {
 		if mismatch := tt.model.ResolutionMismatch(tt.height); (mismatch != "") != tt.mismatch {
@@ -225,8 +236,12 @@ func TestVMAFReport_UnmarshalNoScore(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"vmaf": {"min": 1, "max": 2, "mean": 1.5, "harmonic_mean": 1.4}}`), &pooled); err != nil {
 		t.Fatalf("pooled metrics without cambi should parse: %s", err)
 	}
-	if pooled.VMAF.Mean != 1.5 || pooled.CAMBI.Max != 0 {
+	if pooled.VMAF.Mean != 1.5 || pooled.CAMBI.Max != 0 || pooled.HasCAMBI {
 		t.Errorf("unexpected pooled metrics: %+v", pooled)
+	}
+	// and the zero CAMBI of a model without it (a v0 one forced) is not printed as "no banding"
+	if table := (VMAFReport{PooledMetrics: pooled}).GetStats().String(); strings.Contains(table, "Banding") {
+		t.Errorf("no banding line expected without CAMBI:\n%s", table)
 	}
 }
 
@@ -249,7 +264,7 @@ func TestVMAFProbe(t *testing.T) {
 	}
 	ctx := context.Background()
 	dir := t.TempDir()
-	for _, model := range append(append([]VMAFModel{}, VMAFModels...), VMAFForcedModels...) {
+	for _, model := range append(append(append([]VMAFModel{}, VMAFModels...), VMAFForcedModels...), VMAFV0Models...) {
 		version, err := VMAFProbe(ctx, VMAFProbeConfig{Model: model, ReportDir: dir})
 		if errors.Is(err, ErrVMAFModelUnavailable) {
 			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, model, err)
