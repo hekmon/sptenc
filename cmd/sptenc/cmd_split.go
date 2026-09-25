@@ -228,7 +228,7 @@ var splitCommand = &cli.Command{
 			// build optional hw decode config
 			decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)
 			if requestedDecoder.Enabled() && !decoderCfg.Enabled() {
-				fmt.Fprintf(bypass, "WARNING: input codec is not compatible with %s decoding, falling back to software decode\n", requestedDecoder.Name())
+				fmt.Fprintf(bypass, "WARNING: input codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode\n", requestedDecoder.Name())
 			}
 			// create the master within
 			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, filepath.Join(workingDir, "master.mkv"),

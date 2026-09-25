@@ -218,75 +218,88 @@ func GetEncoderQPRange(encoder Encoder) (qpMin, qpMax int, found bool) {
 	}
 }
 
-// IsNVDecCompatible reports whether the given codec can be decoded by NVDEC in
-// principle. It performs a codec-level check only; it does not verify whether
-// the specific GPU has the required silicon (e.g. AV1 NVDEC requires Ampere or
-// newer, and some datacenter SKUs omit it entirely).
+// IsNVDecCompatible reports whether sptenc decodes the given codec with NVDEC. It performs a
+// codec-level check only; it does not verify whether the specific GPU has the required silicon
+// (e.g. AV1 NVDEC requires Ampere or newer, and some datacenter SKUs omit it entirely).
 //
-// Supported codecs: H.264, HEVC, MJPEG, MPEG-1/2/4, VP8/VP9, VC-1, AV1.
+// Supported by NVDEC: H.264, HEVC, MJPEG, MPEG-1/2/4, VP8/VP9, VC-1, AV1. MJPEG and MPEG-1/2/4
+// are left to the CPU (see the switch).
 //
 // References:
 //   - https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/nvdec-video-decoder-api-prog-guide/index.html#supported-codecs
 //   - https://trac.ffmpeg.org/wiki/HWAccelIntro#NVDECCUVID
 func IsNVDecCompatible(codec CodecName) bool {
 	switch codec {
-	case CodecVideoMPEG1, CodecVideoMPEG2, CodecVideoMPEG4, CodecVideoVC1, CodecVideoAVC,
-		CodecVideoHEVC, CodecVideoVP8, CodecVideoVP9, CodecVideoAV1, CodecVideoMJPEG:
+	// MPEG-1, MPEG-2, MPEG-4 Part 2 and MJPEG are left to the CPU on purpose, though NVDEC
+	// supports them: their decoded frames depend on the inverse DCT of the decoder. ffmpeg's own
+	// inverse DCTs (-idct simple and int) decode each of them to different frames, and NVDEC's
+	// frames differed from ffmpeg's software decode on every frame of a test clip of each (PSNR
+	// 60 to 66 dB). The MPEG-1, MPEG-2 and JPEG standards only bound the error of the inverse DCT
+	// (IEEE 1180, see "mismatch control" in Chad Fogg's MPEG-2 FAQ; ITU-T T.81, A.3.3). Decoded by
+	// NVDEC, the master would not be the one a software decode gives. The codecs below decoded to
+	// the very frames of the software decode (H.264, VP8, VC-1, and HEVC, VP9 and AV1 in 8 and 10
+	// bits, AV1 with film grain as well; ffmpeg 9.0.2, RTX 5090).
+	case CodecVideoVC1, CodecVideoAVC, CodecVideoHEVC, CodecVideoVP8, CodecVideoVP9, CodecVideoAV1:
 		return true
 	default:
 		return false
 	}
 }
 
-// IsVAAPIDecCompatible reports whether the given codec can be decoded by VA-API in
-// principle. It performs a codec-level check only; actual support depends on the
-// specific driver and hardware generation (e.g. AV1 VA-API decode requires Intel
-// Xe-LP+ or AMD VCN3+).
+// IsVAAPIDecCompatible reports whether sptenc decodes the given codec with VA-API. It performs a
+// codec-level check only; actual support depends on the specific driver and hardware generation
+// (e.g. AV1 VA-API decode requires Intel Xe-LP+ or AMD VCN3+).
 //
-// Supported codecs: H.264, HEVC, MPEG-2, VP9, VC-1, AV1.
+// Supported by VA-API: H.264, HEVC, MPEG-2, VP9, VC-1, AV1. MPEG-2 is left to the CPU (see the
+// switch).
 //
 // Reference: https://trac.ffmpeg.org/wiki/HWAccelIntro#VA-API
 func IsVAAPIDecCompatible(codec CodecName) bool {
 	switch codec {
-	case CodecVideoMPEG2, CodecVideoVC1, CodecVideoAVC,
-		CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
+	// MPEG-2 is left to the CPU on purpose, though VA-API supports it: its decoded frames depend on
+	// the inverse DCT of the decoder, see IsNVDecCompatible (not measured with VA-API).
+	case CodecVideoVC1, CodecVideoAVC, CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
 		return true
 	default:
 		return false
 	}
 }
 
-// IsD3D12DecCompatible reports whether the given codec can be decoded by D3D12VA
-// in principle. It performs a codec-level check only; actual support depends on
-// the specific GPU, driver, and Windows version (e.g. AV1 D3D12VA decode requires
-// recent hardware, and the driver must expose decode tier 2 support).
+// IsD3D12DecCompatible reports whether sptenc decodes the given codec with D3D12VA. It performs a
+// codec-level check only; actual support depends on the specific GPU, driver, and Windows version
+// (e.g. AV1 D3D12VA decode requires recent hardware, and the driver must expose decode tier 2
+// support).
 //
-// Supported codecs: H.264, HEVC, MPEG-2, VP9, VC-1, AV1.
+// Supported by D3D12VA: H.264, HEVC, MPEG-2, VP9, VC-1, AV1. MPEG-2 is left to the CPU (see the
+// switch).
 //
 // References:
 //   - https://ffmpeg.org/doxygen/trunk/dir_3b1f69f89eda39a44baf4887988d54a7.html
 //   - https://ffmpeg.org/ffmpeg-codecs.html
 func IsD3D12DecCompatible(codec CodecName) bool {
 	switch codec {
-	case CodecVideoMPEG2, CodecVideoVC1, CodecVideoAVC,
-		CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
+	// MPEG-2 is left to the CPU on purpose, though D3D12VA supports it: its decoded frames depend
+	// on the inverse DCT of the decoder, see IsNVDecCompatible (not measured with D3D12VA).
+	case CodecVideoVC1, CodecVideoAVC, CodecVideoHEVC, CodecVideoVP9, CodecVideoAV1:
 		return true
 	default:
 		return false
 	}
 }
 
-// IsVideoToolboxDecCompatible reports whether the given codec can be decoded by
-// VideoToolbox in principle. It performs a codec-level check only.
+// IsVideoToolboxDecCompatible reports whether sptenc decodes the given codec with VideoToolbox.
+// It performs a codec-level check only.
 //
-// Supported codecs: H.264, HEVC, MPEG-1, MPEG-2, MPEG-4 Part 2, ProRes.
-// ProRes is omitted as sptenc targets consumer codecs.
+// Supported by VideoToolbox: H.264, HEVC, MPEG-1, MPEG-2, MPEG-4 Part 2, ProRes. ProRes is omitted
+// as sptenc targets consumer codecs, MPEG-1/2/4 are left to the CPU (see the switch).
 //
 // Reference: https://trac.ffmpeg.org/wiki/HWAccelIntro#VideoToolbox
 func IsVideoToolboxDecCompatible(codec CodecName) bool {
 	switch codec {
-	case CodecVideoMPEG1, CodecVideoMPEG2, CodecVideoMPEG4,
-		CodecVideoAVC, CodecVideoHEVC:
+	// MPEG-1, MPEG-2 and MPEG-4 Part 2 are left to the CPU on purpose, though VideoToolbox supports
+	// them: their decoded frames depend on the inverse DCT of the decoder, see IsNVDecCompatible
+	// (not measured with VideoToolbox).
+	case CodecVideoAVC, CodecVideoHEVC:
 		return true
 	default:
 		return false

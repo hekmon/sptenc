@@ -51,6 +51,33 @@ func TestResolveHWDecoder(t *testing.T) {
 	}
 }
 
+// Codecs whose decoded frames depend on the inverse DCT of the decoder are left to the CPU,
+// whatever the hardware decoder supports (see IsNVDecCompatible).
+func TestHWDecodersLeaveInexactCodecsToTheCPU(t *testing.T) {
+	for name, decodes := range map[string]func(CodecName) bool{
+		"NVDEC":        IsNVDecCompatible,
+		"VA-API":       IsVAAPIDecCompatible,
+		"D3D12VA":      IsD3D12DecCompatible,
+		"VideoToolbox": IsVideoToolboxDecCompatible,
+	} {
+		for _, codec := range []CodecName{CodecVideoMPEG1, CodecVideoMPEG2, CodecVideoMPEG4, CodecVideoMJPEG} {
+			if decodes(codec) {
+				t.Errorf("%s must not decode %s: its decoded frames depend on the inverse DCT of the decoder", name, codec)
+			}
+		}
+		for _, codec := range []CodecName{CodecVideoAVC, CodecVideoHEVC} {
+			if !decodes(codec) {
+				t.Errorf("%s must decode %s", name, codec)
+			}
+		}
+	}
+	// with a hardware decoder requested, an MPEG-2 source falls back to software decode
+	requested := HWDecoderConfig{NVDec: true, NVDevice: 1}
+	if dec := requested.compatibleWith(t.Context(), "does-not-exist.mkv", CodecVideoMPEG2, nil); dec.Enabled() || dec.NVDevice != 1 {
+		t.Errorf("an MPEG-2 file must fall back to software decode, devices kept: got %+v", dec)
+	}
+}
+
 // With the codec known, no file is probed: the path does not even need to exist.
 func TestHWDecoderConfig_CompatibleWithKnownCodec(t *testing.T) {
 	requested := HWDecoderConfig{NVDec: true, NVDevice: 1, VAAPIDevice: "/dev/dri/renderD129"}

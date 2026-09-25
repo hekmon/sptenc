@@ -149,12 +149,12 @@ var batchsearchCommand = &cli.Command{
 		"    --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + " (Windows) or\n" +
 		"    --" + videoToolboxDecFlagName + " (macOS). More CPU left for the encoder.\n" +
 		"  * --" + concurrentSegmentsFlagName + " (-C) works on several segments at once, see CONCURRENT ENCODING.\n" +
-		"Decoding H.264, HEVC, VP9 or AV1 on a GPU does not change a single pixel (their decoders are\n" +
-		"exact by specification), only who spends the time. MPEG-2 and MPEG-4 Part 2 sources can come\n" +
-		"out slightly different, by rounding (see MANUAL.md, Hardware decoding). A decoder that does not\n" +
+		"Decoding H.264, HEVC, VP8, VP9, AV1 or VC-1 on a GPU gives the pixels of a software decode, only\n" +
+		"who spends the time changes. MPEG-1, MPEG-2, MPEG-4 Part 2 and MJPEG sources are always decoded\n" +
+		"by the CPU: a GPU would not give the same pixels (see MANUAL.md, Hardware decoding). So is the\n" +
+		"lossless intermediate sptenc works from (FFV1): no GPU decodes it. A decoder that does not\n" +
 		"support your source codec falls back to software with a warning. A decode flag contradicting\n" +
-		"the encoder or --" + vmafCUDAFlagName + " is refused before anything starts. The only decoding no GPU can\n" +
-		"take is the lossless intermediate sptenc works from (FFV1): everything else goes.\n" +
+		"the encoder or --" + vmafCUDAFlagName + " is refused before anything starts.\n" +
 		"Run 'sptenc check' to see the encoders and filters available in your ffmpeg build.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
@@ -444,7 +444,7 @@ var batchsearchCommand = &cli.Command{
 		// Decoder of the source (scene detection, frame count, master)
 		decoderCfg := hwDecoder.CompatibleWith(ctx, inputPath)
 		if hwDecoder.Enabled() && !decoderCfg.Enabled() {
-			fmt.Fprintf(bypass, "WARNING: input codec is not compatible with %s decoding, falling back to software decode\n", hwDecoder.Name())
+			fmt.Fprintf(bypass, "WARNING: input codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode\n", hwDecoder.Name())
 		}
 
 		// Get source duration for progress reporting

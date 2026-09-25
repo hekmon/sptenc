@@ -166,10 +166,10 @@ var vmafCommand = &cli.Command{
 		decoderCfg, _ := encodeHWDecoder(cmd, "")
 		if decoderCfg.Enabled() {
 			if !decoderCfg.CompatibleWith(ctx, distortedPath).Enabled() {
-				fmt.Fprintf(bypass, "WARNING: distorted codec is not compatible with %s decoding, falling back to software decode for distorted file\n", decoderCfg.Name())
+				fmt.Fprintf(bypass, "WARNING: distorted codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode for distorted file\n", decoderCfg.Name())
 			}
 			if !decoderCfg.CompatibleWith(ctx, referencePath).Enabled() {
-				fmt.Fprintf(bypass, "WARNING: reference codec is not compatible with %s decoding, falling back to software decode for reference file\n", decoderCfg.Name())
+				fmt.Fprintf(bypass, "WARNING: reference codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode for reference file\n", decoderCfg.Name())
 			}
 		}
 

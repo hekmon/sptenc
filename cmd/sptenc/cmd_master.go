@@ -119,7 +119,7 @@ var masterCommand = &cli.Command{
 		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
 		decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)
 		if requestedDecoder.Enabled() && !decoderCfg.Enabled() {
-			fmt.Fprintf(liveprogress.Bypass(), "WARNING: input codec is not compatible with %s decoding, falling back to software decode\n", requestedDecoder.Name())
+			fmt.Fprintf(liveprogress.Bypass(), "WARNING: input codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode\n", requestedDecoder.Name())
 		}
 		// create master
 		var outputFile string

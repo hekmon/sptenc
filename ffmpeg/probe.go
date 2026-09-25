@@ -142,16 +142,16 @@ const (
 	CodecAudioPCM    CodecName = "pcm_s16le" // LongName: PCM signed 16-bit little-endian
 	CodecAudioPCM24b CodecName = "pcm_s24le" // LongName: PCM signed 24-bit little-endian
 	// Video
-	CodecVideoMPEG1 CodecName = "mpeg1video" // unverified
-	CodecVideoMPEG2 CodecName = "mpeg2video" // unverified
-	CodecVideoMPEG4 CodecName = "mpeg4"      // unverified
+	CodecVideoMPEG1 CodecName = "mpeg1video"
+	CodecVideoMPEG2 CodecName = "mpeg2video"
+	CodecVideoMPEG4 CodecName = "mpeg4"
 	CodecVideoVC1   CodecName = "vc1"
 	CodecVideoAVC   CodecName = "h264"
 	CodecVideoHEVC  CodecName = "hevc"
-	CodecVideoVP8   CodecName = "vp8"   // unverified
-	CodecVideoVP9   CodecName = "vp9"   // unverified
-	CodecVideoAV1   CodecName = "av1"   // unverified
-	CodecVideoMJPEG CodecName = "mjpeg" // unverified
+	CodecVideoVP8   CodecName = "vp8"
+	CodecVideoVP9   CodecName = "vp9"
+	CodecVideoAV1   CodecName = "av1"
+	CodecVideoMJPEG CodecName = "mjpeg"
 )
 
 // FFProbeBinaryStream holds metadata for a single stream within a media file.
