@@ -384,7 +384,6 @@ type HEVCVAAPIEncodeQPConfig struct {
 }
 
 // HEVCVAAPIEncodeQP encodes a video file to HEVC/H.265 using the VA-API hardware encoder via FFmpeg.
-// WARNING: currently untested
 func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
