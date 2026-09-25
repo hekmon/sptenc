@@ -113,6 +113,7 @@ var masterCommand = &cli.Command{
 			return fmt.Errorf("failed to start live progress: %w", err)
 		}
 		defer liveprogress.Stop(false)
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 		// build optional hw decode config
 		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
 		decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)

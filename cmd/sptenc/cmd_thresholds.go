@@ -118,6 +118,7 @@ var thresholdsCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
 		/*
 		 * Execute

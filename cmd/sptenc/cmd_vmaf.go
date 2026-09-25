@@ -124,6 +124,7 @@ var vmafCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
 		// create a temporary directory
 		var workingDir string
@@ -152,6 +153,11 @@ var vmafCommand = &cli.Command{
 		/*
 		 * Execute
 		 */
+		globalStart := time.Now()
+		fmt.Fprintf(bypass, "Computing VMAF of %s against %s\n",
+			shellescape.Quote(filepath.Base(distortedPath)),
+			shellescape.Quote(filepath.Base(referencePath)),
+		)
 
 		// Hardware decoder: NVDEC with VMAF on CUDA, the decode flags otherwise (validated in
 		// Before). Warn when a file can not be decoded by it, the ffmpeg functions fall back by
@@ -167,23 +173,33 @@ var vmafCommand = &cli.Command{
 		}
 
 		// Probe reference file for stream info and frame count (incompatible decoders are ignored)
-		fmt.Fprintln(bypass, "Probing reference file...")
+		fmt.Fprintln(bypass, "Counting the frames of the reference file...")
+		start := time.Now()
 		videoStream, _, err := liveProbeVideoCF(ctx, referencePath, cmd.Bool(debugFlagName), decoderCfg)
 		if err != nil {
 			return fmt.Errorf("failed to probe reference file: %w", err)
 		}
+		fmt.Fprintf(bypass, "\tCounted %d %s frames in %s\n",
+			videoStream.NbReadFrames, videoStream.CodecName, time.Since(start).Round(time.Second),
+		)
 		if !videoStream.IsConstantFrameRate() {
-			return errors.New("variable frame rate (VFR) content is not supported: VMAF requires CFR for frame-exact alignment")
+			return fmt.Errorf("variable frame rate (VFR) content is not supported: reference frames last from %s to %s while it declares a constant frame rate (%s fps)",
+				videoStream.ShortestFrameDuration, videoStream.LongestFrameDuration, videoStream.RFrameRate)
 		}
 
 		// Probe distorted file and validate compatibility
-		fmt.Fprintln(bypass, "Probing distorted file...")
+		fmt.Fprintln(bypass, "Counting the frames of the distorted file...")
+		start = time.Now()
 		distVideoStream, _, err := liveProbeVideoCF(ctx, distortedPath, cmd.Bool(debugFlagName), decoderCfg)
 		if err != nil {
 			return fmt.Errorf("failed to probe distorted file: %w", err)
 		}
+		fmt.Fprintf(bypass, "\tCounted %d %s frames in %s\n",
+			distVideoStream.NbReadFrames, distVideoStream.CodecName, time.Since(start).Round(time.Second),
+		)
 		if !distVideoStream.IsConstantFrameRate() {
-			return errors.New("distorted file has variable frame rate (VFR): VMAF requires CFR for frame-exact alignment")
+			return fmt.Errorf("variable frame rate (VFR) content is not supported: distorted frames last from %s to %s while it declares a constant frame rate (%s fps)",
+				distVideoStream.ShortestFrameDuration, distVideoStream.LongestFrameDuration, distVideoStream.RFrameRate)
 		}
 
 		// Validate frame counts match
@@ -212,7 +228,7 @@ var vmafCommand = &cli.Command{
 
 		// Compute VMAF with progress
 		fmt.Fprintln(bypass, "Computing VMAF...")
-		start := time.Now()
+		start = time.Now()
 		gpuIndex := cmd.Int(nvidiaGPUIndexFlagName)
 		report, err := liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
 			ReferencePath:     referencePath,
@@ -230,10 +246,11 @@ var vmafCommand = &cli.Command{
 		}
 
 		stats := report.GetStats()
-		fmt.Fprintf(bypass, "\nVMAF computed in %s:\n\n%s\n",
+		fmt.Fprintf(bypass, "\tVMAF computed in %s:\n\n%s\n",
 			time.Since(start).Round(time.Second),
 			stats,
 		)
+		fmt.Fprintf(bypass, "Complete VMAF computation took %s\n", time.Since(globalStart).Round(time.Second))
 		return nil
 	},
 }

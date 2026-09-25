@@ -118,6 +118,7 @@ var remuxCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
 		// Probe original file for duration
 		origStats, err := getStreamsInfos(ctx, originalPath, cmd.Bool(debugFlagName))

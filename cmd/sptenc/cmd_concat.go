@@ -114,6 +114,7 @@ var concatCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 		// create a temporary directory
 		var workingDir string
 		if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {

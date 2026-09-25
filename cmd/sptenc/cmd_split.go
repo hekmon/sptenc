@@ -164,6 +164,7 @@ var splitCommand = &cli.Command{
 		}
 		defer liveprogress.Stop(false)
 		bypass := liveprogress.Bypass()
+		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
 		// handle modes and master preparation
 		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
