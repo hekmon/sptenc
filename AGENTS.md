@@ -30,7 +30,8 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 ## Critical files to read before changing anything
 
-- **`README.md`** — QP-vs-CRF rationale, cache system, GPU selection, all commands.
+- **`README.md`** — Overview, all commands, quick start.
+- **`MANUAL.md`** — QP-vs-CRF rationale, Av1an comparison, VMAF thresholds, encoder choice, cache system, GPU selection.
 - **`cmd/sptenc/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes live progress UI and statistical decision logic.
 - **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.

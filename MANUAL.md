@@ -1,6 +1,16 @@
 # Split Encoder - Manual
 
-Start by README. This is the "tell me everything page".
+Start by [README](README.md). This is the "tell me everything page".
+
+1. [Input Requirements](#input-requirements)
+2. [VMAF](#vmaf)
+3. [Encoders](#encoders)
+4. [Scene Detection and Threshold Selection](#scene-detection-and-threshold-selection)
+5. [Adaptive QP Search](#adaptive-qp-search)
+6. [Output](#output)
+7. [Base ffmpeg encode options](#base-ffmpeg-encode-options)
+8. [Installation details](#installation-details)
+9. [Compared to other approaches](#compared-to-other-approaches)
 
 ## Input Requirements
 
@@ -19,81 +29,6 @@ Instead of letting sptenc split the input automatically, you can provide an alre
 ```
 
 When using a pre-segmented directory, `--original-file` (alias `-f`) is **required** so sptenc can remux audio, subtitles, and other streams into the final output.
-
-## How does it compare to Av1an?
-
-[Av1an](https://github.com/rust-av/Av1an) is the reference tool for scene based chunked encoding, and its Target Quality mode looks like what sptenc does: find, for each scene, the encoder setting reaching a metric score. If you know Av1an, this is the question you have. Both tools overlap, they do not aim at the same thing. As of Av1an's documentation and sources in September 2026:
-
-| | Av1an (Target Quality) | sptenc |
-|---|---|---|
-| Purpose | Encode faster by running several encoder processes in parallel; Target Quality is one of its modes | Enforce a quality floor on every scene; time (CPU encoder) or size (GPU encoder) is what is traded for it |
-| What is promised for a scene | A score to aim at: a limited number of probes (4 by default), and the probe closest to the target is used if none reached it | A floor: no limit on attempts, a segment is only accepted once it passes, or is flagged as best effort when even the lowest QP of the encoder can not pass |
-| What is measured | Probes, by default faster and lower resolution encodes than the final one, which is then not measured (`--probe-slow` makes the probes real encodes) | The segments ending up in the output file, always |
-| Quality gate | One statistic of one metric (mean, harmonic mean, a percentile, minimum...) | Any combination of 8 statistics, all having to pass |
-| Metrics | VMAF, SSIMULACRA2, Butteraugli, XPSNR | VMAF only |
-| Dial | CRF / CQ, the rate control of the encoder stays in charge | Constant QP (see [why](#why-qp-instead-of-crf)) |
-| Encoders | Software: aomenc, SVT-AV1, rav1e, vpxenc, x264, x265, with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox), with fixed opinionated parameters |
-| GPU | Decoding (DGDecNV) and some metrics | Encoding, to search fast then encode the final file on CPU (`batchsearch --final-encode`) or as the final encoder, and VMAF (CUDA) |
-| Scene cuts | av-scenechange, frame exact chunks piped through VapourSynth, no intermediate file needed | ffmpeg `scdet`, frame exact cuts of a lossless intermediate (large: count on disk space), and a search of the scene threshold itself (`batchsearch`) |
-| Verification | Optional VMAF plot of the result | Frame counts of every segment and of the final file, final VMAF of the whole file embedded in its tags |
-| Learning | None between runs | QP statistics of previous encodes kept to start the next searches closer |
-| Interrupted run | Can be resumed | Starts over |
-| Requirements | FFmpeg, VapourSynth, the encoders binaries | ffmpeg (with libvmaf) and mkvpropedit |
-
-In short: choose Av1an to encode fast and well, with the encoder, the parameters and the metric of your choice, a metric seeing color (SSIMULACRA2, Butteraugli) included. Choose sptenc when the point is not to get close to a score but to never get under it, on the very files you will keep, and to have that written in them.
-
-## Why QP instead of CRF?
-
-sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant QP)** mode, not CRF.
-
-This is not because CRF could not be searched: for a given segment, both dials are deterministic (same value, same file) and monotonic (VMAF goes down as the value goes up), which is all the interpolation search needs to converge in a few attempts. The reasons are elsewhere:
-
-- **One dial for every encoder.** CRF is a software encoder concept. Hardware encoders expose a constant quantizer, or their own flavor of quality target, not CRF. With QP, the same search, the same statistics and the same workflow (search on a GPU encoder, final encode on its CPU counterpart) apply to every supported encoder.
-- **No rate control competing with the search.** CRF is a rate control: the encoder moves bits between frames and blocks following its own perceptual model (adaptive quantization, cu-tree), which is not VMAF. sptenc already has something deciding where quality must vary, against the metric you chose: the scene splitter, then the search of each segment. A segment being a single scene, its content is homogeneous, there is not much left for a rate control to adapt to.
-
-What happens around that base QP depends on the encoder. `libx265` turns adaptive quantization and cu-tree off by itself in constant QP mode, whatever is asked: the QP requested is the QP applied, frame type offsets aside. NVENC encoders keep their spatial and temporal adaptive quantization (and their lookahead) active under `constqp`: the QP requested is a base the driver modulates per block. Either way these settings are **identical for every tested QP**, only the base QP moves, so the comparison between candidates remains stable.
-
-Whether CRF would give a smaller or a bigger file at the same VMAF score depends on the content and is not something sptenc relies on. The guarantee does not come from the dial anyway: it comes from measuring every segment after it has been encoded, and encoding it again when it fails.
-
-
-
-## Scene Detection and Threshold Selection
-
-Scene detection splits a video into independent segments, and each segment gets its own QP. The threshold controls how many boundaries are kept, which directly affects both quality visibility and file size. There is no single right threshold — the choice depends on which tradeoff you are willing to accept.
-
-### Too fine: many short segments
-
-A low threshold keeps almost every detected boundary. This gives hard passages their own QP and keeps VMAF metrics honest — a bad frame in a 5-second segment will almost certainly move the segment's mean or percentiles enough to trigger a re-encode.
-
-The cost is keyframe bloat and B/P-frame starvation. Every boundary forces an I-frame, and runs shorter than a few seconds never let inter-frame referencing amortize the intra cost. File size inflates, and VMAF percentile metrics become statistically unreliable on very short segments (p1 needs ≥100 frames, p5 needs ≥20).
-
-### Too coarse: few long segments
-
-A high threshold discards weak boundaries, merging scenes into long runs. B/P-frame compression thrives, and file size drops — but the whole segment must bow to its hardest passage. Easy sections pay for quality they do not need.
-
-More dangerously, a short complex passage inside a long easy segment can fail VMAF locally while the segment-wide average still passes. The bad frames are statistically invisible, undermining the guarantee that every part of the video meets your quality floor.
-
-### The role of `batchsearch`
-
-`batchsearch` automates the tedious work of testing multiple thresholds and picking the one that produces the smallest file while still passing your VMAF targets. Its objective is file size — it has no opinion on whether the winning threshold's segment lengths are short enough for their percentile metrics to be trustworthy.
-
-If you care more about tight quality control than file size, skip `batchsearch`. Use the `thresholds` command to inspect distributions, pick a threshold manually, and run `encode`.
-
-### The `--min-segment-length` guardrail
-
-The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbour.
-
-It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
-
-Use the `thresholds` command to preview the segment distributions a threshold would produce before committing to an `encode` or a `batchsearch` run. It is fast and produces no files.
-
-### Reusing a threshold
-
-`encode`, `thresholds`, and `batchsearch` all build scenes the same way: the threshold picks the boundaries first, then `--min-segment-length` merges the short segments that remain. The scenes a threshold produces therefore depend only on that threshold and on `--min-segment-length` — not on the `--min-threshold`/`--max-threshold` range a search was run with.
-
-This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--min-segment-length`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season.
-
-Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scene scores rounded to 3 decimals but compares thresholds against the unrounded score, so sptenc reports half a step below the printed score to guarantee the boundary is kept. Use the value as printed.
 
 ## VMAF
 
@@ -237,6 +172,44 @@ When using a GPU encoder, you can target a specific device:
 
 > These flags select the GPU device for **encoding**, and for **decoding** as well: a hardware encoder decodes with the same device. For hardware-accelerated decoding with a CPU encoder, or during `master`, `split`, `thresholds` or `vmaf`, use `--nvdec`, `--vaapi-dec`, `--d3d12va-dec`, or `--videotoolbox-dec`; the device flags above apply to them. A decode flag contradicting the hardware encoder (or NVDEC implied by `--vmaf-cuda`) is rejected.
 
+## Scene Detection and Threshold Selection
+
+Scene detection splits a video into independent segments, and each segment gets its own QP. The threshold controls how many boundaries are kept, which directly affects both quality visibility and file size. There is no single right threshold — the choice depends on which tradeoff you are willing to accept.
+
+### Too fine: many short segments
+
+A low threshold keeps almost every detected boundary. This gives hard passages their own QP and keeps VMAF metrics honest — a bad frame in a 5-second segment will almost certainly move the segment's mean or percentiles enough to trigger a re-encode.
+
+The cost is keyframe bloat and B/P-frame starvation. Every boundary forces an I-frame, and runs shorter than a few seconds never let inter-frame referencing amortize the intra cost. File size inflates, and VMAF percentile metrics become statistically unreliable on very short segments (p1 needs ≥100 frames, p5 needs ≥20).
+
+### Too coarse: few long segments
+
+A high threshold discards weak boundaries, merging scenes into long runs. B/P-frame compression thrives, and file size drops — but the whole segment must bow to its hardest passage. Easy sections pay for quality they do not need.
+
+More dangerously, a short complex passage inside a long easy segment can fail VMAF locally while the segment-wide average still passes. The bad frames are statistically invisible, undermining the guarantee that every part of the video meets your quality floor.
+
+### The role of `batchsearch`
+
+`batchsearch` automates the tedious work of testing multiple thresholds and picking the one that produces the smallest file while still passing your VMAF targets. Its objective is file size — it has no opinion on whether the winning threshold's segment lengths are short enough for their percentile metrics to be trustworthy.
+
+If you care more about tight quality control than file size, skip `batchsearch`. Use the `thresholds` command to inspect distributions, pick a threshold manually, and run `encode`.
+
+### The `--min-segment-length` guardrail
+
+The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbour.
+
+It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
+
+Use the `thresholds` command to preview the segment distributions a threshold would produce before committing to an `encode` or a `batchsearch` run. It is fast and produces no files.
+
+### Reusing a threshold
+
+`encode`, `thresholds`, and `batchsearch` all build scenes the same way: the threshold picks the boundaries first, then `--min-segment-length` merges the short segments that remain. The scenes a threshold produces therefore depend only on that threshold and on `--min-segment-length` — not on the `--min-threshold`/`--max-threshold` range a search was run with.
+
+This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--min-segment-length`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season.
+
+Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scene scores rounded to 3 decimals but compares thresholds against the unrounded score, so sptenc reports half a step below the printed score to guarantee the boundary is kept. Use the value as printed.
+
 ## Adaptive QP Search
 
 sptenc's per-segment QP search uses a 3-step algorithm that converges on the highest valid QP (smallest file) efficiently, even on the first run:
@@ -269,6 +242,27 @@ Because a given VMAF target can require very different QP distributions dependin
 |---|---|---|---|
 | `--stats-cache-dir` | `-s` | OS cache dir (`~/.cache/sptenc` or equivalent) | Directory where QP statistics are stored |
 | `--cache-profile` | `-c` | *(none)* | Isolate cache history between content types |
+
+## Output
+
+The output is always Matroska (`.mkv`) because it is the most permissive container for stream copy.
+
+Color metadata (`color_range`, `colorspace`, `color_trc` and `color_primaries`) is probed from the source and re-injected into the output container. HDR metadata handling is still being validated.
+
+You specify the output path explicitly as the final positional argument for file-producing commands (`encode`, `batchsearch`, `remux`, `master`, `concat`). Directory-producing commands (`split`) take an output directory in the same way.
+
+### Metadata tags
+
+The output file contains the following metadata tags on the video stream:
+
+- `sptenc_url` and `sptenc_version` — tool provenance
+- `sptenc_encoder` and `sptenc_encoder_preset` — encoder used
+- `sptenc_segments_count` — number of segments
+- `sptenc_stats_min_qp`, `sptenc_stats_max_qp`, `sptenc_stats_weighted_qp` — QP statistics
+- `sptenc_vmaf_model` — VMAF model used
+- `sptenc_vmaf_conf_*` — all enabled VMAF threshold values
+- `sptenc_vmaf_result_*` — final VMAF scores (min, p1, p5, p10, p25, median, hmean, mean, max)
+- `sptenc_best_effort_segments` — number of segments that stopped at minimum QP without reaching the target VMAF profile (omitted if zero)
 
 ## Base ffmpeg encode options
 
@@ -326,23 +320,51 @@ ffmpeg [...] -c:v 'av1_nvenc' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-
 ffmpeg [...] -c:v 'av1_vaapi' -profile:v 'main' -rc_mode 'CQP' -global_quality 'X' [...]
 ```
 
-## Output
+## Installation details
 
-The output is always Matroska (`.mkv`) because it is the most permissive container for stream copy.
+Where the binaries are looked for:
 
-Color metadata (`color_range`, `colorspace`, `color_trc` and `color_primaries`) is probed from the source and re-injected into the output container. HDR metadata handling is still being validated.
+| Binary | Linux / macOS | Windows | Override (global flag) |
+|---|---|---|---|
+| `ffmpeg` | `PATH` | `.\ffmpeg.exe` (current directory, not `PATH`) | `--ffmpeg-path` |
+| `ffprobe` | `PATH` | `.\ffprobe.exe` (current directory, not `PATH`) | `--ffprobe-path` |
+| `mkvpropedit` | `PATH` | `C:\Program Files\MKVToolNix\mkvpropedit.exe` | `--mkvpropedit-path` |
 
-You specify the output path explicitly as the final positional argument for file-producing commands (`encode`, `batchsearch`, `remux`, `master`, `concat`). Directory-producing commands (`split`) take an output directory in the same way.
+Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc check` to verify everything is found and usable.
 
-### Metadata tags
+## Compared to other approaches
 
-The output file contains the following metadata tags on the video stream:
+### How does it compare to Av1an?
 
-- `sptenc_url` and `sptenc_version` — tool provenance
-- `sptenc_encoder` and `sptenc_encoder_preset` — encoder used
-- `sptenc_segments_count` — number of segments
-- `sptenc_stats_min_qp`, `sptenc_stats_max_qp`, `sptenc_stats_weighted_qp` — QP statistics
-- `sptenc_vmaf_model` — VMAF model used
-- `sptenc_vmaf_conf_*` — all enabled VMAF threshold values
-- `sptenc_vmaf_result_*` — final VMAF scores (min, p1, p5, p10, p25, median, hmean, mean, max)
-- `sptenc_best_effort_segments` — number of segments that stopped at minimum QP without reaching the target VMAF profile (omitted if zero)
+[Av1an](https://github.com/rust-av/Av1an) is the reference tool for scene based chunked encoding, and its Target Quality mode looks like what sptenc does: find, for each scene, the encoder setting reaching a metric score. If you know Av1an, this is the question you have. Both tools overlap, they do not aim at the same thing. As of Av1an's documentation and sources in September 2026:
+
+| | Av1an (Target Quality) | sptenc |
+|---|---|---|
+| Purpose | Encode faster by running several encoder processes in parallel; Target Quality is one of its modes | Enforce a quality floor on every scene; time (CPU encoder) or size (GPU encoder) is what is traded for it |
+| What is promised for a scene | A score to aim at: a limited number of probes (4 by default), and the probe closest to the target is used if none reached it | A floor: no limit on attempts, a segment is only accepted once it passes, or is flagged as best effort when even the lowest QP of the encoder can not pass |
+| What is measured | Probes, by default faster and lower resolution encodes than the final one, which is then not measured (`--probe-slow` makes the probes real encodes) | The segments ending up in the output file, always |
+| Quality gate | One statistic of one metric (mean, harmonic mean, a percentile, minimum...) | Any combination of 8 statistics, all having to pass |
+| Metrics | VMAF, SSIMULACRA2, Butteraugli, XPSNR | VMAF only |
+| Dial | CRF / CQ, the rate control of the encoder stays in charge | Constant QP (see [why](#why-qp-instead-of-crf)) |
+| Encoders | Software: aomenc, SVT-AV1, rav1e, vpxenc, x264, x265, with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox), with fixed opinionated parameters |
+| GPU | Decoding (DGDecNV) and some metrics | Encoding, to search fast then encode the final file on CPU (`batchsearch --final-encode`) or as the final encoder, and VMAF (CUDA) |
+| Scene cuts | av-scenechange, frame exact chunks piped through VapourSynth, no intermediate file needed | ffmpeg `scdet`, frame exact cuts of a lossless intermediate (large: count on disk space), and a search of the scene threshold itself (`batchsearch`) |
+| Verification | Optional VMAF plot of the result | Frame counts of every segment and of the final file, final VMAF of the whole file embedded in its tags |
+| Learning | None between runs | QP statistics of previous encodes kept to start the next searches closer |
+| Interrupted run | Can be resumed | Starts over |
+| Requirements | FFmpeg, VapourSynth, the encoders binaries | ffmpeg (with libvmaf) and mkvpropedit |
+
+In short: choose Av1an to encode fast and well, with the encoder, the parameters and the metric of your choice, a metric seeing color (SSIMULACRA2, Butteraugli) included. Choose sptenc when the point is not to get close to a score but to never get under it, on the very files you will keep, and to have that written in them.
+
+### Why QP instead of CRF?
+
+sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant QP)** mode, not CRF.
+
+This is not because CRF could not be searched: for a given segment, both dials are deterministic (same value, same file) and monotonic (VMAF goes down as the value goes up), which is all the interpolation search needs to converge in a few attempts. The reasons are elsewhere:
+
+- **One dial for every encoder.** CRF is a software encoder concept. Hardware encoders expose a constant quantizer, or their own flavor of quality target, not CRF. With QP, the same search, the same statistics and the same workflow (search on a GPU encoder, final encode on its CPU counterpart) apply to every supported encoder.
+- **No rate control competing with the search.** CRF is a rate control: the encoder moves bits between frames and blocks following its own perceptual model (adaptive quantization, cu-tree), which is not VMAF. sptenc already has something deciding where quality must vary, against the metric you chose: the scene splitter, then the search of each segment. A segment being a single scene, its content is homogeneous, there is not much left for a rate control to adapt to.
+
+What happens around that base QP depends on the encoder. `libx265` turns adaptive quantization and cu-tree off by itself in constant QP mode, whatever is asked: the QP requested is the QP applied, frame type offsets aside. NVENC encoders keep their spatial and temporal adaptive quantization (and their lookahead) active under `constqp`: the QP requested is a base the driver modulates per block. Either way these settings are **identical for every tested QP**, only the base QP moves, so the comparison between candidates remains stable.
+
+Whether CRF would give a smaller or a bigger file at the same VMAF score depends on the content and is not something sptenc relies on. The guarantee does not come from the dial anyway: it comes from measuring every segment after it has been encoded, and encoding it again when it fails.

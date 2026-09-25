@@ -8,7 +8,7 @@ A final, complete VMAF comparison between the encoded output and original source
 
 This approach gives each scene the highest QP, so the smallest size, that still passes the quality target defined by the VMAF profile.
 
-> **Trade-off:** several QP values are tested on every segment and each one is measured with VMAF, so an encode costs a few passes of the chosen encoder where a CRF encode costs one. What that costs depends on the encoder: a larger file with a GPU encoder, which searches faster than realtime once several segments run in parallel, hours and the smallest file with a CPU one (measured in [Encoder selection vs file size](#encoder-selection-vs-file-size)). The floor is the same either way, and it is not what a single CRF pass with a whole-file VMAF check gives: that only validates an average, so one complex scene in an otherwise steady movie can be destroyed while the overall score still looks fine. sptenc enforces its quality floor on every single scene independently.
+> **Trade-off:** several QP values are tested on every segment and each one is measured with VMAF, so an encode costs a few passes of the chosen encoder where a CRF encode costs one. What that costs depends on the encoder: a larger file with a GPU encoder, which searches faster than realtime once several segments run in parallel, hours and the smallest file with a CPU one (measured in [Encoder selection vs file size](MANUAL.md#encoder-selection-vs-file-size)). The floor is the same either way, and it is not what a single CRF pass with a whole-file VMAF check gives: that only validates an average, so one complex scene in an otherwise steady movie can be destroyed while the overall score still looks fine. sptenc enforces its quality floor on every single scene independently.
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) framework, which pioneered scene-aware, perceptually-optimized video encoding, and the VMAF perceptual quality models that power it. This project is built for power users encoding on their own hardware, not for streaming-scale infrastructure.
 
@@ -25,13 +25,15 @@ sptenc is built for workflows where you want the **smallest file size that still
 
 If you already know why CRF averages can hide bad frames, sptenc closes the loop: encode, measure, correct, converge.
 
+Coming from Av1an or CRF with VMAF spot checks? See [how sptenc compares](MANUAL.md#compared-to-other-approaches).
+
 ## Key Features
 
-- 🎯 **VMAF-driven encoding** - The quality gate is a perceptual score measured on the output, not a CRF or bitrate you hope will be enough. 1080p or 4K model auto-selected from the input, NEG variants available (see [what VMAF does not see](#what-vmaf-does-not-see))
+- 🎯 **VMAF-driven encoding** - The quality gate is a perceptual score measured on the output, not a CRF or bitrate you hope will be enough. 1080p or 4K model auto-selected from the input, NEG variants available (see [what VMAF does not see](MANUAL.md#what-vmaf-does-not-see))
 - 🎬 **Scene-aware segmentation** - Segments are cut on scene changes, so the quality floor is enforced per scene, never averaged across a whole file
 - 📊 **Multi-metric validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25) and worst frame; every enabled threshold must pass
-- 🧠 **Adaptive QP search** - Each segment converges on the highest QP that still passes in a few attempts, and stats kept from previous runs make the next ones start closer (see [Adaptive QP Search](#adaptive-qp-search))
-- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU and encode the final file small on the CPU, or keep the GPU encode when time matters more than size: the floor is proven the same way (see [Encoders](#encoders))
+- 🧠 **Adaptive QP search** - Each segment converges on the highest QP that still passes in a few attempts, and stats kept from previous runs make the next ones start closer (see [Adaptive QP Search](MANUAL.md#adaptive-qp-search))
+- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU and encode the final file small on the CPU, or keep the GPU encode when time matters more than size: the floor is proven the same way (see [Encoders](MANUAL.md#encoders))
 - 🚀 **Hardware acceleration wherever it helps** - CUDA VMAF, GPU decoding even alongside a CPU encoder, and several segments searched in parallel: same output, less time
 - 🔬 **Automatic scene threshold search** - `batchsearch` tries several scene detection thresholds and keeps the one that produces the smallest passing file
 - 📋 **A file you can trust** - Audio, subtitles and color metadata are carried over (PCM audio losslessly compressed to FLAC), and the final whole-file VMAF result is written into the output's metadata tags
@@ -41,7 +43,7 @@ If you already know why CRF averages can hide bad frames, sptenc closes the loop
 1. **Scene detection** - FFmpeg `scdet` analyzes the video to find scene boundaries, producing semantically coherent segments. For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so splits can happen at any frame without quality loss. It also shields against open GOPs, where a cut can leave frames referencing others in the neighboring segment: they can not be decoded anymore and are dropped, a drift (against the audio for instance) that accumulates with every cut.
 2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `libsvtav1`).
 3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
-4. **Adaptive QP search** - Each segment starts from a smart QP estimate, brackets the valid range with stepped probes, then uses interpolation to converge on the highest valid QP (smallest file) in just a few attempts. Persistent stats from previous runs further accelerate this (see below).
+4. **Adaptive QP search** - Each segment starts from a smart QP estimate, brackets the valid range with stepped probes, then uses interpolation to converge on the highest valid QP (smallest file) in just a few attempts. Persistent stats from previous runs further accelerate this (see [Adaptive QP Search](MANUAL.md#adaptive-qp-search)).
 5. **Best effort** - If the encoder's minimum QP is reached and thresholds are still not met (e.g. pathological scene), the segment is accepted and flagged as "best effort" in logs.
 6. **Muxing & tagging** - Segments are merged into a single output file. Audio, subtitles, and other streams from the original source are remuxed into the final file. PCM audio tracks are automatically losslessly compressed to FLAC. A final VMAF comparison between the complete encoded file and original source is performed, with results displayed in logs and embedded in the output file's metadata tags. Matroska statistics tags are regenerated for full player compatibility.
 
@@ -138,22 +140,18 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 
 ## Installation
 
-Check the releases page, standalone binaries for most platform are availables here.
+Standalone binaries for most platforms are available on the [releases page](https://github.com/hekmon/sptenc/releases).
 
 **External Dependencies:**
 - `ffmpeg` - the one your distribution, Homebrew or the [static builds](https://ffmpeg.org/download.html) ship is enough: it must be built with `libvmaf` and with `libx265` (or another supported encoder), which the usual packages are. A recent version is highly recommended. Nothing to compile, with one exception: `--vmaf-cuda` needs `libvmaf_cuda`, which no package ships. See the [build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128) for that one (works in WSL on Windows).
 - `ffprobe` - bundled with ffmpeg
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
 
-**Where the binaries are looked for:**
+Run `sptenc check` to verify everything is found and usable. On Windows, `ffmpeg.exe` and `ffprobe.exe` are looked for in the current directory, not in `PATH`: see [where the binaries are looked for](MANUAL.md#installation-details).
 
-| Binary | Linux / macOS | Windows | Override (global flag) |
-|---|---|---|---|
-| `ffmpeg` | `PATH` | `.\ffmpeg.exe` (current directory, not `PATH`) | `--ffmpeg-path` |
-| `ffprobe` | `PATH` | `.\ffprobe.exe` (current directory, not `PATH`) | `--ffprobe-path` |
-| `mkvpropedit` | `PATH` | `C:\Program Files\MKVToolNix\mkvpropedit.exe` | `--mkvpropedit-path` |
+## Going further
 
-Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc check` to verify everything is found and usable.
+Still here? The [manual](MANUAL.md) covers everything else: VMAF models and thresholds, encoder choice and file size, scene detection, the QP search and its cache, the output and its tags, and how sptenc compares to other approaches.
 
 ## License
 
