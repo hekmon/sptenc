@@ -24,25 +24,18 @@ var vmafCommand = &cli.Command{
 	Description: "Compare a distorted (encoded) video against its reference (original) using VMAF.\n\n" +
 		"This computes the full VMAF report and prints summary statistics including percentiles,\n" +
 		"mean, harmonic mean, min and max scores.\n\n" +
+		"MODEL\n" +
+		"The VMAF model is selected from the height of the reference (see MANUAL.md, Models):\n" +
+		"--" + vmafModelFlagName + " forces one. libvmaf 3.2.0 or newer is required (VMAF v1 models).\n\n" +
 		"HARDWARE ACCELERATION\n" +
 		"Use --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD), --" + d3d12DecFlagName + " (Windows),\n" +
 		"or --" + videoToolboxDecFlagName + " (macOS) to offload frame decoding to the GPU. This reserves\n" +
-		"CPU cycles for the software libvmaf computation. Each decoder is activated only if the\n" +
-		"input codec is compatible.\n\n" +
-		"Use --" + vmafCUDAFlagName + " to additionally accelerate the VMAF computation itself on the GPU\n" +
-		"(requires libvmaf_cuda, not available in standard ffmpeg builds). When this is enabled,\n" +
-		"NVDEC decoding is automatically used for compatible input codecs; --" + nvdecFlagName + " is implied.\n" +
-		"Its scores vary between runs, the min and low percentiles most (see MANUAL.md, VMAF on CUDA).",
+		"CPU cycles for the libvmaf computation, which runs on the CPU: the VMAF v1 models have no\n" +
+		"CUDA implementation. Each decoder is activated only if the input codec is compatible.",
 	Flags: func() (flags []cli.Flag) {
-		flags = append(flags, hardwareAccelFlags(hwAccelScopeVMAF)...)
+		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		flags = append(flags,
-			&cli.BoolFlag{
-				Name:     vmafNegFlagName,
-				Usage:    "Use VMAF NEG models",
-				Value:    false,
-				OnlyOnce: true,
-				Category: "VMAF",
-			},
+			vmafModelFlag("VMAF"),
 			&cli.StringFlag{
 				Name:             tmpDirFlagName,
 				Aliases:          []string{"t"},
@@ -96,19 +89,13 @@ var vmafCommand = &cli.Command{
 		if !distInfo.Mode().IsRegular() {
 			return ctx, errors.New("distorted file must be a regular file")
 		}
-		// The decode flags must not contradict VMAF on CUDA (see ffmpeg.ResolveHWDecoder)
-		if _, err := encodeHWDecoder(cmd, ""); err != nil {
+		// Only one decode flag at a time
+		if _, err := hwDecodeFlags(cmd); err != nil {
 			return ctx, err
 		}
-		// Check CUDA VMAF support if requested
-		if cmd.Bool(vmafCUDAFlagName) {
-			filters, err := ffmpeg.GetFilters(ctx)
-			if err != nil {
-				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
-			}
-			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
-			}
+		// libvmaf must know the model before anything is decoded
+		if err := checkLibVMAF(ctx, cmd); err != nil {
+			return ctx, err
 		}
 		return ctx, nil
 	},
@@ -160,10 +147,9 @@ var vmafCommand = &cli.Command{
 			shellescape.Quote(filepath.Base(referencePath)),
 		)
 
-		// Hardware decoder: NVDEC with VMAF on CUDA, the decode flags otherwise (validated in
-		// Before). Warn when a file can not be decoded by it, the ffmpeg functions fall back by
-		// themselves.
-		decoderCfg, _ := encodeHWDecoder(cmd, "")
+		// Hardware decoder: the decode flags (validated in Before). Warn when a file can not be
+		// decoded by it, the ffmpeg functions fall back by themselves.
+		decoderCfg, _ := hwDecodeFlags(cmd)
 		if decoderCfg.Enabled() {
 			if !decoderCfg.CompatibleWith(ctx, distortedPath).Enabled() {
 				fmt.Fprintf(bypass, "WARNING: distorted codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode for distorted file\n", decoderCfg.Name())
@@ -187,6 +173,10 @@ var vmafCommand = &cli.Command{
 			return fmt.Errorf("variable frame rate (VFR) content is not supported: reference frames last from %s to %s while it declares a constant frame rate (%s fps)",
 				videoStream.ShortestFrameDuration, videoStream.LongestFrameDuration, videoStream.RFrameRate)
 		}
+		if err = ffmpeg.CheckVMAFResolution(videoStream.Width, videoStream.Height); err != nil {
+			return err
+		}
+		model := resolveVMAFModel(cmd, bypass, videoStream)
 
 		// Probe distorted file and validate compatibility
 		fmt.Fprintln(bypass, "Counting the frames of the distorted file...")
@@ -230,17 +220,13 @@ var vmafCommand = &cli.Command{
 		// Compute VMAF with progress
 		fmt.Fprintln(bypass, "Computing VMAF...")
 		start = time.Now()
-		gpuIndex := cmd.Int(nvidiaGPUIndexFlagName)
 		report, err := liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
-			ReferencePath:     referencePath,
-			DistortedPath:     distortedPath,
-			InputFrameRate:    videoStream.RFrameRate,
-			ReportPath:        filepath.Join(workingDir, "vmaf.json"),
-			UltraHD:           videoStream.Height >= ffmpeg.Height4K,
-			NoEnhancementGain: cmd.Bool(vmafNegFlagName),
-			VMAFCuda:          cmd.Bool(vmafCUDAFlagName),
-			GPUID:             &gpuIndex,
-			HWDecoderConfig:   decoderCfg,
+			ReferencePath:   referencePath,
+			DistortedPath:   distortedPath,
+			InputFrameRate:  videoStream.RFrameRate,
+			ReportPath:      filepath.Join(workingDir, "vmaf.json"),
+			Model:           model,
+			HWDecoderConfig: decoderCfg,
 		}, totalFrames, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to compute VMAF: %w", err)

@@ -48,7 +48,8 @@ var encodeCommand = &cli.Command{
 		"VMAF METRICS\n" +
 		fmt.Sprintf("Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n", core.VMAFMinValue, core.VMAFMaxValue) +
 		fmt.Sprintf("below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n", core.VMAFOffValue) +
-		"that metric.\n\n" +
+		"that metric. The VMAF model (v1, libvmaf 3.2.0 or newer) is selected from the height of the\n" +
+		"source, --" + vmafModelFlagName + " forces one.\n\n" +
 		"STATS CACHE\n" +
 		"The cache records QP search statistics to speed up future encodes with the same encoder\n" +
 		"and VMAF profile. Different content types (clean animation vs grainy film) need very\n" +
@@ -61,9 +62,6 @@ var encodeCommand = &cli.Command{
 		"  * A hardware encoder (" + string(ffmpeg.HEVCEncoderNVEnc) + ", " + string(ffmpeg.HEVCEncoderVAAPI) + ", " + string(ffmpeg.HEVCEncoderD3D12VA) + ", " + string(ffmpeg.HEVCEncoderVideoToolbox) + ",\n" +
 		"    " + string(ffmpeg.AV1EncoderNVEnc) + ", " + string(ffmpeg.AV1EncoderVAAPI) + ") decodes with the same GPU. Nothing to set. Fast: the right choice\n" +
 		"    to try VMAF profiles.\n" +
-		"  * --" + vmafCUDAFlagName + " scores VMAF on an NVIDIA GPU and decodes with it (NVDEC). It is the biggest\n" +
-		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg),\n" +
-		"    knowing that its scores vary between runs (see MANUAL.md, VMAF on CUDA).\n" +
 		"  * A CPU encoder (" + string(ffmpeg.HEVCEncoderLibx265) + ", " + string(ffmpeg.AV1EncoderSVTAV1) + ") gives the smallest file, and the CPU is what it has.\n" +
 		"    If there is a GPU in the machine anyway, an integrated one or Apple silicon included, hand\n" +
 		"    it the decoding: --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + "\n" +
@@ -74,19 +72,18 @@ var encodeCommand = &cli.Command{
 		"by the CPU: a GPU would not give the same pixels (see MANUAL.md, Hardware decoding). So is the\n" +
 		"lossless intermediate sptenc works from (FFV1): no GPU decodes it. A decoder that does not\n" +
 		"support your source codec falls back to software with a warning. A decode flag contradicting\n" +
-		"the encoder or --" + vmafCUDAFlagName + " is refused before anything starts.\n" +
+		"the encoder is refused before anything starts. VMAF itself runs on the CPU: the VMAF v1 models\n" +
+		"have no CUDA implementation.\n" +
 		"Run 'sptenc check' to see the encoders and filters available in your ffmpeg build.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel (default: 1).\n" +
-		"The output is the same whatever the value, only the time it takes changes (except with\n" +
-		"--" + vmafCUDAFlagName + ", whose scores vary between runs whatever the value).\n" +
+		"The output is the same whatever the value, only the time it takes changes.\n" +
 		"  * GPU encoders: the encoding engines of the card are not the limit, the CPU decoding the FFV1\n" +
-		"    intermediate for them is. Raise it until the CPU is saturated; the driver's encode session\n" +
-		"    limit is the hard stop.\n" +
+		"    intermediate for them and computing VMAF is. Raise it until the CPU is saturated; the\n" +
+		"    driver's encode session limit is the hard stop.\n" +
 		"  * CPU encoders use every thread of the machine on their own, but a single encode does not\n" +
-		"    keep a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second,\n" +
-		"    more so with --" + vmafCUDAFlagName + " (which takes VMAF away from the CPU). Expect less with fewer\n" +
-		"    cores or bigger pictures, and mind the memory with 4K content.\n" +
+		"    keep a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second.\n" +
+		"    Expect less with fewer cores or bigger pictures, and mind the memory with 4K content.\n" +
 		"Measurements are in MANUAL.md (Encoders). Measure on your machine.\n" +
 		"Segments started together can not learn from each other: a run with several concurrent\n" +
 		"segments needs a few more attempts at its beginning, a cost only visible on short inputs.\n\n" +
@@ -177,19 +174,13 @@ var encodeCommand = &cli.Command{
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}
-		// Check the decode flags against the encoder and VMAF on CUDA
+		// Check the decode flags against the encoder
 		if _, err = encodeHWDecoder(cmd, ffmpeg.Encoder(requestedEncoder)); err != nil {
 			return ctx, err
 		}
-		// Check CUDA VMAF support if requested
-		if cmd.Bool(vmafCUDAFlagName) {
-			filters, err := ffmpeg.GetFilters(ctx)
-			if err != nil {
-				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
-			}
-			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
-			}
+		// libvmaf must know the model: better now than once the master is done
+		if err = checkLibVMAF(ctx, cmd); err != nil {
+			return ctx, err
 		}
 		// Check arguments
 		if cmd.Args().Len() != 2 {
@@ -307,9 +298,8 @@ var encodeCommand = &cli.Command{
 			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
 			VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
 			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
-			VMAFNeg:           cmd.Bool(vmafNegFlagName),
-			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
 			HWDecoder:         hwDecoder,
+			// VMAFModel is set once the source is probed
 		}
 
 		/*
@@ -446,6 +436,9 @@ var encodeCommand = &cli.Command{
 		if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 			return
 		}
+		// The VMAF model of the run, now that the resolution is known
+		vmafModel := resolveVMAFModel(cmd, bypass, videoStream)
+		encoderAdapter.VMAFModel = vmafModel
 
 		// Get the stats cache (after probing so we know the VMAF model)
 		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
@@ -453,8 +446,7 @@ var encodeCommand = &cli.Command{
 			err = fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
 			return
 		}
-		vmafModel := ffmpeg.VMAFModel(videoStream.Height >= ffmpeg.Height4K, cmd.Bool(vmafNegFlagName))
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, vmafModel, vmafAuditor, cmd.String(cacheProfileFlagName))
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, vmafModel.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create stats cache: %w", err)
 			return
@@ -533,8 +525,7 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, cmd.Int(nvidiaGPUIndexFlagName), cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName),
-			hwDecoder,
+			results.TotalSegmentsFrames, vmafModel, cmd.Bool(debugFlagName), hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)
@@ -566,7 +557,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		tags := metadata.GenerateTags(vmafAuditor, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(segmentsPaths))
+			results, finalVMAFStats, vmafModel, len(segmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {

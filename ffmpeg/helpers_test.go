@@ -11,26 +11,19 @@ func TestResolveHWDecoder(t *testing.T) {
 	}
 	for name, tc := range map[string]struct {
 		encoder   Encoder
-		vmafCUDA  bool
 		requested HWDecoderConfig
 		expected  string // Name of the resolved decoder
 		fails     bool
 	}{
-		"CPU encoder, nothing requested":             {HEVCEncoderLibx265, false, devices, "software", false},
-		"CPU encoder, NVDEC requested":               {HEVCEncoderLibx265, false, requested(true, false, false, false), "NVDEC", false},
-		"CPU encoder, VideoToolbox requested":        {AV1EncoderSVTAV1, false, requested(false, false, false, true), "VideoToolbox", false},
-		"GPU encoder decodes with its own GPU":       {HEVCEncoderNVEnc, false, devices, "NVDEC", false},
-		"GPU encoder, same decoder requested":        {AV1EncoderVAAPI, false, requested(false, true, false, false), "VA-API", false},
-		"GPU encoder, other decoder requested":       {HEVCEncoderNVEnc, false, requested(false, true, false, false), "", true},
-		"VMAF on CUDA implies NVDEC":                 {HEVCEncoderLibx265, true, devices, "NVDEC", false},
-		"VMAF on CUDA, NVDEC requested":              {HEVCEncoderLibx265, true, requested(true, false, false, false), "NVDEC", false},
-		"VMAF on CUDA, other decoder requested":      {HEVCEncoderLibx265, true, requested(false, false, true, false), "", true},
-		"GPU encoder prevails over VMAF on CUDA":     {HEVCEncoderVAAPI, true, devices, "VA-API", false},
-		"no encoder (vmaf command), flags only":      {"", false, requested(false, false, true, false), "D3D12VA", false},
-		"no encoder (vmaf command), CUDA and a flag": {"", true, requested(false, true, false, false), "", true},
+		"CPU encoder, nothing requested":       {HEVCEncoderLibx265, devices, "software", false},
+		"CPU encoder, NVDEC requested":         {HEVCEncoderLibx265, requested(true, false, false, false), "NVDEC", false},
+		"CPU encoder, VideoToolbox requested":  {AV1EncoderSVTAV1, requested(false, false, false, true), "VideoToolbox", false},
+		"GPU encoder decodes with its own GPU": {HEVCEncoderNVEnc, devices, "NVDEC", false},
+		"GPU encoder, same decoder requested":  {AV1EncoderVAAPI, requested(false, true, false, false), "VA-API", false},
+		"GPU encoder, other decoder requested": {HEVCEncoderNVEnc, requested(false, true, false, false), "", true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			dec, err := ResolveHWDecoder(tc.encoder, tc.vmafCUDA, tc.requested)
+			dec, err := ResolveHWDecoder(tc.encoder, tc.requested)
 			if tc.fails {
 				if err == nil {
 					t.Fatalf("expected an error, got %s", dec.Name())

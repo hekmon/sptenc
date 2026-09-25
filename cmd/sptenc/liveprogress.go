@@ -747,18 +747,15 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 // liveFinalVMAF computes the final VMAF on the fully encoded/concatenated output.
 // It is used by the encode and batch-search pipelines as the last quality-check step.
 // Both files are decoded by dec when their codec allows it (software decode otherwise).
-func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *ffmpeg.FFProbeBinaryStream, totalFrames, gpuIndex int,
-	vmafNeg, vmafCUDA, debug bool, dec ffmpeg.HWDecoderConfig) (stats ffmpeg.VMAFReport, err error) {
+func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *ffmpeg.FFProbeBinaryStream, totalFrames int,
+	model ffmpeg.VMAFModel, debug bool, dec ffmpeg.HWDecoderConfig) (stats ffmpeg.VMAFReport, err error) {
 	return liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
-		ReferencePath:     source,
-		DistortedPath:     distorted,
-		InputFrameRate:    videoStream.RFrameRate,
-		ReportPath:        distorted + "_vmaf.json",
-		UltraHD:           videoStream.Height >= ffmpeg.Height4K,
-		NoEnhancementGain: vmafNeg,
-		VMAFCuda:          vmafCUDA,
-		GPUID:             &gpuIndex,
-		HWDecoderConfig:   dec,
+		ReferencePath:   source,
+		DistortedPath:   distorted,
+		InputFrameRate:  videoStream.RFrameRate,
+		ReportPath:      distorted + "_vmaf.json",
+		Model:           model,
+		HWDecoderConfig: dec,
 	}, totalFrames, debug)
 }
 

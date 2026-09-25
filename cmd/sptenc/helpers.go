@@ -64,7 +64,60 @@ func checkSourceVideo(stats ffmpeg.FFProbeStats) (videoStream *ffmpeg.FFProbeBin
 	if err = checkProgressive(videoStream); err != nil {
 		return nil, err
 	}
+	if err = ffmpeg.CheckVMAFResolution(videoStream.Width, videoStream.Height); err != nil {
+		return nil, err
+	}
 	return
+}
+
+// resolveVMAFModel returns the VMAF model of a run and tells the user which one and why: the
+// one forced with the model flag, warned about when it is not the one of the source resolution
+// (it is the point of forcing it: a 1440p source judged as 4K, 4K content meant for 1080p
+// screens), the one of the source resolution otherwise (see ffmpeg.SelectVMAFModel).
+func resolveVMAFModel(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBinaryStream) ffmpeg.VMAFModel {
+	if forced := cmd.String(vmafModelFlagName); forced != "" {
+		model := ffmpeg.VMAFModel(forced)
+		if mismatch := model.ResolutionMismatch(stream.Height); mismatch != "" {
+			fmt.Fprintf(out, "WARNING: VMAF model %s forced by --%s: %s\n", model, vmafModelFlagName, mismatch)
+		} else {
+			fmt.Fprintf(out, "VMAF model %s forced by --%s (%s)\n", model, vmafModelFlagName, model.Description())
+		}
+		return model
+	}
+	model := ffmpeg.SelectVMAFModel(stream.Height)
+	fmt.Fprintf(out, "VMAF model %s selected for the %dp source (%s), use --%s to force another one\n",
+		model, stream.Height, model.Description(), vmafModelFlagName)
+	return model
+}
+
+// checkLibVMAF verifies before anything starts that the ffmpeg build can score with VMAF: the
+// libvmaf filter is there and it knows the model of the run (the one forced with the model
+// flag, the 1080p one otherwise: the v1 models come together, one of them is enough to tell
+// the libvmaf version). A model libvmaf does not know surfaces mid-run otherwise, once the
+// master and the first segment have been produced. The probe report goes to the temporary
+// directory of the command.
+func checkLibVMAF(ctx context.Context, cmd *cli.Command) error {
+	filters, err := ffmpeg.GetFilters(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list ffmpeg filters: %w", err)
+	}
+	if !filters.HasLibVMAF() {
+		return errors.New("libvmaf is not available in this ffmpeg build; run 'sptenc check' to see available filters")
+	}
+	model := ffmpeg.VMAFModelFHD
+	if forced := cmd.String(vmafModelFlagName); forced != "" {
+		model = ffmpeg.VMAFModel(forced)
+	}
+	if _, err = ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
+		Model:     model,
+		ReportDir: cmd.String(tmpDirFlagName),
+	}); err != nil {
+		if errors.Is(err, ffmpeg.ErrVMAFModelUnavailable) {
+			return fmt.Errorf("the libvmaf of this ffmpeg build does not know the VMAF model %s: sptenc needs ffmpeg built against libvmaf 3.2.0 or newer (run 'sptenc check' for details)", model)
+		}
+		return fmt.Errorf("libvmaf check failed: %w", err)
+	}
+	return nil
 }
 
 // checkProgressive rejects a video stream declared as interlaced.

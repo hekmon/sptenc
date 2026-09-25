@@ -137,27 +137,21 @@ func DecoderForEncoder(encoder Encoder, nvidiaGPUIndex int, vaapiDevice string, 
 // ResolveHWDecoder picks the hardware decoder of an encoding run, by order of precedence:
 //
 //  1. the one matching the encoder when it is a hardware one (the same GPU is used both ways)
-//  2. NVDEC when VMAF is computed on CUDA (the frames go to the GPU anyway)
-//  3. the one explicitly requested, if any: a CPU encoder is chosen for its file size, not
+//  2. the one explicitly requested, if any: a CPU encoder is chosen for its file size, not
 //     because the machine has no accelerator, and every decode it does not do itself can be
 //     taken away from the CPU it needs
 //
 // The devices always come from requested (they are the device flags). An explicit request
-// contradicting the two first levels is an error: it can not be honored, better to say so than
-// to decode with a hardware the user did not ask for.
-func ResolveHWDecoder(encoder Encoder, vmafCUDA bool, requested HWDecoderConfig) (dec HWDecoderConfig, err error) {
-	var origin string
-	switch derived := DecoderForEncoder(encoder, requested.NVDevice, requested.VAAPIDevice, requested.D3D12Device); {
-	case derived.Enabled():
-		dec, origin = derived, fmt.Sprintf("the %s encoder", encoder)
-	case vmafCUDA:
-		dec, origin = derived, "VMAF on CUDA" // derived carries the devices only
-		dec.NVDec = true
-	default:
+// contradicting the first level is an error: it can not be honored, better to say so than to
+// decode with a hardware the user did not ask for.
+func ResolveHWDecoder(encoder Encoder, requested HWDecoderConfig) (dec HWDecoderConfig, err error) {
+	derived := DecoderForEncoder(encoder, requested.NVDevice, requested.VAAPIDevice, requested.D3D12Device)
+	if !derived.Enabled() {
 		return requested, nil
 	}
+	dec = derived
 	if requested.Enabled() && requested.Name() != dec.Name() {
-		err = fmt.Errorf("%s decoding was requested but %s implies %s decoding", requested.Name(), origin, dec.Name())
+		err = fmt.Errorf("%s decoding was requested but the %s encoder implies %s decoding", requested.Name(), encoder, dec.Name())
 	}
 	return
 }

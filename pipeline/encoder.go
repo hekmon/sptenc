@@ -15,8 +15,7 @@ type EncoderAdapter struct {
 	NVIDIAGPUIndex    int
 	VAAPIRendererPath string
 	D3D12VAGPUIndex   int
-	VMAFNeg           bool
-	VMAFCUDA          bool
+	VMAFModel         ffmpeg.VMAFModel
 	// Hardware decoder of the run (see ffmpeg.ResolveHWDecoder): applied by the ffmpeg functions
 	// to every input whose codec it can decode, software decode for the others (FFV1 segments).
 	HWDecoder ffmpeg.HWDecoderConfig
@@ -148,10 +147,7 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		DistortedPath:     distorted,
 		InputFrameRate:    stream.RFrameRate,
 		ReportPath:        distorted + "_vmaf.json",
-		UltraHD:           stream.Height >= ffmpeg.Height4K,
-		NoEnhancementGain: e.VMAFNeg,
-		VMAFCuda:          e.VMAFCUDA,
-		GPUID:             &e.NVIDIAGPUIndex,
+		Model:             e.VMAFModel,
 		HWDecoderConfig:   e.HWDecoder,
 		Debug:             debug,
 		RuntimeError:      runtimeError,
@@ -172,6 +168,8 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		HarmonicMean: stats.HarmonicMean,
 		Mean:         stats.Mean,
 		Maximum:      stats.Maximum,
+		CAMBIMean:    stats.CAMBIMean,
+		CAMBIMax:     stats.CAMBIMax,
 	}, nil
 }
 

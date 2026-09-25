@@ -1,6 +1,7 @@
 package ffmpeg
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,28 +20,196 @@ import (
 	"github.com/olekukonko/tablewriter/tw"
 )
 
-// Predefined VMAF model names.
+/*
+ * Models
+ */
+
+// VMAFModel identifies a VMAF v1 model built into libvmaf (3.2.0 or newer). The v1 models
+// fuse ADM (with an additive impairment term for blockiness), motion, CAMBI (banding) and a
+// chroma feature; the enhancement gain is clamped in all of them (what used to be the NEG
+// variants of v0), and VIF is gone. See resource/doc/models_v1.md in the libvmaf repository.
+type VMAFModel string
+
 const (
-	VMAFModelRegularName    = "vmaf_v0.6.1"
-	VMAFModelRegularNEGName = "vmaf_v0.6.1neg"
-	VMAFModelUltraHDName    = "vmaf_4k_v0.6.1"
-	VMAFModelUltraHDNEGName = "vmaf_4k_v0.6.1neg"
+	// VMAFModelFHD predicts the viewing condition of a 1080p display watched from 3 picture
+	// heights: the v1 successor of vmaf_v0.6.1.
+	VMAFModelFHD VMAFModel = "vmaf_v1.0.16_3d0h"
+	// VMAFModelUHD predicts the viewing condition of a 2160p display watched from 1.5 picture
+	// heights, the distance at which 4K is worth it: the v1 successor of vmaf_4k_v0.6.1.
+	VMAFModelUHD VMAFModel = "vmaf_v1.0.16_1d5h_2160"
 )
 
-// VMAFModel returns the VMAF model name to use based on the desired resolution
-// and whether the No-Enhancement-Gain (NEG) variant is requested.
-func VMAFModel(ultraHD, neg bool) string {
-	if ultraHD {
-		if neg {
-			return VMAFModelUltraHDNEGName
-		}
-		return VMAFModelUltraHDName
-	}
-	if neg {
-		return VMAFModelRegularNEGName
-	}
-	return VMAFModelRegularName
+// VMAFModels lists the supported models. The other v1 models (phone at 5 picture heights, 4K
+// at 3 picture heights) are lenient viewing conditions where small artifacts are not seen,
+// which is not what a quality floor is about; the high frame rate variants are not supported
+// yet.
+var VMAFModels = []VMAFModel{VMAFModelFHD, VMAFModelUHD}
+
+// String returns the model name as libvmaf knows it.
+func (m VMAFModel) String() string {
+	return string(m)
 }
+
+// Valid reports whether the model is one of the supported ones.
+func (m VMAFModel) Valid() bool {
+	for _, candidate := range VMAFModels {
+		if m == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+// Description returns the viewing condition the model predicts.
+func (m VMAFModel) Description() string {
+	switch m {
+	case VMAFModelFHD:
+		return "1080p display at 3 picture heights"
+	case VMAFModelUHD:
+		return "2160p display at 1.5 picture heights"
+	default:
+		return "unknown model"
+	}
+}
+
+// SelectVMAFModel returns the model matching the resolution of a source: the 4K model from
+// 2160 lines up, the 1080p model below.
+func SelectVMAFModel(height int) VMAFModel {
+	if height >= Height4K {
+		return VMAFModelUHD
+	}
+	return VMAFModelFHD
+}
+
+// ResolutionMismatch explains why the model is not the one of a source of the given height
+// (see SelectVMAFModel), an empty string when it is.
+func (m VMAFModel) ResolutionMismatch(height int) string {
+	expected := SelectVMAFModel(height)
+	if m == expected {
+		return ""
+	}
+	return fmt.Sprintf("%s predicts a %s but the source is %dp, %s is the model of this resolution",
+		m, m.Description(), height, expected)
+}
+
+// Minimum picture size libvmaf can score with a v1 model, measured with libvmaf 3.2.1 and
+// f85a8536: under 160 lines the chroma feature reports "image too small" and crashes libvmaf,
+// under 216 columns CAMBI produces no feature and ffmpeg exits with a zero exit code and no
+// report (libvmaf only prints an error).
+const (
+	VMAFMinWidth  = 216
+	VMAFMinHeight = 160
+)
+
+// CheckVMAFResolution returns an error when a picture is too small to be scored by libvmaf.
+func CheckVMAFResolution(width, height int) error {
+	if width < VMAFMinWidth || height < VMAFMinHeight {
+		return fmt.Errorf("%dx%d pictures are too small to be scored by libvmaf: VMAF v1 models need at least %dx%d",
+			width, height, VMAFMinWidth, VMAFMinHeight)
+	}
+	return nil
+}
+
+/*
+ * Filter
+ */
+
+// vmafFilter returns the libvmaf filter of a computation, to be fed the distorted stream then
+// the reference one.
+func vmafFilter(model VMAFModel, reportPath string, threads int) string {
+	return fmt.Sprintf("libvmaf=model=version=%s:log_fmt=json:log_path=%s:n_threads=%d",
+		model, adaptVMAFPath(reportPath), threads)
+}
+
+/*
+ * Probe
+ */
+
+// ErrVMAFModelUnavailable is returned by VMAFProbe when the libvmaf of ffmpeg does not know
+// the model: the v1 models are built into libvmaf 3.2.0 and newer.
+var ErrVMAFModelUnavailable = errors.New("libvmaf does not know this model (VMAF v1 models need libvmaf 3.2.0 or newer)")
+
+// Probe pictures: the smallest size every v1 model scores (see VMAFMinWidth), the fewest
+// frames a report can be built from.
+const (
+	vmafProbeSize     = "320x180"
+	vmafProbeFrames   = 2
+	vmafProbeFileMask = "sptenc-vmaf-probe-*.json"
+)
+
+// vmafModelUnavailableMarker is what ffmpeg prints when libvmaf can not load a model by its
+// version name.
+const vmafModelUnavailableMarker = "could not load libvmaf model with version"
+
+// VMAFProbeConfig holds the parameters of a libvmaf probe.
+type VMAFProbeConfig struct {
+	Model     VMAFModel        // Model to load.
+	ReportDir string           // Directory the JSON report of the probe is written to (and removed from).
+	Debug     func(msg string) // Optional debug logger.
+}
+
+// VMAFProbe checks that the libvmaf of ffmpeg can score with a model, and returns the libvmaf
+// version. It runs libvmaf for real on two synthetic frames generated by ffmpeg itself (no
+// file needed), scored against themselves. Success is a report on disk: the exit code of
+// ffmpeg is not to be trusted, libvmaf errors have been seen leaving it at zero with no report
+// written. A model libvmaf does not know is reported with ErrVMAFModelUnavailable.
+func VMAFProbe(ctx context.Context, config VMAFProbeConfig) (libvmafVersion string, err error) {
+	if !config.Model.Valid() {
+		err = fmt.Errorf("unsupported VMAF model %q", config.Model)
+		return
+	}
+	// Report file, unique in case of concurrent probes
+	reportFd, err := os.CreateTemp(config.ReportDir, vmafProbeFileMask)
+	if err != nil {
+		err = fmt.Errorf("failed to create the probe report file: %w", err)
+		return
+	}
+	reportPath := reportFd.Name()
+	reportFd.Close()
+	defer os.Remove(reportPath)
+	// One generated stream split in two: the distorted side is the reference itself
+	args := []string{
+		"-loglevel", "error", "-nostats", "-nostdin", "-y",
+		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%s:rate=%d:duration=1", vmafProbeSize, vmafProbeFrames),
+		"-filter_complex", fmt.Sprintf("[0:v]format=yuv420p10le,split[distorted][reference];[distorted][reference]%s",
+			vmafFilter(config.Model, reportPath, 1)),
+		"-f", "null", "-",
+	}
+	if config.Debug != nil {
+		config.Debug(fmt.Sprintf("Probe libvmaf with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
+	}
+	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	output := strings.TrimSpace(stderr.String())
+	if strings.Contains(output, vmafModelUnavailableMarker) {
+		err = fmt.Errorf("%w: %s", ErrVMAFModelUnavailable, output)
+		return
+	}
+	if runErr != nil {
+		err = fmt.Errorf("error during %s execution: %w\n%s\n%s", FFMPEGBinary, runErr, output, getPrintableCMDLine(FFMPEGBinary, args))
+		return
+	}
+	// Parse the report
+	report, err := readVMAFReport(reportPath)
+	if err != nil {
+		err = fmt.Errorf("libvmaf did not produce a usable report with model %s: %w\n%s", config.Model, err, output)
+		return
+	}
+	if len(report.Frames) != vmafProbeFrames {
+		err = fmt.Errorf("libvmaf scored %d frames out of %d with model %s\n%s", len(report.Frames), vmafProbeFrames, config.Model, output)
+		return
+	}
+	if libvmafVersion = report.Version; libvmafVersion == "" {
+		libvmafVersion = "unknown"
+	}
+	return
+}
+
+/*
+ * Compute
+ */
 
 // VMAFComputeConfig holds the parameters for a VMAF computation.
 type VMAFComputeConfig struct {
@@ -49,12 +218,9 @@ type VMAFComputeConfig struct {
 	DistortedPath  string // Path to the distorted (encoded) video.
 	InputFrameRate string // Frame rate of the input videos (e.g. "24" or "24000/1001").
 	// VMAF generation
-	ReportPath        string // Path where the JSON VMAF report will be written.
-	UltraHD           bool   // Use the Ultra-HD (4K) VMAF model.
-	NoEnhancementGain bool   // Use the NEG (No Enhancement Gain) model variant.
-	VMAFCuda          bool   // Enable CUDA-accelerated VMAF computation. NVDEC hardware decoding is automatically used for input codecs that support it.
-	GPUID             *int   // Optional CUDA GPU device ID for libvmaf_cuda (used only when VMAFCuda is true).
-	// Hardware decode for the software libvmaf path (ignored when VMAFCuda is true).
+	ReportPath string    // Path where the JSON VMAF report will be written.
+	Model      VMAFModel // Model to score with (see SelectVMAFModel).
+	// Hardware decode
 	HWDecoderConfig
 	// Reporting
 	Debug             func(msg string)          // Optional debug logger.
@@ -83,7 +249,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		err = errors.New("input frame rate must be set")
 		return
 	}
-	version := VMAFModel(config.UltraHD, config.NoEnhancementGain)
+	if !config.Model.Valid() {
+		err = fmt.Errorf("unsupported VMAF model %q", config.Model)
+		return
+	}
 	// Apply defaults
 	if config.NVDevice == 0 {
 		config.NVDevice = CUDADefaultDevice
@@ -99,108 +268,37 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
-	if config.VMAFCuda {
-		// CUDA VMAF path: auto-detect NVDEC compatibility
-		nvdecDistorted := false
-		nvdecReference := false
-		if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.DistortedPath}); err == nil {
-			if video := stats.VideoTrack(); video != nil {
-				nvdecDistorted = IsNVDecCompatible(video.CodecName)
-			}
-		} else if config.RuntimeError != nil {
-			config.RuntimeError(fmt.Errorf("failed to probe distorted file for NVDEC auto-detection: %w, falling back to software decode", err))
-		}
-		if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.ReferencePath}); err == nil {
-			if video := stats.VideoTrack(); video != nil {
-				nvdecReference = IsNVDecCompatible(video.CodecName)
-			}
-		} else if config.RuntimeError != nil {
-			config.RuntimeError(fmt.Errorf("failed to probe reference file for NVDEC auto-detection: %w, falling back to software decode", err))
-		}
-		if (nvdecDistorted || nvdecReference) && config.GPUID != nil {
-			args = append(args, "-init_hw_device", fmt.Sprintf("cuda=nvc:%d", *config.GPUID))
-		}
-		//// distorted file first
-		if nvdecDistorted {
-			args = append(args, "-hwaccel", "cuda")
-			if config.GPUID != nil {
-				args = append(args, "-hwaccel_device", "nvc")
-			}
-			args = append(args, "-hwaccel_output_format", "cuda")
-		}
-		args = append(args,
-			"-r", config.InputFrameRate,
-			"-i", config.DistortedPath,
+	// Hardware-accelerated decoding, when requested and when the codec allows it
+	distortedHW := HWDecoderConfig{}
+	referenceHW := HWDecoderConfig{}
+	if config.NVDec || config.VAAPIDec || config.D3D12Dec || config.VideoToolboxDec {
+		distortedHW = SelectCompatibleDecoders(ctx, config.DistortedPath,
+			config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
+			config.NVDevice, config.VAAPIDevice, config.D3D12Device,
 		)
-		//// ref file
-		if nvdecReference {
-			args = append(args, "-hwaccel", "cuda")
-			if config.GPUID != nil {
-				args = append(args, "-hwaccel_device", "nvc")
-			}
-			args = append(args, "-hwaccel_output_format", "cuda")
-		}
-		args = append(args,
-			"-r", config.InputFrameRate,
-			"-i", config.ReferencePath,
-		)
-		//// vmaf filter
-		if config.GPUID != nil {
-			args = append(args, "-filter_hw_device", "nvc")
-		}
-		var scaleDist, scaleRef string
-		if nvdecDistorted {
-			scaleDist = "[syncdist]scale_cuda=format=yuv420p[dist]"
-		} else {
-			scaleDist = "[syncdist]hwupload,scale_cuda=format=yuv420p[dist]"
-		}
-		if nvdecReference {
-			scaleRef = "[syncref]scale_cuda=format=yuv420p[ref]"
-		} else {
-			scaleRef = "[syncref]hwupload,scale_cuda=format=yuv420p[ref]"
-		}
-		args = append(args,
-			"-filter_complex",
-			fmt.Sprintf(
-				"[0:v]setpts=PTS-STARTPTS[syncdist];%s;[1:v]setpts=PTS-STARTPTS[syncref];%s;[dist][ref]libvmaf_cuda=model=version=%s:log_fmt=json:log_path=%s",
-				scaleDist, scaleRef, version, adaptVMAFPath(config.ReportPath),
-			),
-		)
-	} else {
-		// Software libvmaf path, optionally with hardware-accelerated decoding
-		distortedHW := HWDecoderConfig{}
-		referenceHW := HWDecoderConfig{}
-		if config.NVDec || config.VAAPIDec || config.D3D12Dec || config.VideoToolboxDec {
-			distortedHW = SelectCompatibleDecoders(ctx, config.DistortedPath,
-				config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
-				config.NVDevice, config.VAAPIDevice, config.D3D12Device,
-			)
-			referenceHW = SelectCompatibleDecoders(ctx, config.ReferencePath,
-				config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
-				config.NVDevice, config.VAAPIDevice, config.D3D12Device,
-			)
-		}
-		//// distorted file first
-		args = appendHWAccelArgs(args, distortedHW)
-		args = append(args,
-			"-r", config.InputFrameRate,
-			"-i", config.DistortedPath,
-		)
-		//// ref file
-		args = appendHWAccelArgs(args, referenceHW)
-		args = append(args,
-			"-r", config.InputFrameRate,
-			"-i", config.ReferencePath,
-		)
-		//// vmaf filter
-		args = append(args,
-			"-filter_complex",
-			fmt.Sprintf(
-				"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]setpts=PTS-STARTPTS[reference];[distorted][reference]libvmaf=model=version=%s:log_fmt=json:log_path=%s:n_threads=%d",
-				version, adaptVMAFPath(config.ReportPath), NbThreadsToUse,
-			),
+		referenceHW = SelectCompatibleDecoders(ctx, config.ReferencePath,
+			config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
+			config.NVDevice, config.VAAPIDevice, config.D3D12Device,
 		)
 	}
+	//// distorted file first
+	args = appendHWAccelArgs(args, distortedHW)
+	args = append(args,
+		"-r", config.InputFrameRate,
+		"-i", config.DistortedPath,
+	)
+	//// ref file
+	args = appendHWAccelArgs(args, referenceHW)
+	args = append(args,
+		"-r", config.InputFrameRate,
+		"-i", config.ReferencePath,
+	)
+	//// vmaf filter
+	args = append(args,
+		"-filter_complex",
+		"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]setpts=PTS-STARTPTS[reference];[distorted][reference]"+
+			vmafFilter(config.Model, config.ReportPath, NbThreadsToUse),
+	)
 	//// no ffmpeg output
 	args = append(args, "-f", "null", "-")
 	// Prepare command
@@ -245,17 +343,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	// Parse report
-	reportFd, err := os.Open(config.ReportPath)
-	if err != nil {
-		err = fmt.Errorf("failed to open VMAF report file: %w", err)
-		return
-	}
-	defer reportFd.Close()
-	if err = json.NewDecoder(reportFd).Decode(&stats); err != nil {
-		err = fmt.Errorf("error parsing VMAF JSON output: %w", err)
-		return
-	}
-	return
+	return readVMAFReport(config.ReportPath)
 }
 
 // appendHWAccelArgs appends the appropriate -hwaccel flags for the given decoder config.
@@ -280,6 +368,25 @@ func appendHWAccelArgs(args []string, dec HWDecoderConfig) []string {
 	}
 	return args
 }
+
+// readVMAFReport reads and parses the JSON report written by libvmaf.
+func readVMAFReport(path string) (report VMAFReport, err error) {
+	reportFd, err := os.Open(path)
+	if err != nil {
+		err = fmt.Errorf("failed to open VMAF report file: %w", err)
+		return
+	}
+	defer reportFd.Close()
+	if err = json.NewDecoder(reportFd).Decode(&report); err != nil {
+		err = fmt.Errorf("error parsing VMAF JSON output: %w", err)
+		return
+	}
+	return
+}
+
+/*
+ * Report
+ */
 
 // VMAFReport is the top-level structure of the JSON report produced by libvmaf.
 type VMAFReport struct {
@@ -308,6 +415,8 @@ func (vr VMAFReport) GetStats() (vs VMAFStats) {
 	vs.HarmonicMean = vr.PooledMetrics.VMAF.HarmonicMean
 	vs.Mean = vr.PooledMetrics.VMAF.Mean
 	vs.Maximum = vr.PooledMetrics.VMAF.Max
+	vs.CAMBIMean = vr.PooledMetrics.CAMBI.Mean
+	vs.CAMBIMax = vr.PooledMetrics.CAMBI.Max
 	// Compute the missing ones
 	sort.Sort(vr.Frames)
 	vs.Percentile1 = vr.Frames.VMAFPercentile(vmafPercentile1)
@@ -363,36 +472,80 @@ type VMAFFrame struct {
 	Metrics  VMAFFrameMetrics `json:"metrics"`
 }
 
-// VMAFFrameMetrics holds the individual metric values reported by libvmaf for one frame.
-type VMAFFrameMetrics struct {
-	IntegerAdm2      float64 `json:"integer_adm2"`
-	IntegerAdmScale0 float64 `json:"integer_adm_scale0"`
-	IntegerAdmScale1 float64 `json:"integer_adm_scale1"`
-	IntegerAdmScale2 float64 `json:"integer_adm_scale2"`
-	IntegerAdmScale3 float64 `json:"integer_adm_scale3"`
-	IntegerMotion2   float64 `json:"integer_motion2"`
-	IntegerMotion    float64 `json:"integer_motion"`
-	IntegerVifScale0 float64 `json:"integer_vif_scale0"`
-	IntegerVifScale1 float64 `json:"integer_vif_scale1"`
-	IntegerVifScale2 float64 `json:"integer_vif_scale2"`
-	IntegerVifScale3 float64 `json:"integer_vif_scale3"`
-	VMAF             float64 `json:"vmaf"`
+// Metric keys of a libvmaf report. The score is always "vmaf". The features are keyed by a
+// name templated from their options (cambi_hrs_1080_cmxv_17_vlt_0.06 for the CAMBI of the
+// v1.0.16 models): a model retrained with other options changes the key, hence a prefix match.
+const (
+	vmafMetricKey     = "vmaf"
+	cambiMetricPrefix = "cambi"
+)
+
+// findMetricKeys returns the keys of the score and of the CAMBI feature among the metrics
+// of a report, empty when absent. Keys are scanned in order for a deterministic pick.
+func findMetricKeys(keys []string) (vmafKey, cambiKey string) {
+	sort.Strings(keys)
+	for _, key := range keys {
+		switch {
+		case key == vmafMetricKey:
+			vmafKey = key
+		case cambiKey == "" && strings.HasPrefix(key, cambiMetricPrefix):
+			cambiKey = key
+		}
+	}
+	return
 }
 
-// VMAFPooledMetrics aggregates metrics over the entire sequence.
+// VMAFFrameMetrics holds the metrics of one frame sptenc reads out of the ones libvmaf reports:
+// the score, and the CAMBI banding feature the v1 models are fed with (0 is no banding, around
+// 5 is where it starts to be slightly annoying, the v1 models cap it at 17).
+type VMAFFrameMetrics struct {
+	VMAF  float64
+	CAMBI float64
+}
+
+// UnmarshalJSON picks the score and the CAMBI feature among the metrics of a frame.
+func (m *VMAFFrameMetrics) UnmarshalJSON(data []byte) error {
+	var raw map[string]float64
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(raw))
+	for key := range raw {
+		keys = append(keys, key)
+	}
+	vmafKey, cambiKey := findMetricKeys(keys)
+	if vmafKey == "" {
+		return fmt.Errorf("no %q metric in frame metrics", vmafMetricKey)
+	}
+	m.VMAF = raw[vmafKey]
+	m.CAMBI = raw[cambiKey] // zero when absent
+	return nil
+}
+
+// VMAFPooledMetrics aggregates over the entire sequence the metrics sptenc reads (see
+// VMAFFrameMetrics).
 type VMAFPooledMetrics struct {
-	IntegerAdm2      VMAFPooledMetric `json:"integer_adm2"`
-	IntegerAdmScale0 VMAFPooledMetric `json:"integer_adm_scale0"`
-	IntegerAdmScale1 VMAFPooledMetric `json:"integer_adm_scale1"`
-	IntegerAdmScale2 VMAFPooledMetric `json:"integer_adm_scale2"`
-	IntegerAdmScale3 VMAFPooledMetric `json:"integer_adm_scale3"`
-	IntegerMotion2   VMAFPooledMetric `json:"integer_motion2"`
-	IntegerMotion    VMAFPooledMetric `json:"integer_motion"`
-	IntegerVifScale0 VMAFPooledMetric `json:"integer_vif_scale0"`
-	IntegerVifScale1 VMAFPooledMetric `json:"integer_vif_scale1"`
-	IntegerVifScale2 VMAFPooledMetric `json:"integer_vif_scale2"`
-	IntegerVifScale3 VMAFPooledMetric `json:"integer_vif_scale3"`
-	VMAF             VMAFPooledMetric `json:"vmaf"`
+	VMAF  VMAFPooledMetric
+	CAMBI VMAFPooledMetric
+}
+
+// UnmarshalJSON picks the score and the CAMBI feature among the pooled metrics of a report.
+func (m *VMAFPooledMetrics) UnmarshalJSON(data []byte) error {
+	var raw map[string]VMAFPooledMetric
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(raw))
+	for key := range raw {
+		keys = append(keys, key)
+	}
+	vmafKey, cambiKey := findMetricKeys(keys)
+	if vmafKey == "" {
+		return fmt.Errorf("no %q metric in pooled metrics", vmafMetricKey)
+	}
+	m.VMAF = raw[vmafKey]
+	m.CAMBI = raw[cambiKey] // zero when absent
+	return nil
 }
 
 // VMAFPooledMetric holds aggregate values (min, max, mean, harmonic mean) for a single metric.
@@ -403,7 +556,8 @@ type VMAFPooledMetric struct {
 	HarmonicMean float64 `json:"harmonic_mean"`
 }
 
-// VMAFStats is a user-friendly summary of VMAF results, including computed percentiles.
+// VMAFStats is a user-friendly summary of VMAF results, including computed percentiles and
+// the banding diagnostic (see VMAFFrameMetrics).
 type VMAFStats struct {
 	Version      string
 	Minimum      float64 `json:"min"`
@@ -415,9 +569,13 @@ type VMAFStats struct {
 	HarmonicMean float64 `json:"harmonic_mean"`
 	Mean         float64 `json:"mean"`
 	Maximum      float64 `json:"max"`
+	CAMBIMean    float64 `json:"cambi_mean"`
+	CAMBIMax     float64 `json:"cambi_max"`
 }
 
-// String renders the VMAF statistics as an aligned plain-text table.
+// String renders the VMAF statistics as an aligned plain-text table, followed by the banding
+// diagnostic. CAMBI is already part of the score: it is shown to tell a segment losing points
+// to banding from one losing them to compression.
 func (vs VMAFStats) String() string {
 	var tableBuffer strings.Builder
 	table := tablewriter.NewTable(&tableBuffer,
@@ -462,6 +620,10 @@ func (vs VMAFStats) String() string {
 		strconv.FormatFloat(vs.Maximum, 'f', -1, float64Precision),
 	})
 	table.Render()
+	fmt.Fprintf(&tableBuffer, "\nBanding (CAMBI, 0 = none, ~5 = slightly annoying, 17 = ceiling): mean %s, max %s\n",
+		strconv.FormatFloat(vs.CAMBIMean, 'f', -1, float64Precision),
+		strconv.FormatFloat(vs.CAMBIMax, 'f', -1, float64Precision),
+	)
 	return tableBuffer.String()
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hekmon/sptenc/core"
@@ -24,7 +25,6 @@ const (
 	d3d12vaGPUIndexFlagName   = "d3d12va-gpu-index"
 
 	concurrentSegmentsFlagName = "concurrent-segments"
-	vmafCUDAFlagName           = "vmaf-cuda"
 
 	hardwareAccelerationCategoryName = "Hardware Acceleration"
 )
@@ -33,20 +33,19 @@ const (
 type hwAccelScope int
 
 const (
-	hwAccelScopeDecode hwAccelScope = iota // decode-only commands (master, split, thresholds)
-	hwAccelScopeVMAF                       // vmaf command (decode toggles + cuda)
-	hwAccelScopeEncode                     // encode commands (decode toggles + cuda + concurrency)
+	hwAccelScopeDecode hwAccelScope = iota // decode-only commands (master, split, thresholds, vmaf)
+	hwAccelScopeEncode                     // encode commands (decode toggles + concurrency)
 )
 
 // hardwareAccelFlags returns hardware acceleration flags under a single category. The device
 // selectors and the decode toggles are common to every scope: the encoding commands decode
 // too, and a CPU encoder does not mean there is no accelerator (see ffmpeg.ResolveHWDecoder).
 func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
-	// the encoding commands decode with the GPU of a hardware encoder (or of VMAF on CUDA) by
-	// themselves: the decode flags are for a CPU encoder, say so where the user reads them
+	// the encoding commands decode with the GPU of a hardware encoder by themselves: the decode
+	// flags are for a CPU encoder, say so where the user reads them
 	var decodeUsageSuffix string
 	if scope == hwAccelScopeEncode {
-		decodeUsageSuffix = " with a CPU encoder (a hardware encoder or --" + vmafCUDAFlagName + " decodes on its GPU by itself)"
+		decodeUsageSuffix = " with a CPU encoder (a hardware encoder decodes on its GPU by itself)"
 	}
 	flags = []cli.Flag{
 		&cli.IntFlag{
@@ -101,17 +100,6 @@ func hardwareAccelFlags(scope hwAccelScope) (flags []cli.Flag) {
 			Category: hardwareAccelerationCategoryName,
 		},
 	)
-	if scope == hwAccelScopeVMAF || scope == hwAccelScopeEncode {
-		flags = append(flags,
-			&cli.BoolFlag{
-				Name:     vmafCUDAFlagName,
-				Usage:    "Use CUDA for VMAF computation",
-				Value:    false,
-				OnlyOnce: true,
-				Category: hardwareAccelerationCategoryName,
-			},
-		)
-	}
 	if scope == hwAccelScopeEncode {
 		flags = append(flags,
 			&cli.IntFlag{
@@ -154,13 +142,13 @@ func hwDecodeFlags(cmd *cli.Command) (dec ffmpeg.HWDecoderConfig, err error) {
 }
 
 // encodeHWDecoder returns the hardware decoder of an encoding run (see ffmpeg.ResolveHWDecoder)
-// out of the encoder, the VMAF CUDA flag and the decode flags of the command.
+// out of the encoder and the decode flags of the command.
 func encodeHWDecoder(cmd *cli.Command, encoder ffmpeg.Encoder) (dec ffmpeg.HWDecoderConfig, err error) {
 	requested, err := hwDecodeFlags(cmd)
 	if err != nil {
 		return
 	}
-	return ffmpeg.ResolveHWDecoder(encoder, cmd.Bool(vmafCUDAFlagName), requested)
+	return ffmpeg.ResolveHWDecoder(encoder, requested)
 }
 
 func validateConcurrentSegments(v int) error {
@@ -354,7 +342,7 @@ func validateTmpDir(path string) error {
 }
 
 const (
-	vmafNegFlagName         = "vmaf-neg"
+	vmafModelFlagName       = "vmaf-model"
 	vmafMinFlagName         = "vmaf-min"
 	vmafP1FlagName          = "vmaf-p1"
 	vmafP5FlagName          = "vmaf-p5"
@@ -366,16 +354,40 @@ const (
 	vmafProfileCategoryName = "VMAF Profile"
 )
 
+// vmafModelFlag returns the flag forcing the VMAF model. Not set, the model is selected from
+// the height of the source (see resolveVMAFModel).
+func vmafModelFlag(category string) cli.Flag {
+	return &cli.StringFlag{
+		Name: vmafModelFlagName,
+		Usage: fmt.Sprintf("VMAF model to score with. Valid values: %s. Selected from the source height when not set",
+			strings.Join(vmafModelNames(), ", ")),
+		Value:     "",
+		OnlyOnce:  true,
+		Category:  category,
+		Validator: vmafModelValidator,
+	}
+}
+
+// vmafModelNames returns the names of the supported VMAF models.
+func vmafModelNames() []string {
+	names := make([]string, len(ffmpeg.VMAFModels))
+	for i, model := range ffmpeg.VMAFModels {
+		names[i] = model.String()
+	}
+	return names
+}
+
+func vmafModelValidator(v string) error {
+	if v != "" && !ffmpeg.VMAFModel(v).Valid() {
+		return fmt.Errorf("unknown VMAF model %q, valid values: %s", v, strings.Join(vmafModelNames(), ", "))
+	}
+	return nil
+}
+
 // VMAFFlags returns the VMAF quality metric flags.
 func VMAFFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.BoolFlag{
-			Name:     vmafNegFlagName,
-			Usage:    "Use VMAF NEG models",
-			Value:    false,
-			OnlyOnce: true,
-			Category: vmafProfileCategoryName,
-		},
+		vmafModelFlag(vmafProfileCategoryName),
 		&cli.Float64Flag{
 			Name:      vmafMinFlagName,
 			Usage:     "Minimum acceptable VMAF score for the worst frame.",

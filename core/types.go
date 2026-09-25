@@ -17,15 +17,20 @@ type VMAFStats struct {
 	HarmonicMean float64
 	Mean         float64
 	Maximum      float64
+	// Banding diagnostic: the CAMBI feature the model fused into the score (0 is no banding,
+	// around 5 is where it starts to be slightly annoying, the models cap it at 17). Not a
+	// threshold: it tells a segment losing points to banding from one losing them to compression.
+	CAMBIMean float64
+	CAMBIMax  float64
 }
 
 // String renders the VMAF statistics on a single line, for the debug logs of the QP search.
 // Without it, formatting the struct with %s prints each float as %!s(float64=...).
 // The table rendering lives with the ffmpeg type: core does not import ffmpeg.
 func (vs VMAFStats) String() string {
-	return fmt.Sprintf("min=%v p1=%v p5=%v p10=%v p25=%v median=%v hmean=%v mean=%v max=%v (libvmaf %s)",
+	return fmt.Sprintf("min=%v p1=%v p5=%v p10=%v p25=%v median=%v hmean=%v mean=%v max=%v cambi_mean=%v cambi_max=%v (libvmaf %s)",
 		vs.Minimum, vs.Percentile1, vs.Percentile5, vs.Percentile10, vs.Percentile25,
-		vs.Median, vs.HarmonicMean, vs.Mean, vs.Maximum, vs.Version,
+		vs.Median, vs.HarmonicMean, vs.Mean, vs.Maximum, vs.CAMBIMean, vs.CAMBIMax, vs.Version,
 	)
 }
 

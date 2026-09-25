@@ -141,9 +141,6 @@ var batchsearchCommand = &cli.Command{
 		"    " + string(ffmpeg.HEVCEncoderVideoToolbox) + ", " + string(ffmpeg.AV1EncoderNVEnc) + " and " + string(ffmpeg.AV1EncoderVAAPI) + " are the others. It decodes with the same GPU,\n" +
 		"    nothing to set, and so does the final encode (--" + finalEncodeFlagName + "): the GPU that ran the search\n" +
 		"    keeps decoding, the CPU encoder gets the power it takes.\n" +
-		"  * --" + vmafCUDAFlagName + " scores VMAF on an NVIDIA GPU and decodes with it (NVDEC). It is the biggest\n" +
-		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg),\n" +
-		"    knowing that its scores vary between runs (see MANUAL.md, VMAF on CUDA).\n" +
 		"  * Searching with a CPU encoder (" + string(ffmpeg.HEVCEncoderLibx265) + ", " + string(ffmpeg.AV1EncoderSVTAV1) + ") is possible but long. If there is a GPU\n" +
 		"    in the machine anyway, an integrated one or Apple silicon included, hand it the decoding:\n" +
 		"    --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + " (Windows) or\n" +
@@ -154,19 +151,19 @@ var batchsearchCommand = &cli.Command{
 		"by the CPU: a GPU would not give the same pixels (see MANUAL.md, Hardware decoding). So is the\n" +
 		"lossless intermediate sptenc works from (FFV1): no GPU decodes it. A decoder that does not\n" +
 		"support your source codec falls back to software with a warning. A decode flag contradicting\n" +
-		"the encoder or --" + vmafCUDAFlagName + " is refused before anything starts.\n" +
+		"the encoder is refused before anything starts. VMAF itself runs on the CPU: the VMAF v1 models\n" +
+		"have no CUDA implementation.\n" +
 		"Run 'sptenc check' to see the encoders and filters available in your ffmpeg build.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
 		"each candidate encode (default: 1). The output is the same whatever the value, only the time it\n" +
-		"takes changes (except with --" + vmafCUDAFlagName + ", whose scores vary between runs whatever the value).\n" +
+		"takes changes.\n" +
 		"  * GPU encoders: the encoding engines of the card are not the limit, the CPU decoding the FFV1\n" +
-		"    intermediate for them is. Raise it until the CPU is saturated; the driver's encode session\n" +
-		"    limit is the hard stop.\n" +
+		"    intermediate for them and computing VMAF is. Raise it until the CPU is saturated; the\n" +
+		"    driver's encode session limit is the hard stop.\n" +
 		"  * CPU encoders use every thread of the machine on their own, but a single encode does not keep\n" +
-		"    a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second,\n" +
-		"    more so with --" + vmafCUDAFlagName + ". Expect less with fewer cores or bigger pictures, and mind the\n" +
-		"    memory with 4K content.\n" +
+		"    a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second.\n" +
+		"    Expect less with fewer cores or bigger pictures, and mind the memory with 4K content.\n" +
 		"Measurements are in MANUAL.md (Encoders). Measure on your machine.\n" +
 		"This flag only applies to the search: the final encode (--" + finalEncodeFlagName + ") has its own,\n" +
 		"--" + finalConcurrentSegmentsFlagName + ", as they do not run on the same hardware.\n\n" +
@@ -276,8 +273,12 @@ var batchsearchCommand = &cli.Command{
 		if !encoders.Has(requestedEncoder) {
 			return ctx, fmt.Errorf("requested encoder %q is not available in this ffmpeg build; run 'sptenc check' to see available encoders", requestedEncoder)
 		}
-		// Check the decode flags against the encoder and VMAF on CUDA
+		// Check the decode flags against the encoder
 		if _, err = encodeHWDecoder(cmd, ffmpeg.Encoder(requestedEncoder)); err != nil {
+			return ctx, err
+		}
+		// libvmaf must know the model: better now than once the master is done
+		if err = checkLibVMAF(ctx, cmd); err != nil {
 			return ctx, err
 		}
 		// A final encode concurrency without any final encode to come is a mistake: better
@@ -289,16 +290,6 @@ var batchsearchCommand = &cli.Command{
 			if _, alreadyCPU := ffmpeg.GetCPURelative(ffmpeg.Encoder(requestedEncoder)); alreadyCPU {
 				return ctx, fmt.Errorf("--%s has no effect: %s is already a CPU encoder, there will be no final encode. Use --%s",
 					finalConcurrentSegmentsFlagName, requestedEncoder, concurrentSegmentsFlagName)
-			}
-		}
-		// Check CUDA VMAF support if requested
-		if cmd.Bool(vmafCUDAFlagName) {
-			filters, err := ffmpeg.GetFilters(ctx)
-			if err != nil {
-				return ctx, fmt.Errorf("failed to list ffmpeg filters: %w", err)
-			}
-			if !filters.HasLibVMAFCUDA() {
-				return ctx, fmt.Errorf("CUDA VMAF was requested but libvmaf_cuda is not available in this ffmpeg build; run 'sptenc check' to see available filters")
 			}
 		}
 		// Check arguments: batchsearch only accepts a single regular file
@@ -410,9 +401,8 @@ var batchsearchCommand = &cli.Command{
 			NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
 			VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
 			D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
-			VMAFNeg:           cmd.Bool(vmafNegFlagName),
-			VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
 			HWDecoder:         hwDecoder,
+			// VMAFModel is set once the source is probed
 		}
 
 		/*
@@ -457,15 +447,17 @@ var batchsearchCommand = &cli.Command{
 			return err
 		}
 		totalDuration := sourceStats.Format.Duration
+		// The VMAF model of the run (search and final encode alike), now that the resolution is known
+		vmafModel := resolveVMAFModel(cmd, bypass, videoStream)
+		encoderAdapter.VMAFModel = vmafModel
 
 		// Get the stats cache (after probing so we know the VMAF model)
 		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
 		if !qpFound {
 			return fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
 		}
-		vmafModel := ffmpeg.VMAFModel(videoStream.Height >= ffmpeg.Height4K, cmd.Bool(vmafNegFlagName))
 		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax,
-			vmafModel, vmafAuditor, cmd.String(cacheProfileFlagName))
+			vmafModel.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to create stats cache: %w", err)
 		}
@@ -664,18 +656,15 @@ var batchsearchCommand = &cli.Command{
 				NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
 				VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
 				D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
-				VMAFNeg:           cmd.Bool(vmafNegFlagName),
-				VMAFCUDA:          cmd.Bool(vmafCUDAFlagName),
+				VMAFModel:         vmafModel,
 				HWDecoder:         hwDecoder, // the one of the search, see above
 			}
 			finalQPMin, finalQPMax, finalQPFound := finalEncoderAdapter.QPRange()
 			if !finalQPFound {
 				return fmt.Errorf("unsupported final encoder %s", finalEncoderAdapter.Name())
 			}
-			// videoStream is still in scope from the probe above
-			finalVMAFModel := ffmpeg.VMAFModel(videoStream.Height >= ffmpeg.Height4K, cmd.Bool(vmafNegFlagName))
 			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter.Name(), finalQPMin, finalQPMax,
-				finalVMAFModel, vmafAuditor, cmd.String(cacheProfileFlagName))
+				vmafModel.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
 			if err != nil {
 				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
 			}
@@ -731,8 +720,7 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, cmd.Int(nvidiaGPUIndexFlagName), cmd.Bool(vmafNegFlagName), cmd.Bool(vmafCUDAFlagName), cmd.Bool(debugFlagName),
-			hwDecoder,
+			results.TotalSegmentsFrames, vmafModel, cmd.Bool(debugFlagName), hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)
@@ -760,7 +748,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		videoStream = sourceStats.VideoTrack()
 		tags := metadata.GenerateTags(vmafAuditor, usedEncoder,
-			results, finalVMAFStats, cmd.Bool(vmafNegFlagName), videoStream.Height >= ffmpeg.Height4K, len(results.EncodedSegmentsPaths))
+			results, finalVMAFStats, vmafModel, len(results.EncodedSegmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, inputPath, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {

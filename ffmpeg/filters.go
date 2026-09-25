@@ -59,9 +59,6 @@ type Filter struct {
 // HasLibVMAF reports whether libvmaf is available.
 func (fi *FiltersInfo) HasLibVMAF() bool { return fi.Has("libvmaf") }
 
-// HasLibVMAFCUDA reports whether libvmaf_cuda is available.
-func (fi *FiltersInfo) HasLibVMAFCUDA() bool { return fi.Has("libvmaf_cuda") }
-
 var (
 	filtersHeaderRe = regexp.MustCompile(`^\s*Filters:\s*$`)
 	filtersSepRe    = regexp.MustCompile(`^\s*[-=]{3,}\s*$`)

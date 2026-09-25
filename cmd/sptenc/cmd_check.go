@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/hekmon/sptenc/ffmpeg"
@@ -19,7 +21,8 @@ var checkCommand = &cli.Command{
 	Aliases: []string{"k"},
 	Usage:   "Check that third-party tools are present and usable",
 	Description: "Check that required external tools are available and functional:\n" +
-		"  * ffmpeg (with at least one encoder and libvmaf support)\n" +
+		"  * ffmpeg (with at least one encoder and libvmaf 3.2.0 or newer: the VMAF v1 models\n" +
+		"    are loaded for real, on two frames ffmpeg generates by itself)\n" +
 		"  * ffprobe\n" +
 		"  * mkvpropedit",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -28,14 +31,14 @@ var checkCommand = &cli.Command{
 		fmt.Println()
 		fmt.Println()
 		var (
-			ffprobeOK      bool
-			ffmpegOK       bool
-			mkvpropeditOK  bool
-			hasLibvmaf     bool
-			hasLibvmafCUDA bool
-			hasAnyHEVC     bool
-			hasAnyAV1      bool
-			encoders       ffmpeg.EncodersInfo
+			ffprobeOK     bool
+			ffmpegOK      bool
+			mkvpropeditOK bool
+			hasLibvmaf    bool
+			hasVMAFModels bool
+			hasAnyHEVC    bool
+			hasAnyAV1     bool
+			encoders      ffmpeg.EncodersInfo
 		)
 		// Check ffprobe
 		ffprobeVersion, ffprobeErr := ffmpeg.GetFFProbeVersion(ctx)
@@ -59,9 +62,27 @@ var checkCommand = &cli.Command{
 				ffmpegErr = fmt.Errorf("failed to list filters: %w", filtErr)
 			} else {
 				hasLibvmaf = filters.HasLibVMAF()
-				hasLibvmafCUDA = filters.HasLibVMAFCUDA()
 				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf", boolToEmoji(hasLibvmaf)})
-				ffmpegDetails = append(ffmpegDetails, [2]string{"libvmaf_cuda", boolToEmoji(hasLibvmafCUDA)})
+			}
+			// Check the VMAF models: libvmaf must be recent enough to know them
+			if hasLibvmaf {
+				hasVMAFModels = true
+				for _, model := range ffmpeg.VMAFModels {
+					libvmafVersion, probeErr := ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
+						Model:     model,
+						ReportDir: os.TempDir(),
+					})
+					if probeErr != nil {
+						hasVMAFModels = false
+						reason := probeErr.Error()
+						if errors.Is(probeErr, ffmpeg.ErrVMAFModelUnavailable) {
+							reason = ffmpeg.ErrVMAFModelUnavailable.Error()
+						}
+						ffmpegDetails = append(ffmpegDetails, [2]string{model.String(), boolToEmoji(false) + " " + reason})
+					} else {
+						ffmpegDetails = append(ffmpegDetails, [2]string{model.String(), boolToEmoji(true) + " (libvmaf " + libvmafVersion + ")"})
+					}
+				}
 			}
 			// Check encoders
 			var encErr error
@@ -105,7 +126,7 @@ var checkCommand = &cli.Command{
 			fmt.Println(renderAV1EncodersAvailability(encoders))
 		}
 		// Determine status
-		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, mkvpropeditOK, hasLibvmaf, hasAnyHEVC || hasAnyAV1)
+		status, statusEmoji := computeStatus(ffprobeOK, ffmpegOK, mkvpropeditOK, hasLibvmaf && hasVMAFModels, hasAnyHEVC || hasAnyAV1)
 		fmt.Printf("\n  Status: %s %s\n\n", statusEmoji, status)
 		if status == "not ok" {
 			return fmt.Errorf("one or more required tools are missing or misconfigured")

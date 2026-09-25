@@ -47,7 +47,7 @@ const (
 // GenerateTags builds the ffmpeg metadata flags documenting an encode. They are all set on the
 // video stream: container level metadata (the title in particular) belongs to the user and is
 // passed through from the source untouched.
-func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, vmafNEG, ultraHD bool, segmentsCount int) (flags ffmpeg.FFMEGTags) {
+func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, model ffmpeg.VMAFModel, segmentsCount int) (flags ffmpeg.FFMEGTags) {
 	flags = make(ffmpeg.FFMEGTags, 0, 58)
 	// Global
 	module, version := signature()
@@ -78,7 +78,7 @@ func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSe
 		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencStatsWeightedQP, strconv.FormatFloat(statsQP.GlobalWeightedQP, 'f', -1, 64)),
 	)
 	// VMAF
-	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, ffmpeg.VMAFModel(ultraHD, vmafNEG)))
+	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, model))
 	//// VMAF conf
 	thresholdTags := map[string]string{
 		"min":    sptencVMAFConfMinTagKey,
