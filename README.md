@@ -325,11 +325,11 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS (Apple Silicon) |
 | `libsvtav1` | AV1 | CPU | All |
 | `av1_nvenc` | AV1 | NVIDIA GPU | All |
-| `av1_vaapi` | AV1 | VAAPI GPU | Linux |
+| `av1_vaapi` | AV1 | VAAPI GPU | Linux (Intel Arc or Core Ultra, AMD RDNA 3 or newer) |
 
 > **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `libsvtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc check` to see which encoders your ffmpeg build supports.
 
-> **Untested encoders:** `av1_vaapi` and `hevc_d3d12va` are implemented but have not been validated end to end (`hevc_vaapi` was, on Linux with an Intel iGPU). `hevc_d3d12va` targets Intel and AMD GPUs on Windows, which the author does not have: NVIDIA users should use `hevc_nvenc` and `av1_nvenc`, not D3D12VA. Feedback from Intel or AMD hardware is welcome.
+> **Untested encoders:** `av1_vaapi` and `hevc_d3d12va` are implemented but have not been validated end to end (`hevc_vaapi` was, on Linux with an Intel iGPU). `av1_vaapi` needs a GPU that encodes AV1, and the author's only decodes it, as do the Intel iGPUs from Tiger Lake to Raptor Lake (11th to 14th generation Core, N100 included): ffmpeg then refuses to open the encoder, `No usable encoding entrypoint found for profile VAProfileAV1Profile0`. A GPU that can encode AV1 lists `VAEntrypointEncSlice` or `VAEntrypointEncSliceLP` for `VAProfileAV1Profile0` in `vainfo --display drm --device /dev/dri/renderD128`. `hevc_d3d12va` targets Intel and AMD GPUs on Windows, which the author does not have: NVIDIA users should use `hevc_nvenc` and `av1_nvenc`, not D3D12VA. Feedback from Intel or AMD hardware is welcome.
 
 ### Encoder selection vs file size
 

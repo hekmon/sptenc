@@ -489,7 +489,13 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
  * Linux only, vendor-agnostic (Intel/AMD).
  * ffmpeg -h encoder=av1_vaapi
  * Device handling is shared with HEVC VA-API (see hevc.go).
- * Driver support: Intel Xe-LP+ (Tiger Lake), AMD VCN3+ (RDNA).
+ * Requires a GPU with an AV1 encoder: Intel DG2 (Arc Alchemist), Meteor Lake and newer, AMD VCN 4.0
+ * (RDNA 3) and newer. Intel Tiger Lake to Raptor Lake (Alder Lake-N included), DG1 and AMD VCN 3
+ * (RDNA 2) can not encode AV1. Where they decode it, the driver lists VAProfileAV1Profile0 without
+ * an encode entrypoint, and ffmpeg fails to open the encoder with "No usable encoding entrypoint
+ * found for profile VAProfileAV1Profile0".
+ * https://github.com/intel/media-driver#decodingencoding-features
+ * https://github.com/GPUOpen-LibrariesAndSDKs/AMF/wiki/GPU%20and%20APU%20HW%20Features%20and%20Support
  */
 
 const (
