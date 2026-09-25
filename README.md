@@ -8,7 +8,7 @@ A final, complete VMAF comparison between the encoded output and original source
 
 This approach gives each scene the highest QP, so the smallest size, that still passes the quality target defined by the VMAF profile.
 
-> **Trade-off:** several QP values are tested on every segment and each one is measured with VMAF, so an encode costs a few passes of the chosen encoder where a CRF encode costs one. What that costs depends on the encoder: a larger file with a GPU encoder, hours and the smallest file with a CPU one. On the machine measured in [Encoder selection vs file size](MANUAL.md#encoder-selection-vs-file-size) (RTX 5090, 16 cores, VMAF computed on the GPU too), the GPU search of a 26 min episode took under 11 minutes, its CPU counterpart 53. The floor is the same either way, and it is not what a single CRF pass followed by a whole-file VMAF check gives. That check comes after the fact: the average of an otherwise steady movie can hide one destroyed scene, and a low percentile catching it says neither which scene it was nor what it needed. sptenc enforces its quality floor on every single scene independently.
+> **Trade-off:** several QP values are tested on every segment and each one is measured with VMAF, so an encode costs a few passes of the chosen encoder where a CRF encode costs one. What that costs depends on the encoder: a larger file with a GPU encoder, hours and the smallest file with a CPU one. On the machine measured in [Encoder selection vs file size](MANUAL.md#encoder-selection-vs-file-size) (RTX 5090, 16 cores), the GPU search of a 26 min episode took 17 minutes, its CPU counterpart <!-- TODO(night): libx265 run --> TBD. The floor is the same either way, and it is not what a single CRF pass followed by a whole-file VMAF check gives. That check comes after the fact: the average of an otherwise steady movie can hide one destroyed scene, and a low percentile catching it says neither which scene it was nor what it needed. sptenc enforces its quality floor on every single scene independently.
 
 > **Inspiration:** sptenc is inspired by Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f), a framework that optimizes the encoding of each shot of a video against VMAF, Netflix's perceptual quality metric. This project is built for power users encoding on their own hardware, not for streaming-scale infrastructure.
 
@@ -29,18 +29,18 @@ Coming from Av1an or CRF with VMAF spot checks? See [how sptenc compares](MANUAL
 
 ## Key Features
 
-- 🎯 **VMAF-driven encoding** - The quality gate is a perceptual score measured on the output, not a CRF or bitrate you hope will be enough. 1080p or 4K model auto-selected from the input, NEG variants available (see [what VMAF does not see](MANUAL.md#what-vmaf-does-not-see))
-- 🎬 **Scene-aware segmentation** - Segments are cut on scene changes, so the quality floor is enforced per scene, never averaged across a whole file
+- 🎯 **VMAF-driven encoding** - The quality gate is a perceptual score measured on the output, not a CRF or bitrate you hope will be enough. Netflix's VMAF v1 models see banding and part of the color defects the previous generation was blind to; the 1080p or 4K one is selected from the height of the input (see [what VMAF sees](MANUAL.md#what-vmaf-sees-and-what-it-does-not))
+- 🎬 **Scene-aware segmentation** - Segments are cut on scene changes and each one must pass the floor on its own: a bad scene can not hide in the average of the whole file. The whole-file VMAF computed at the end is recorded in the output, it is not the gate
 - 📊 **Multi-metric validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25) and worst frame; every enabled threshold must pass
 - 🧠 **Adaptive QP search** - Each segment converges on the highest QP that still passes in a few attempts, and stats kept from previous runs make the next ones start closer (see [Adaptive QP Search](MANUAL.md#adaptive-qp-search))
 - ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU and encode the final file small on the CPU, or keep the GPU encode when time matters more than size: the floor is proven the same way (see [Encoders](MANUAL.md#encoders))
-- 🚀 **Hardware acceleration wherever it helps** - GPU decoding even alongside a CPU encoder and several segments searched in parallel: same output, less time. VMAF on CUDA as well, much faster but with scores varying between runs (see [its limits](MANUAL.md#vmaf-on-cuda))
+- 🚀 **Hardware acceleration wherever it helps** - GPU decoding even alongside a CPU encoder and several segments searched in parallel: same output, less time. VMAF itself runs on the CPU: the v1 models have no GPU implementation (see [why](MANUAL.md#vmaf-runs-on-the-cpu))
 - 🔬 **Automatic scene threshold search** - `batchsearch` tries several scene detection thresholds and keeps the one that produces the smallest passing file
-- 📋 **A file you can trust** - Audio, subtitles, attachments and color metadata are carried over (PCM audio losslessly compressed to FLAC when every audio track is PCM), and the final whole-file VMAF result is written into the output's metadata tags
+- 📋 **A file that remembers** - The output's tags record how it was made and what it scored: the whole-file VMAF, the model and the thresholds, the encoder and its preset, the QP statistics and the number of best effort segments (see [Metadata tags](MANUAL.md#metadata-tags))
 
 ## How It Works
 
-1. **Scene detection** - FFmpeg `scdet` measures how much each frame differs from the previous one to find the scene cuts, and the video is split on them. For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so splits can happen at any frame without quality loss. It also shields against open GOPs, where a cut can leave frames referencing others in the neighboring segment: they can not be decoded anymore and are dropped, a drift (against the audio for instance) that accumulates with every cut.
+1. **Scene detection** - FFmpeg `scdet` measures how much each frame differs from the previous one to find the scene cuts, and the video is split on them. For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so a cut can fall on any frame without losing any. It also shields against open GOPs, where a cut can leave frames referencing others in the neighboring segment: they can not be decoded anymore and are dropped, a drift (against the audio for instance) that accumulates with every cut.
 2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `libsvtav1`).
 3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
 4. **Adaptive QP search** - Each segment starts from a smart QP estimate, brackets the valid range with stepped probes, then uses interpolation to converge on the highest valid QP (smallest file) in just a few attempts. Persistent stats from previous runs further accelerate this (see [Adaptive QP Search](MANUAL.md#adaptive-qp-search)).
@@ -82,14 +82,15 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 ./sptenc encode video.mkv output.mkv --vmaf-hmean -1 --vmaf-mean 95 --vmaf-p5 85 --vmaf-min 70
 ```
 
-### Use the VMAF NEG models
+### Force the VMAF model
 ```bash
-./sptenc encode video.mkv output.mkv --vmaf-neg
+# A 1440p source judged as it would be on a 4K display (below 2160 lines, the 1080p model is selected)
+./sptenc encode video.mkv output.mkv --vmaf-model vmaf_v1.0.16_1d5h_2160
 ```
 
 ### Fast VMAF profile prototyping with NVENC on the second GPU
 ```bash
-./sptenc encode video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --nvidia-gpu-index 1 --vmaf-hmean 93
+./sptenc encode video.mkv output.mkv --encoder hevc_nvenc --nvidia-gpu-index 1 --vmaf-hmean 93
 # Once happy with the profile, re-run with the default libx265 for a smaller file, or keep this one
 ```
 
@@ -112,20 +113,20 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 
 ### Compute VMAF between two videos
 ```bash
-# Software libvmaf with GPU-accelerated decoding
+# VMAF runs on the CPU, the GPU decodes both videos
 ./sptenc vmaf --nvdec original.mkv encoded.mkv
 
-# Full GPU acceleration (requires libvmaf_cuda)
-./sptenc vmaf --vmaf-cuda --vmaf-neg original.mkv encoded.mkv
+# With another model than the one selected from the height of the reference
+./sptenc vmaf --vmaf-model vmaf_v1.0.16_1d5h_2160 original.mkv encoded.mkv
 ```
 
 ### Search for the threshold that yields the smallest passing file
 ```bash
 # Fast search on GPU: the output is the best candidate, encoded by the GPU encoder
-./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93
+./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-hmean 93
 # Same search, but once the best threshold is found the file is re-encoded with the equivalent
 # CPU encoder to shrink it even further (one run: no need to run the search first)
-./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-cuda --vmaf-hmean 93 --final-encode
+./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-hmean 93 --final-encode
 ```
 
 ### Manual pipeline (master → split → encode)
@@ -137,21 +138,21 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 
 > Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (0–100): higher values detect fewer scenes, lower values detect more. `split` and `encode` default to 10, ffmpeg's own; `thresholds` and `batchsearch` search upward from 8.
 >
-> **Use everything you have.** A hardware encoder decodes with its own GPU and `--vmaf-cuda` decodes with NVDEC: nothing to set. With a CPU encoder (the smallest files, out of the CPU alone), hand the decoding to whatever GPU is in the machine, integrated or Apple silicon included: `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec`. More CPU left for the encoder, and the same file out: a GPU is only handed the codecs it decodes to the pixels of a software decode (H.264, HEVC, VP8, VP9, AV1 and VC-1), MPEG-1, MPEG-2, MPEG-4 Part 2 and MJPEG sources stay on the CPU. The same flags serve `master`, `split`, `thresholds` and `vmaf`. A source codec the decoder does not support falls back to software with a warning, a flag contradicting the encoder is refused. The lossless FFV1 intermediate has no hardware decoder. The details (AV1 film grain, profiles a GPU does not decode) are in [Hardware decoding](MANUAL.md#hardware-decoding).
+> **Use everything you have.** A hardware encoder decodes with its own GPU: nothing to set. With a CPU encoder (the smallest files, out of the CPU alone), hand the decoding to whatever GPU is in the machine, integrated or Apple silicon included: `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec`. More CPU left for the encoder and the VMAF computations, and the same file out: a GPU is only handed the codecs it decodes to the pixels of a software decode (H.264, HEVC, VP8, VP9, AV1 and VC-1), MPEG-1, MPEG-2, MPEG-4 Part 2 and MJPEG sources stay on the CPU. The same flags serve `master`, `split`, `thresholds` and `vmaf`. A source codec the decoder does not support falls back to software with a warning, a flag contradicting the encoder is refused. The lossless FFV1 intermediate has no hardware decoder, and VMAF itself runs on the CPU. The details (AV1 film grain, profiles a GPU does not decode) are in [Hardware decoding](MANUAL.md#hardware-decoding).
 
 ## Installation
 
 Standalone binaries for most platforms are available on the [releases page](https://github.com/hekmon/sptenc/releases).
 
 **External Dependencies:**
-- `ffmpeg` - built with `libvmaf` and with `libx265` (or another supported encoder). A recent version is highly recommended.
-  - Arch Linux's, Homebrew's, RPM Fusion's (x86_64) and the builds linked from [ffmpeg.org](https://ffmpeg.org/download.html) for Windows and Linux (gyan.dev, BtbN's GPL ones) have both.
-  - Debian's and Ubuntu's have no `libvmaf`, and Fedora's own `ffmpeg-free` has no `libx265` (`libsvtav1` works with it).
-  - If yours lacks one, the [build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128) compiles a static ffmpeg with both. It is written for Ubuntu 24.04 under WSL on Windows, with an optional CUDA part for an RTX 50 series GPU: that part adds `libvmaf_cuda`, which `--vmaf-cuda` needs and none of the builds above include.
+- `ffmpeg` - built with `libvmaf` **3.2.0 or newer**, the first release with the VMAF v1 models, and with `libx265` (or another supported encoder). As of September 2026:
+  - Arch Linux's and Homebrew's (libvmaf 3.2.1), and the builds linked from [ffmpeg.org](https://ffmpeg.org/download.html) for Windows and Linux (BtbN's GPL ones, gyan.dev's from 9.0.1 on) have both. gyan.dev's 8.1.1 has a libvmaf without the v1 models.
+  - Debian's and Ubuntu's have no `libvmaf`, RPM Fusion's uses Fedora's, which is 3.0.0 on Fedora 43 and 44 (3.2.1 in Rawhide), and Fedora's own `ffmpeg-free` has no `libx265` (`libsvtav1` works with it).
+  - If yours lacks one, the [build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128) compiles a static ffmpeg with both, libvmaf included from its current sources. It is written for Ubuntu 24.04 under WSL on Windows.
 - `ffprobe` - bundled with ffmpeg
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
 
-Run `sptenc check` to verify everything is found and usable. On Windows, `ffmpeg.exe` and `ffprobe.exe` are looked for in the current directory, not in `PATH`: see [where the binaries are looked for](MANUAL.md#installation-details).
+Run `sptenc check` to verify everything is found and usable: it loads both VMAF models for real and prints the libvmaf version. On Windows, `ffmpeg.exe` and `ffprobe.exe` are looked for in the current directory, not in `PATH`: see [where the binaries are looked for](MANUAL.md#installation-details).
 
 ## Going further
 
