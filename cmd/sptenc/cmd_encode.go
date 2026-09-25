@@ -57,27 +57,29 @@ var encodeCommand = &cli.Command{
 		"HARDWARE: USE EVERYTHING YOU HAVE\n" +
 		"Two workloads compete for your CPU: encoding, and checking the result (decoding the videos\n" +
 		"and scoring every frame with VMAF, for every QP tried). Whatever a GPU can take over from the\n" +
-		"second one is time saved for the exact same output, so sptenc takes it by itself whenever it\n" +
-		"knows it can:\n" +
+		"second one is time saved, so sptenc takes it by itself whenever it knows it can:\n" +
 		"  * A hardware encoder (" + string(ffmpeg.HEVCEncoderNVEnc) + ", " + string(ffmpeg.HEVCEncoderVAAPI) + ", " + string(ffmpeg.HEVCEncoderD3D12VA) + ", " + string(ffmpeg.HEVCEncoderVideoToolbox) + ",\n" +
 		"    " + string(ffmpeg.AV1EncoderNVEnc) + ", " + string(ffmpeg.AV1EncoderVAAPI) + ") decodes with the same GPU. Nothing to set. Fast: the right choice\n" +
 		"    to try VMAF profiles.\n" +
 		"  * --" + vmafCUDAFlagName + " scores VMAF on an NVIDIA GPU and decodes with it (NVDEC). It is the biggest\n" +
-		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg).\n" +
+		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg),\n" +
+		"    knowing that its scores vary between runs (see MANUAL.md, VMAF on CUDA).\n" +
 		"  * A CPU encoder (" + string(ffmpeg.HEVCEncoderLibx265) + ", " + string(ffmpeg.AV1EncoderSVTAV1) + ") gives the smallest file, and the CPU is what it has.\n" +
 		"    If there is a GPU in the machine anyway, an integrated one or Apple silicon included, hand\n" +
 		"    it the decoding: --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + "\n" +
-		"    (Windows) or --" + videoToolboxDecFlagName + " (macOS). Same file out, more CPU left for the encoder.\n" +
+		"    (Windows) or --" + videoToolboxDecFlagName + " (macOS). More CPU left for the encoder.\n" +
 		"  * --" + concurrentSegmentsFlagName + " (-C) works on several segments at once, see CONCURRENT ENCODING.\n" +
-		"You can not get it wrong. Decoding on a GPU does not change a single pixel (the decoders of\n" +
-		"H.264, HEVC, VP9 and AV1 are exact by specification), only who spends the time. A decoder\n" +
-		"that does not support your source codec falls back to software with a warning. A decode flag\n" +
-		"contradicting the encoder or --" + vmafCUDAFlagName + " is refused before anything starts. The only decoding\n" +
-		"no GPU can take is the lossless intermediate sptenc works from (FFV1): everything else goes.\n" +
+		"Decoding H.264, HEVC, VP9 or AV1 on a GPU does not change a single pixel (their decoders are\n" +
+		"exact by specification), only who spends the time. MPEG-2 and MPEG-4 Part 2 sources can come\n" +
+		"out slightly different, by rounding (see MANUAL.md, Hardware decoding). A decoder that does not\n" +
+		"support your source codec falls back to software with a warning. A decode flag contradicting\n" +
+		"the encoder or --" + vmafCUDAFlagName + " is refused before anything starts. The only decoding no GPU can\n" +
+		"take is the lossless intermediate sptenc works from (FFV1): everything else goes.\n" +
 		"Run 'sptenc check' to see the encoders and filters available in your ffmpeg build.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel (default: 1).\n" +
-		"The output is the same whatever the value, only the time it takes changes.\n" +
+		"The output is the same whatever the value, only the time it takes changes (except with\n" +
+		"--" + vmafCUDAFlagName + ", whose scores vary between runs whatever the value).\n" +
 		"  * GPU encoders: the encoding engines of the card are not the limit, the CPU decoding the FFV1\n" +
 		"    intermediate for them is. Raise it until the CPU is saturated; the driver's encode session\n" +
 		"    limit is the hard stop.\n" +
@@ -85,7 +87,7 @@ var encodeCommand = &cli.Command{
 		"    keep a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second,\n" +
 		"    more so with --" + vmafCUDAFlagName + " (which takes VMAF away from the CPU). Expect less with fewer\n" +
 		"    cores or bigger pictures, and mind the memory with 4K content.\n" +
-		"Measurements are in the README (Encoders). Measure on your machine.\n" +
+		"Measurements are in MANUAL.md (Encoders). Measure on your machine.\n" +
 		"Segments started together can not learn from each other: a run with several concurrent\n" +
 		"segments needs a few more attempts at its beginning, a cost only visible on short inputs.\n\n" +
 		"SEGMENT LENGTH\n" +

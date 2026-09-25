@@ -36,10 +36,11 @@ var masterCommand = &cli.Command{
 		"and no dropped frame.\n\n" +
 		"PIXEL FORMAT\n" +
 		"FFV1 is mathematically lossless, but the master is stored as 10-bit 4:2:0, the pixel format of\n" +
-		"every sptenc output. For 8-bit and 10-bit 4:2:0 sources, by far the most common ones, the master\n" +
-		"is bit-exact with the original. 4:2:2 and 4:4:4 sources get their chroma subsampled (luma stays\n" +
-		"exact) and sources deeper than 10 bits are reduced to 10 bits: the conversion the final encode\n" +
-		"requires anyway simply happens at this step.",
+		"every sptenc output. From limited range 8-bit and 10-bit 4:2:0 sources, by far the most common\n" +
+		"ones, it holds every sample of the original without loss (8-bit values are shifted to 10 bits).\n" +
+		"Other sources are converted at this step: 4:2:2 and 4:4:4 ones get their chroma subsampled (luma\n" +
+		"stays exact), sources deeper than 10 bits are reduced to 10 bits, and full range sources are\n" +
+		"converted to limited range (without loss from 8 bits, with a slight loss from 10 bits).",
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{}
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)

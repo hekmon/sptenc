@@ -291,8 +291,8 @@ func clampVMAF(value float64) float64 {
 	segment, which the ephemeral cache now removes after the first few segments of a run. The
 	"Manual start QP" lines are an oracle, computed after the fact by replaying the results
 	from every possible fixed start. Measured in 2026 with the ephemeral learning, the
-	production pipeline takes about 3.9 attempts per segment from a cold cache (see the
-	README).
+	production pipeline takes about 3.9 attempts per segment from a cold cache (see
+	MANUAL.md).
 
 	-------------------------------------------------------------------------------
 	Interpolation algorithms compared (clip not recorded)

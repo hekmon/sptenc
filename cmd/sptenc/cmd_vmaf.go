@@ -31,7 +31,8 @@ var vmafCommand = &cli.Command{
 		"input codec is compatible.\n\n" +
 		"Use --" + vmafCUDAFlagName + " to additionally accelerate the VMAF computation itself on the GPU\n" +
 		"(requires libvmaf_cuda, not available in standard ffmpeg builds). When this is enabled,\n" +
-		"NVDEC decoding is automatically used for compatible input codecs; --" + nvdecFlagName + " is implied.",
+		"NVDEC decoding is automatically used for compatible input codecs; --" + nvdecFlagName + " is implied.\n" +
+		"Its scores vary between runs, the min and low percentiles most (see MANUAL.md, VMAF on CUDA).",
 	Flags: func() (flags []cli.Flag) {
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeVMAF)...)
 		flags = append(flags,

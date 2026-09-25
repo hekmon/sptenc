@@ -106,7 +106,7 @@ var batchsearchCommand = &cli.Command{
 		"Each candidate is a full encode pass with VMAF validation: the run costs as many encodes as\n" +
 		"candidates tried, up to --" + maxCandidatesFlagName + " (--" + strikesFlagName + " usually stops it earlier). Count in hours\n" +
 		"with a GPU encoder and several concurrent segments, in days with a CPU encoder, more for films\n" +
-		"and 4K content (see the README, Encoders, for measured encode times).\n\n" +
+		"and 4K content (see MANUAL.md, Encoders, for measured encode times).\n\n" +
 		"You control the cost with three levers: which boundaries are eligible, how many candidates\n" +
 		"are generated from them, and when to give up.\n\n" +
 		"THRESHOLD RANGE (--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ")\n" +
@@ -135,29 +135,31 @@ var batchsearchCommand = &cli.Command{
 		"additional full encode passes.\n\n" +
 		"HARDWARE: USE EVERYTHING YOU HAVE\n" +
 		"A search is many full encodes, each one checked frame by frame with VMAF: decoding and scoring\n" +
-		"compete with the encoder for your CPU. Whatever a GPU can take over is time saved for the\n" +
-		"exact same result, so sptenc takes it by itself whenever it knows it can:\n" +
+		"compete with the encoder for your CPU. Whatever a GPU can take over is time saved, so sptenc\n" +
+		"takes it by itself whenever it knows it can:\n" +
 		"  * Search with a hardware encoder. The default, " + string(ffmpeg.HEVCEncoderNVEnc) + ", is one; " + string(ffmpeg.HEVCEncoderVAAPI) + ", " + string(ffmpeg.HEVCEncoderD3D12VA) + ",\n" +
 		"    " + string(ffmpeg.HEVCEncoderVideoToolbox) + ", " + string(ffmpeg.AV1EncoderNVEnc) + " and " + string(ffmpeg.AV1EncoderVAAPI) + " are the others. It decodes with the same GPU,\n" +
 		"    nothing to set, and so does the final encode (--" + finalEncodeFlagName + "): the GPU that ran the search\n" +
 		"    keeps decoding, the CPU encoder gets the power it takes.\n" +
 		"  * --" + vmafCUDAFlagName + " scores VMAF on an NVIDIA GPU and decodes with it (NVDEC). It is the biggest\n" +
-		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg).\n" +
+		"    relief you can give the CPU: use it whenever you have one (needs libvmaf_cuda in ffmpeg),\n" +
+		"    knowing that its scores vary between runs (see MANUAL.md, VMAF on CUDA).\n" +
 		"  * Searching with a CPU encoder (" + string(ffmpeg.HEVCEncoderLibx265) + ", " + string(ffmpeg.AV1EncoderSVTAV1) + ") is possible but long. If there is a GPU\n" +
 		"    in the machine anyway, an integrated one or Apple silicon included, hand it the decoding:\n" +
 		"    --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + " (Windows) or\n" +
-		"    --" + videoToolboxDecFlagName + " (macOS). Same result, more CPU left for the encoder.\n" +
+		"    --" + videoToolboxDecFlagName + " (macOS). More CPU left for the encoder.\n" +
 		"  * --" + concurrentSegmentsFlagName + " (-C) works on several segments at once, see CONCURRENT ENCODING.\n" +
-		"You can not get it wrong. Decoding on a GPU does not change a single pixel (the decoders of\n" +
-		"H.264, HEVC, VP9 and AV1 are exact by specification), only who spends the time. A decoder\n" +
-		"that does not support your source codec falls back to software with a warning. A decode flag\n" +
-		"contradicting the encoder or --" + vmafCUDAFlagName + " is refused before anything starts. The only decoding\n" +
-		"no GPU can take is the lossless intermediate sptenc works from (FFV1): everything else goes.\n" +
+		"Decoding H.264, HEVC, VP9 or AV1 on a GPU does not change a single pixel (their decoders are\n" +
+		"exact by specification), only who spends the time. MPEG-2 and MPEG-4 Part 2 sources can come\n" +
+		"out slightly different, by rounding (see MANUAL.md, Hardware decoding). A decoder that does not\n" +
+		"support your source codec falls back to software with a warning. A decode flag contradicting\n" +
+		"the encoder or --" + vmafCUDAFlagName + " is refused before anything starts. The only decoding no GPU can\n" +
+		"take is the lossless intermediate sptenc works from (FFV1): everything else goes.\n" +
 		"Run 'sptenc check' to see the encoders and filters available in your ffmpeg build.\n\n" +
 		"CONCURRENT ENCODING\n" +
 		"The --" + concurrentSegmentsFlagName + " flag controls how many segments are searched in parallel within\n" +
 		"each candidate encode (default: 1). The output is the same whatever the value, only the time it\n" +
-		"takes changes.\n" +
+		"takes changes (except with --" + vmafCUDAFlagName + ", whose scores vary between runs whatever the value).\n" +
 		"  * GPU encoders: the encoding engines of the card are not the limit, the CPU decoding the FFV1\n" +
 		"    intermediate for them is. Raise it until the CPU is saturated; the driver's encode session\n" +
 		"    limit is the hard stop.\n" +
@@ -165,7 +167,7 @@ var batchsearchCommand = &cli.Command{
 		"    a many-core CPU fully busy: 2 or 3 concurrent segments encode more frames per second,\n" +
 		"    more so with --" + vmafCUDAFlagName + ". Expect less with fewer cores or bigger pictures, and mind the\n" +
 		"    memory with 4K content.\n" +
-		"Measurements are in the README (Encoders). Measure on your machine.\n" +
+		"Measurements are in MANUAL.md (Encoders). Measure on your machine.\n" +
 		"This flag only applies to the search: the final encode (--" + finalEncodeFlagName + ") has its own,\n" +
 		"--" + finalConcurrentSegmentsFlagName + ", as they do not run on the same hardware.\n\n" +
 		"FINAL ENCODE\n" +

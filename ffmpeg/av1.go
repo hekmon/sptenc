@@ -263,7 +263,8 @@ func AV1SVTAV1EncodeQP(ctx context.Context, config AV1SVTAV1EncodeQPConfig) (err
 	// // quality
 	// -qp in the FFmpeg wrapper is true CQP: rate_control_mode 0 with aq_mode explicitly
 	// disabled (libsvtav1.c). The QP asked is the QP applied, deterministic for the
-	// per-scene quality loop. (-crf would be rc 0 + variance AQ, SVT's adaptive mode.)
+	// per-scene quality loop. (-crf would keep SVT-AV1's default aq-mode 2, "deltaq pred
+	// efficiency"; the variance based AQ is mode 1.)
 	args = append(args,
 		"-qp", strconv.Itoa(config.Quantization),
 	)
