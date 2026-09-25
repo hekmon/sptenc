@@ -64,22 +64,24 @@ func checkSourceVideo(stats ffmpeg.FFProbeStats) (videoStream *ffmpeg.FFProbeBin
 	if err = checkProgressive(videoStream); err != nil {
 		return nil, err
 	}
-	if err = ffmpeg.CheckVMAFResolution(videoStream.Width, videoStream.Height); err != nil {
-		return nil, err
-	}
 	return
 }
 
 // resolveVMAFModel returns the VMAF model of a run and tells the user which one and why: the
-// one forced with the model flag, warned about when it is not the one of the source resolution
-// (it is the point of forcing it: a 1440p source judged as 4K, 4K content meant for 1080p
-// screens), the one of the source resolution otherwise (see ffmpeg.SelectVMAFModel).
+// one forced with the model flag, warned about when it is made for another display than the
+// one of the source resolution (it is the point of forcing it: a 1440p source judged as 4K, 4K
+// content meant for 1080p screens), and said unknown when sptenc does not know it (a model
+// newer than sptenc); the one of the source resolution otherwise (see ffmpeg.SelectVMAFModel).
 func resolveVMAFModel(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBinaryStream) ffmpeg.VMAFModel {
 	if forced := cmd.String(vmafModelFlagName); forced != "" {
 		model := ffmpeg.VMAFModel(forced)
-		if mismatch := model.ResolutionMismatch(stream.Height); mismatch != "" {
+		switch mismatch := model.ResolutionMismatch(stream.Height); {
+		case mismatch != "":
 			fmt.Fprintf(out, "WARNING: VMAF model %s forced by --%s: %s\n", model, vmafModelFlagName, mismatch)
-		} else {
+		case model.Description() == "":
+			fmt.Fprintf(out, "VMAF model %s forced by --%s: sptenc does not know this model, its viewing condition and its scale are yours to check\n",
+				model, vmafModelFlagName)
+		default:
 			fmt.Fprintf(out, "VMAF model %s forced by --%s (%s)\n", model, vmafModelFlagName, model.Description())
 		}
 		return model
@@ -94,8 +96,9 @@ func resolveVMAFModel(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBin
 // libvmaf filter is there and it knows the model of the run (the one forced with the model
 // flag, the 1080p one otherwise: the v1 models come together, one of them is enough to tell
 // the libvmaf version). A model libvmaf does not know surfaces mid-run otherwise, once the
-// master and the first segment have been produced. The probe report goes to the temporary
-// directory of the command.
+// master and the first segment have been produced. The probe runs at 1080p, the size the
+// models are made for: the size of the source is checked once it is known (see
+// checkVMAFPictures). The probe report goes to the temporary directory of the command.
 func checkLibVMAF(ctx context.Context, cmd *cli.Command) error {
 	filters, err := ffmpeg.GetFilters(ctx)
 	if err != nil {
@@ -105,17 +108,41 @@ func checkLibVMAF(ctx context.Context, cmd *cli.Command) error {
 		return errors.New("libvmaf is not available in this ffmpeg build; run 'sptenc check' to see available filters")
 	}
 	model := ffmpeg.VMAFModelFHD
-	if forced := cmd.String(vmafModelFlagName); forced != "" {
+	forced := cmd.String(vmafModelFlagName)
+	if forced != "" {
 		model = ffmpeg.VMAFModel(forced)
 	}
 	if _, err = ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
 		Model:     model,
 		ReportDir: cmd.String(tmpDirFlagName),
 	}); err != nil {
-		if errors.Is(err, ffmpeg.ErrVMAFModelUnavailable) {
+		switch {
+		case errors.Is(err, ffmpeg.ErrVMAFModelUnavailable) && forced != "":
+			return fmt.Errorf("the libvmaf of this ffmpeg build does not know the VMAF model %s forced by --%s: check its name, or the version of libvmaf (run 'sptenc check' for details)",
+				model, vmafModelFlagName)
+		case errors.Is(err, ffmpeg.ErrVMAFModelUnavailable):
 			return fmt.Errorf("the libvmaf of this ffmpeg build does not know the VMAF model %s: sptenc needs ffmpeg built against libvmaf 3.2.0 or newer (run 'sptenc check' for details)", model)
+		default:
+			return fmt.Errorf("libvmaf check failed: %w", err)
 		}
-		return fmt.Errorf("libvmaf check failed: %w", err)
+	}
+	return nil
+}
+
+// checkVMAFPictures verifies, once the source is known and before any long step, that libvmaf
+// can score pictures of its size with the model of the run. Below a minimum size libvmaf
+// crashes, or writes no report, and that minimum depends on the model and on the aspect ratio
+// (see ffmpeg.VMAFProbeConfig): two frames of that very size are scored for real rather than
+// held against a fixed floor. Refused later, the source would fail at its first VMAF, after
+// the master and a first encode.
+func checkVMAFPictures(ctx context.Context, cmd *cli.Command, model ffmpeg.VMAFModel, stream *ffmpeg.FFProbeBinaryStream) error {
+	if _, err := ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
+		Model:     model,
+		Width:     stream.Width,
+		Height:    stream.Height,
+		ReportDir: cmd.String(tmpDirFlagName),
+	}); err != nil {
+		return fmt.Errorf("libvmaf can not score %dx%d pictures with the VMAF model %s: %w", stream.Width, stream.Height, model, err)
 	}
 	return nil
 }

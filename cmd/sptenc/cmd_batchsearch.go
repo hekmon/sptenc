@@ -447,8 +447,13 @@ var batchsearchCommand = &cli.Command{
 			return err
 		}
 		totalDuration := sourceStats.Format.Duration
-		// The VMAF model of the run (search and final encode alike), now that the resolution is known
+		// The VMAF model of the run (search and final encode alike), now that the resolution is
+		// known, and whether libvmaf scores pictures of this size with it: better now than after
+		// the master
 		vmafModel := resolveVMAFModel(cmd, bypass, videoStream)
+		if err = checkVMAFPictures(ctx, cmd, vmafModel, videoStream); err != nil {
+			return err
+		}
 		encoderAdapter.VMAFModel = vmafModel
 
 		// Get the stats cache (after probing so we know the VMAF model)

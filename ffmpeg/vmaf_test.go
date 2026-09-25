@@ -28,17 +28,32 @@ func TestAdaptVMAFPath(t *testing.T) {
 }
 
 func TestVMAFModel(t *testing.T) {
-	for _, model := range VMAFModels {
+	// the 8 v1 models libvmaf 3.2.0 builds in: 2 selected, 6 described for a run forcing one
+	if n := len(VMAFModels) + len(VMAFForcedModels); n != 8 {
+		t.Errorf("expected the 8 v1 models of libvmaf, got %d", n)
+	}
+	for _, model := range append(append([]VMAFModel{}, VMAFModels...), VMAFForcedModels...) {
 		if !model.Valid() {
 			t.Errorf("%s should be valid", model)
 		}
-		if model.Description() == "unknown model" {
+		if model.Description() == "" {
 			t.Errorf("%s has no description", model)
 		}
 	}
-	for _, name := range []string{"", "vmaf_v0.6.1", "vmaf_v1.0.16_5d0h", "vmaf_v1.0.16_3d0h_2160", "vmaf_v1.0.16_hfr_3d0h"} {
+	// any name libvmaf may know is valid, a v0 or a future model included: whether libvmaf
+	// knows it is for the probe to tell
+	for _, name := range []string{"vmaf_v0.6.1", "vmaf_4k_v0.6.1neg", "vmaf_v1.0.17_3d0h"} {
+		if !VMAFModel(name).Valid() {
+			t.Errorf("%q should be valid", name)
+		}
+		if description := VMAFModel(name).Description(); description != "" {
+			t.Errorf("%q should not be described, got %q", name, description)
+		}
+	}
+	// what the filter graph would read as options or filters is not a name
+	for _, name := range []string{"", "vmaf_v1.0.16_3d0h:log_path=/tmp/x", "a=b", "a,b", "a;b", "a b", "a'b", "a[b]", "../a"} {
 		if VMAFModel(name).Valid() {
-			t.Errorf("%q should not be a supported model", name)
+			t.Errorf("%q should not be a valid model name", name)
 		}
 	}
 }
@@ -70,18 +85,67 @@ func TestSelectVMAFModel(t *testing.T) {
 	if mismatch := VMAFModelFHD.ResolutionMismatch(2160); mismatch == "" {
 		t.Error("the 1080p model on a 2160p source should be a mismatch")
 	}
-}
-
-func TestCheckVMAFResolution(t *testing.T) {
-	for _, ok := range [][2]int{{VMAFMinWidth, VMAFMinHeight}, {320, 180}, {1920, 1080}, {3840, 2160}} {
-		if err := CheckVMAFResolution(ok[0], ok[1]); err != nil {
-			t.Errorf("%dx%d should be accepted: %s", ok[0], ok[1], err)
+	// A forced model is compared by the display it predicts only: its viewing distance and
+	// frame rate are the user's choice
+	for _, tt := range []struct {
+		model    VMAFModel
+		height   int
+		mismatch bool
+	}{
+		{VMAFModelPhone, 1080, false},
+		{VMAFModelFHDHFR, 1080, false},
+		{VMAFModelPhoneHFR, 720, false},
+		{VMAFModelUHDFar, 2160, false},
+		{VMAFModelUHDHFR, 2160, false},
+		{VMAFModelUHDFarHFR, 2160, false},
+		{VMAFModelPhone, 2160, true},
+		{VMAFModelFHDHFR, 2160, true},
+		{VMAFModelUHDFar, 1080, true},
+		{VMAFModelUHDHFR, 1440, true},
+		{VMAFModel("vmaf_v1.0.17_3d0h"), 2160, false}, // unknown to sptenc: nothing to compare
+	} {
+		if mismatch := tt.model.ResolutionMismatch(tt.height); (mismatch != "") != tt.mismatch {
+			t.Errorf("%s on %dp: expected a mismatch %t, got %q", tt.model, tt.height, tt.mismatch, mismatch)
 		}
 	}
-	for _, ko := range [][2]int{{VMAFMinWidth - 1, VMAFMinHeight}, {VMAFMinWidth, VMAFMinHeight - 1}, {256, 144}, {0, 0}} {
-		if err := CheckVMAFResolution(ko[0], ko[1]); err == nil {
-			t.Errorf("%dx%d should be rejected", ko[0], ko[1])
+}
+
+// TestVMAFProbeSize runs the real thing: the smallest picture libvmaf scores depends on the
+// model, which is why the probe takes the size of the source (see VMAFProbeConfig). The
+// failing cases were measured with libvmaf f85a8536: a libvmaf scoring smaller pictures makes
+// them pass, and the MANUAL figures need the same update.
+func TestVMAFProbeSize(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		model         VMAFModel
+		width, height int
+		ok            bool
+	}{
+		{VMAFModelFHD, 320, 180, true},
+		{VMAFModelFHD, 16, 16, false},
+		{VMAFModelFHD, 1920, 160, false}, // wide enough to matter at this height
+		{VMAFModelPhone, 640, 360, true},
+		{VMAFModelPhone, 320, 180, false}, // scored by VMAFModelFHD above
+		{VMAFModelUHDFar, 640, 360, true},
+		{VMAFModelUHDFar, 512, 288, false},
+	} {
+		_, err := VMAFProbe(ctx, VMAFProbeConfig{Model: tc.model, Width: tc.width, Height: tc.height, ReportDir: dir})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, tc.model, err)
 		}
+		if (err == nil) != tc.ok {
+			t.Errorf("%s at %dx%d: expected success %t, got %v", tc.model, tc.width, tc.height, tc.ok, err)
+		}
+	}
+	// no probe report left behind, crashes included
+	if entries, err := os.ReadDir(dir); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Errorf("probe reports left behind: %v", entries)
 	}
 }
 
@@ -184,8 +248,9 @@ func TestVMAFProbe(t *testing.T) {
 		t.Skipf("%s not found: %s", FFMPEGBinary, err)
 	}
 	ctx := context.Background()
-	for _, model := range VMAFModels {
-		version, err := VMAFProbe(ctx, VMAFProbeConfig{Model: model, ReportDir: t.TempDir()})
+	dir := t.TempDir()
+	for _, model := range append(append([]VMAFModel{}, VMAFModels...), VMAFForcedModels...) {
+		version, err := VMAFProbe(ctx, VMAFProbeConfig{Model: model, ReportDir: dir})
 		if errors.Is(err, ErrVMAFModelUnavailable) {
 			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, model, err)
 		}
@@ -196,14 +261,17 @@ func TestVMAFProbe(t *testing.T) {
 			t.Errorf("probe with %s returned no libvmaf version", model)
 		}
 	}
-	if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: "vmaf_v0.6.1", ReportDir: t.TempDir()}); err == nil {
-		t.Error("an unsupported model should be refused before running ffmpeg")
+	// a name libvmaf does not know is told apart from any other failure
+	if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: "vmaf_v9.9.9_unknown", ReportDir: dir}); !errors.Is(err, ErrVMAFModelUnavailable) {
+		t.Errorf("an unknown model should be reported unavailable, got %v", err)
 	}
-	entries, err := os.ReadDir(t.TempDir())
-	if err != nil {
+	// and a name that is not one never reaches ffmpeg
+	if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: "a:b", ReportDir: dir}); err == nil {
+		t.Error("an invalid model name should be refused")
+	}
+	if entries, err := os.ReadDir(dir); err != nil {
 		t.Fatal(err)
-	}
-	if len(entries) != 0 {
+	} else if len(entries) != 0 {
 		t.Errorf("probe reports left behind: %v", entries)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/hekmon/sptenc/core"
@@ -355,12 +354,14 @@ const (
 )
 
 // vmafModelFlag returns the flag forcing the VMAF model. Not set, the model is selected from
-// the height of the source (see resolveVMAFModel).
+// the height of the source (see resolveVMAFModel). The usage names the two models sptenc
+// selects only: any other one libvmaf knows is accepted when forced, not advertised (see
+// ffmpeg.VMAFModel).
 func vmafModelFlag(category string) cli.Flag {
 	return &cli.StringFlag{
 		Name: vmafModelFlagName,
-		Usage: fmt.Sprintf("VMAF model to score with. Valid values: %s. Selected from the source height when not set",
-			strings.Join(vmafModelNames(), ", ")),
+		Usage: fmt.Sprintf("VMAF model to score with. Selected from the source height when not set: %s below 2160 lines, %s from 2160. Any other model libvmaf knows is accepted (see MANUAL.md, Models)",
+			ffmpeg.VMAFModelFHD, ffmpeg.VMAFModelUHD),
 		Value:     "",
 		OnlyOnce:  true,
 		Category:  category,
@@ -368,18 +369,11 @@ func vmafModelFlag(category string) cli.Flag {
 	}
 }
 
-// vmafModelNames returns the names of the supported VMAF models.
-func vmafModelNames() []string {
-	names := make([]string, len(ffmpeg.VMAFModels))
-	for i, model := range ffmpeg.VMAFModels {
-		names[i] = model.String()
-	}
-	return names
-}
-
+// vmafModelValidator refuses the names that can not be handed to libvmaf. Whether libvmaf
+// knows the model is checked before anything starts (see checkLibVMAF).
 func vmafModelValidator(v string) error {
 	if v != "" && !ffmpeg.VMAFModel(v).Valid() {
-		return fmt.Errorf("unknown VMAF model %q, valid values: %s", v, strings.Join(vmafModelNames(), ", "))
+		return fmt.Errorf("invalid VMAF model name %q: letters, digits, '.', '_' and '-' only", v)
 	}
 	return nil
 }

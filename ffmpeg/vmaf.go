@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,10 +25,13 @@ import (
  * Models
  */
 
-// VMAFModel identifies a VMAF v1 model built into libvmaf (3.2.0 or newer). The v1 models
-// fuse ADM (with an additive impairment term for blockiness), motion, CAMBI (banding) and a
-// chroma feature; the enhancement gain is clamped in all of them (what used to be the NEG
-// variants of v0), and VIF is gone. See resource/doc/models_v1.md in the libvmaf repository.
+// VMAFModel names a VMAF model built into libvmaf. sptenc selects between two VMAF v1 models
+// (libvmaf 3.2.0 or newer, see VMAFModels) and scores with any other one libvmaf knows when the
+// user forces it: whether libvmaf knows a name is for VMAFProbe to tell, so a model released
+// after sptenc can be used without waiting for an update. The v1 models fuse ADM (with an
+// additive impairment term for blockiness), motion, CAMBI (banding) and a chroma feature; the
+// enhancement gain is clamped in all of them (what used to be the NEG variants of v0), and VIF
+// is gone. See resource/doc/models_v1.md in the libvmaf repository.
 type VMAFModel string
 
 const (
@@ -37,38 +41,79 @@ const (
 	// VMAFModelUHD predicts the viewing condition of a 2160p display watched from 1.5 picture
 	// heights, the distance at which 4K is worth it: the v1 successor of vmaf_4k_v0.6.1.
 	VMAFModelUHD VMAFModel = "vmaf_v1.0.16_1d5h_2160"
+	// The other v1 models libvmaf builds in (all of them since 3.2.0), never selected: named
+	// for the messages of a run that forces one (see VMAFForcedModels).
+	VMAFModelPhone     VMAFModel = "vmaf_v1.0.16_5d0h"
+	VMAFModelUHDFar    VMAFModel = "vmaf_v1.0.16_3d0h_2160"
+	VMAFModelFHDHFR    VMAFModel = "vmaf_v1.0.16_hfr_3d0h"
+	VMAFModelUHDHFR    VMAFModel = "vmaf_v1.0.16_hfr_1d5h_2160"
+	VMAFModelPhoneHFR  VMAFModel = "vmaf_v1.0.16_hfr_5d0h"
+	VMAFModelUHDFarHFR VMAFModel = "vmaf_v1.0.16_hfr_3d0h_2160"
 )
 
-// VMAFModels lists the supported models. The other v1 models (phone at 5 picture heights, 4K
-// at 3 picture heights) are lenient viewing conditions where small artifacts are not seen,
-// which is not what a quality floor is about; the high frame rate variants are not supported
-// yet.
+// VMAFModels lists the models sptenc selects, from the height of the source (see
+// SelectVMAFModel), and the ones it checks and lists: the viewing conditions where the small
+// artifacts a quality floor is about are seen, at the frame rates the models are made for.
 var VMAFModels = []VMAFModel{VMAFModelFHD, VMAFModelUHD}
+
+// VMAFForcedModels lists the other v1 models libvmaf builds in, which sptenc never selects:
+// the phone (5 picture heights) and the 4K at 3 picture heights viewing conditions are
+// lenient, small artifacts are not seen from there (the latter also scores up to 110, above
+// what a threshold can ask for), and the high frame rate variants, made for ~50/60 fps, are in
+// Netflix's words "an area of active improvement". Forcing one is the user's call.
+var VMAFForcedModels = []VMAFModel{VMAFModelPhone, VMAFModelUHDFar,
+	VMAFModelFHDHFR, VMAFModelUHDHFR, VMAFModelPhoneHFR, VMAFModelUHDFarHFR}
+
+// vmafModelNameRe is what a model name may be made of: it is written into an ffmpeg filter
+// graph, where ':', '=', ',' or ';' would be read as options or filters.
+var vmafModelNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // String returns the model name as libvmaf knows it.
 func (m VMAFModel) String() string {
 	return string(m)
 }
 
-// Valid reports whether the model is one of the supported ones.
+// Valid reports whether the name can be handed to libvmaf. Whether libvmaf knows the model is
+// for VMAFProbe to tell: any model it knows is accepted, a future one included.
 func (m VMAFModel) Valid() bool {
-	for _, candidate := range VMAFModels {
-		if m == candidate {
-			return true
-		}
-	}
-	return false
+	return vmafModelNameRe.MatchString(string(m))
 }
 
-// Description returns the viewing condition the model predicts.
+// Description returns the viewing condition the model predicts, empty for a model sptenc does
+// not know.
 func (m VMAFModel) Description() string {
 	switch m {
 	case VMAFModelFHD:
 		return "1080p display at 3 picture heights"
 	case VMAFModelUHD:
 		return "2160p display at 1.5 picture heights"
+	case VMAFModelPhone:
+		return "phone (1080p) at 5 picture heights"
+	case VMAFModelUHDFar:
+		return "2160p display at 3 picture heights, scored up to 110"
+	case VMAFModelFHDHFR:
+		return "1080p display at 3 picture heights, ~50/60 fps"
+	case VMAFModelUHDHFR:
+		return "2160p display at 1.5 picture heights, ~50/60 fps"
+	case VMAFModelPhoneHFR:
+		return "phone (1080p) at 5 picture heights, ~50/60 fps"
+	case VMAFModelUHDFarHFR:
+		return "2160p display at 3 picture heights, ~50/60 fps, scored up to 110"
 	default:
-		return "unknown model"
+		return ""
+	}
+}
+
+// displayHeight returns the height of the display the model predicts: 2160 for the 4K models,
+// 1080 for the others (the phone ones included), 0 for a model sptenc does not know.
+func (m VMAFModel) displayHeight() int {
+	switch m {
+	case VMAFModelUHD, VMAFModelUHDFar, VMAFModelUHDHFR, VMAFModelUHDFarHFR:
+		return Height4K
+	case VMAFModelFHD, VMAFModelPhone, VMAFModelFHDHFR, VMAFModelPhoneHFR:
+		return 1080
+	default:
+		return 0
 	}
 }
 
@@ -81,33 +126,17 @@ func SelectVMAFModel(height int) VMAFModel {
 	return VMAFModelFHD
 }
 
-// ResolutionMismatch explains why the model is not the one of a source of the given height
-// (see SelectVMAFModel), an empty string when it is.
+// ResolutionMismatch explains why the model is not made for the display of a source of the
+// given height (see SelectVMAFModel), an empty string when it is, or when sptenc does not know
+// the model. Only the display is compared: the viewing distance and the frame rate of a forced
+// model are the user's choice.
 func (m VMAFModel) ResolutionMismatch(height int) string {
 	expected := SelectVMAFModel(height)
-	if m == expected {
+	if display := m.displayHeight(); display == 0 || display == expected.displayHeight() {
 		return ""
 	}
 	return fmt.Sprintf("%s predicts a %s but the source is %dp, %s is the model of this resolution",
 		m, m.Description(), height, expected)
-}
-
-// Minimum picture size libvmaf can score with a v1 model, measured with libvmaf 3.2.1 and
-// f85a8536: under 160 lines the chroma feature reports "image too small" and crashes libvmaf,
-// under 216 columns CAMBI produces no feature and ffmpeg exits with a zero exit code and no
-// report (libvmaf only prints an error).
-const (
-	VMAFMinWidth  = 216
-	VMAFMinHeight = 160
-)
-
-// CheckVMAFResolution returns an error when a picture is too small to be scored by libvmaf.
-func CheckVMAFResolution(width, height int) error {
-	if width < VMAFMinWidth || height < VMAFMinHeight {
-		return fmt.Errorf("%dx%d pictures are too small to be scored by libvmaf: VMAF v1 models need at least %dx%d",
-			width, height, VMAFMinWidth, VMAFMinHeight)
-	}
-	return nil
 }
 
 /*
@@ -126,13 +155,15 @@ func vmafFilter(model VMAFModel, reportPath string, threads int) string {
  */
 
 // ErrVMAFModelUnavailable is returned by VMAFProbe when the libvmaf of ffmpeg does not know
-// the model: the v1 models are built into libvmaf 3.2.0 and newer.
-var ErrVMAFModelUnavailable = errors.New("libvmaf does not know this model (VMAF v1 models need libvmaf 3.2.0 or newer)")
+// the model (the v1 models are built into libvmaf 3.2.0 and newer).
+var ErrVMAFModelUnavailable = errors.New("libvmaf does not know this model")
 
-// Probe pictures: the smallest size every v1 model scores (see VMAFMinWidth), the fewest
-// frames a report can be built from.
+// Probe pictures: 1080p unless told otherwise, the resolution the models are made for (smaller
+// pictures are not scored by every model, see VMAFProbeConfig), and the fewest frames a report
+// can be built from.
 const (
-	vmafProbeSize     = "320x180"
+	vmafProbeWidth    = 1920
+	vmafProbeHeight   = 1080
 	vmafProbeFrames   = 2
 	vmafProbeFileMask = "sptenc-vmaf-probe-*.json"
 )
@@ -143,20 +174,31 @@ const vmafModelUnavailableMarker = "could not load libvmaf model with version"
 
 // VMAFProbeConfig holds the parameters of a libvmaf probe.
 type VMAFProbeConfig struct {
-	Model     VMAFModel        // Model to load.
-	ReportDir string           // Directory the JSON report of the probe is written to (and removed from).
-	Debug     func(msg string) // Optional debug logger.
+	Model VMAFModel // Model to load.
+	// Size of the probe pictures, 1920x1080 when zero. Below a minimum size libvmaf crashes, or
+	// writes no report, and that minimum depends on the model and on the aspect ratio, which a
+	// fixed floor can not follow. Measured with libvmaf f85a8536 (a September 2026 build): the
+	// 1080p and 4K models of VMAFModels score 216x160 but not 1920x160 nor 3840x180, the phone
+	// models need 480x270 and the 4K at 3 picture heights ones 568x320 at 16:9. Probing with the size
+	// of the source tells for sure, whatever the model and the libvmaf version.
+	Width, Height int
+	ReportDir     string           // Directory the JSON report of the probe is written to (and removed from).
+	Debug         func(msg string) // Optional debug logger.
 }
 
-// VMAFProbe checks that the libvmaf of ffmpeg can score with a model, and returns the libvmaf
-// version. It runs libvmaf for real on two synthetic frames generated by ffmpeg itself (no
-// file needed), scored against themselves. Success is a report on disk: the exit code of
-// ffmpeg is not to be trusted, libvmaf errors have been seen leaving it at zero with no report
-// written. A model libvmaf does not know is reported with ErrVMAFModelUnavailable.
+// VMAFProbe checks that the libvmaf of ffmpeg can score pictures of a given size with a model,
+// and returns the libvmaf version. It runs libvmaf for real on two synthetic frames generated
+// by ffmpeg itself (no file needed), scored against themselves. Success is a report on disk:
+// the exit code of ffmpeg is not to be trusted, libvmaf errors have been seen leaving it at
+// zero with no report written. A model libvmaf does not know is reported with
+// ErrVMAFModelUnavailable.
 func VMAFProbe(ctx context.Context, config VMAFProbeConfig) (libvmafVersion string, err error) {
 	if !config.Model.Valid() {
-		err = fmt.Errorf("unsupported VMAF model %q", config.Model)
+		err = fmt.Errorf("invalid VMAF model name %q", config.Model)
 		return
+	}
+	if config.Width == 0 || config.Height == 0 {
+		config.Width, config.Height = vmafProbeWidth, vmafProbeHeight
 	}
 	// Report file, unique in case of concurrent probes
 	reportFd, err := os.CreateTemp(config.ReportDir, vmafProbeFileMask)
@@ -170,7 +212,7 @@ func VMAFProbe(ctx context.Context, config VMAFProbeConfig) (libvmafVersion stri
 	// One generated stream split in two: the distorted side is the reference itself
 	args := []string{
 		"-loglevel", "error", "-nostats", "-nostdin", "-y",
-		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%s:rate=%d:duration=1", vmafProbeSize, vmafProbeFrames),
+		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%dx%d:rate=%d:duration=1", config.Width, config.Height, vmafProbeFrames),
 		"-filter_complex", fmt.Sprintf("[0:v]format=yuv420p10le,split[distorted][reference];[distorted][reference]%s",
 			vmafFilter(config.Model, reportPath, 1)),
 		"-f", "null", "-",
@@ -250,7 +292,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	if !config.Model.Valid() {
-		err = fmt.Errorf("unsupported VMAF model %q", config.Model)
+		err = fmt.Errorf("invalid VMAF model name %q", config.Model)
 		return
 	}
 	// Apply defaults
@@ -574,8 +616,8 @@ type VMAFStats struct {
 }
 
 // String renders the VMAF statistics as an aligned plain-text table, followed by the banding
-// diagnostic. CAMBI is already part of the score: it is shown to tell a segment losing points
-// to banding from one losing them to compression.
+// diagnostic. CAMBI is already part of the score: it is shown for diagnosis, never gated. It
+// rates the banding of the encoded picture, the source's included (see core.VMAFStats).
 func (vs VMAFStats) String() string {
 	var tableBuffer strings.Builder
 	table := tablewriter.NewTable(&tableBuffer,

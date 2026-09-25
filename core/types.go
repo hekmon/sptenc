@@ -19,7 +19,8 @@ type VMAFStats struct {
 	Maximum      float64
 	// Banding diagnostic: the CAMBI feature the model fused into the score (0 is no banding,
 	// around 5 is where it starts to be slightly annoying, the models cap it at 17). Not a
-	// threshold: it tells a segment losing points to banding from one losing them to compression.
+	// threshold. CAMBI rates the encoded picture alone: banding already in the source counts as
+	// much as banding the encoder added, and coarse posterization is left to the other features.
 	CAMBIMean float64
 	CAMBIMax  float64
 }

@@ -173,10 +173,10 @@ var vmafCommand = &cli.Command{
 			return fmt.Errorf("variable frame rate (VFR) content is not supported: reference frames last from %s to %s while it declares a constant frame rate (%s fps)",
 				videoStream.ShortestFrameDuration, videoStream.LongestFrameDuration, videoStream.RFrameRate)
 		}
-		if err = ffmpeg.CheckVMAFResolution(videoStream.Width, videoStream.Height); err != nil {
+		model := resolveVMAFModel(cmd, bypass, videoStream)
+		if err = checkVMAFPictures(ctx, cmd, model, videoStream); err != nil {
 			return err
 		}
-		model := resolveVMAFModel(cmd, bypass, videoStream)
 
 		// Probe distorted file and validate compatibility
 		fmt.Fprintln(bypass, "Counting the frames of the distorted file...")

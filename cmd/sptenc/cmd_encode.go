@@ -315,6 +315,7 @@ var encodeCommand = &cli.Command{
 			videoStream       *ffmpeg.FFProbeBinaryStream
 			sourceTotalFrames int
 			sourceFrameRate   string // see core.QPSearchConfig.SourceFrameRate
+			vmafModel         ffmpeg.VMAFModel
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
@@ -340,6 +341,12 @@ var encodeCommand = &cli.Command{
 			}
 			sourceFrameRate = videoStream.RFrameRate
 			totalDuration = sourceStats.Format.Duration
+			// The VMAF model of the run, and whether libvmaf scores pictures of this size with
+			// it: better now than after the master
+			vmafModel = resolveVMAFModel(cmd, bypass, videoStream)
+			if err = checkVMAFPictures(ctx, cmd, vmafModel, videoStream); err != nil {
+				return
+			}
 			// Detect scenes on the original file to take advantage of hw decoding
 			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
@@ -436,8 +443,14 @@ var encodeCommand = &cli.Command{
 		if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 			return
 		}
-		// The VMAF model of the run, now that the resolution is known
-		vmafModel := resolveVMAFModel(cmd, bypass, videoStream)
+		// The VMAF model of the run, now that the resolution is known (a file had it resolved
+		// and checked before its master already)
+		if vmafModel == "" {
+			vmafModel = resolveVMAFModel(cmd, bypass, videoStream)
+			if err = checkVMAFPictures(ctx, cmd, vmafModel, videoStream); err != nil {
+				return
+			}
+		}
 		encoderAdapter.VMAFModel = vmafModel
 
 		// Get the stats cache (after probing so we know the VMAF model)
