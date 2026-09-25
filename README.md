@@ -324,7 +324,7 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 | `hevc_d3d12va` | HEVC | D3D12VA GPU | Windows |
 | `hevc_videotoolbox` | HEVC | VideoToolbox GPU | macOS (Apple Silicon) |
 | `libsvtav1` | AV1 | CPU | All |
-| `av1_nvenc` | AV1 | NVIDIA GPU | All |
+| `av1_nvenc` | AV1 | NVIDIA GPU | All (Ada Lovelace / RTX 40 series or newer) |
 | `av1_vaapi` | AV1 | VAAPI GPU | Linux (Intel Arc or Core Ultra, AMD RDNA 3 or newer) |
 
 > **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `libsvtav1` is the only viable CPU AV1 encoder for this workflow. Run `sptenc check` to see which encoders your ffmpeg build supports.
