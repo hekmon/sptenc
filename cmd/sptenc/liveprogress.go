@@ -27,7 +27,8 @@ import (
  *   - batch: '═' a stack of complete files
  */
 
-// fileProgressRunes is used for the global progress of a single file.
+// fileProgressRunes is used for any step working on a whole file: the global progress of a search,
+// and every step before the split or after the merge (the merge included).
 var fileProgressRunes = liveprogress.BarRunes{
 	LeftEnd:  '❮', // https://www.compart.com/unicode/U+276E
 	Fill:     '━', // https://www.compart.com/unicode/U+2501
@@ -86,7 +87,7 @@ func liveCountFrames(ctx context.Context, path string, codec ffmpeg.CodecName, d
 	var currentStats ffmpeg.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(duration)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -129,7 +130,7 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 	// prepare live progress
 	encodeBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(nbFrames)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -180,7 +181,7 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 	var currentStats ffmpeg.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -221,9 +222,9 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 	var currentStats ffmpeg.ProgressStats
 	bar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
-		// liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  Splitting | "
 		}),
@@ -279,7 +280,7 @@ func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segm
 	var speed float64
 	concatBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalDuration)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "     Concat | "
@@ -663,7 +664,7 @@ func liveVMAF(ctx context.Context, config ffmpeg.VMAFComputeConfig, totalFrames 
 	stats ffmpeg.VMAFReport, err error) {
 	bypass := liveprogress.Bypass()
 	barOpts := []liveprogress.BarOption{
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "       VMAF | "
@@ -715,7 +716,7 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 	}
 	concatBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(totalFrames)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		// liveprogress.WithWidth(barsWidth),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
@@ -776,7 +777,7 @@ func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputF
 	var currentStats ffmpeg.ProgressStats
 	remuxBar := liveprogress.AddBar(
 		liveprogress.WithTotal(uint64(expectedDuration)),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "   Remuxing | "
@@ -816,7 +817,7 @@ func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputF
 func liveGenerateMKVStats(ctx context.Context, outputPath string, debug bool) (err error) {
 	mkvStatsBar := liveprogress.AddBar(
 		liveprogress.WithTotal(100),
-		liveprogress.WithMultiplyRunes(),
+		liveprogress.WithRunes(fileProgressRunes),
 		liveprogress.WithSameAutoSizeInternalPadding(true, false),
 		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
 			return "  MKV Stats | "
