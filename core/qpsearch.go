@@ -536,9 +536,13 @@ func probeVideoStream(ctx context.Context, scb QPSearchCallbacks, config QPSearc
 // boundary walks) explicit and inline. Edge-case handling is subtle;
 // resist collapsing into generic helpers - readability trumps brevity here.
 //
-// The QP→VMAF relationship is empirically monotonic (lower QP = higher VMAF).
-// This has held across 2+ years of production encoding; non-monotonic edge cases
-// have not been observed in practice.
+// The QP→VMAF relationship is assumed monotonic (lower QP = higher VMAF). It held across
+// 2+ years of production encoding with the v0 models. The v1 models break it on a source
+// that is banded already: CAMBI rates the encodes less banded than the source, and the
+// score peaks above the lowest QPs (measured on a film segment: 94.06 at QP 4, 93.65 at
+// QP 0, 91.80 for the source against itself). A gate above the peak then ends as best
+// effort at qpMin, which scores below the peak. So can a gate between the qpMin score and
+// the peak, when the bracketing steps straight to qpMin, although a QP in between passes.
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, segment int, segmentPath string, videoTrack VideoStream) (
 	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, err error) {

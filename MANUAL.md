@@ -3,14 +3,15 @@
 Start with the [README](README.md). This is the "tell me everything" page.
 
 1. [Input Requirements](#input-requirements)
-2. [VMAF](#vmaf)
-3. [Encoders](#encoders)
-4. [Scene Detection and Threshold Selection](#scene-detection-and-threshold-selection)
-5. [Adaptive QP Search](#adaptive-qp-search)
-6. [Output](#output)
-7. [Base ffmpeg encode options](#base-ffmpeg-encode-options)
-8. [Installation details](#installation-details)
-9. [Compared to other approaches](#compared-to-other-approaches)
+2. [Disk space](#disk-space)
+3. [VMAF](#vmaf)
+4. [Encoders](#encoders)
+5. [Scene Detection and Threshold Selection](#scene-detection-and-threshold-selection)
+6. [Adaptive QP Search](#adaptive-qp-search)
+7. [Output](#output)
+8. [Base ffmpeg encode options](#base-ffmpeg-encode-options)
+9. [Installation details](#installation-details)
+10. [Compared to other approaches](#compared-to-other-approaches)
 
 ## Input Requirements
 
@@ -29,6 +30,29 @@ Instead of letting sptenc split the input automatically, you can provide an alre
 ```
 
 When using a pre-segmented directory, `--original-file` (alias `-f`) is **required** so sptenc can remux audio, subtitles, and other streams into the final output.
+
+## Disk space
+
+sptenc cuts and measures a lossless copy of the video, the master (FFV1 on 10 bits, see [Base ffmpeg encode options](#base-ffmpeg-encode-options)), and that copy is large. Measured on two 1080p 8-bit Blu-ray remuxes:
+
+| Source | Source file | Master | Master per hour |
+|---|---|---|---|
+| 26 min anime episode | 4.04 GiB | 14.29 GiB | 33.0 GiB |
+| 101 min live-action film | 23.77 GiB | 59.30 GiB | 35.2 GiB |
+
+Its size depends on the content, and a 4K source has four times as many pixels to store. What each command holds at its peak, besides its output:
+
+| Command | At its peak | The film above |
+|---|---|---|
+| `encode` on a file | The master and its segments, about twice the master, until the end of the run | 119 GiB, plus the encodes |
+| `batchsearch` | The same: the master is kept for every candidate, the segments of a candidate are deleted once it is done | 119 GiB, plus the encodes |
+| `encode` on a pre-split directory | The segments merged back into one file, the reference of the final VMAF | 59 GiB, plus the encodes |
+| `split` | The segments, about the master, in the output directory; given a source (without `--master`), the master too, until the end | 59 or 119 GiB |
+| `master` | The master, at its output path | 59 GiB |
+
+The encodes are the encoded segments kept for the output and their merge: twice the encoded video, small next to the master (3.3 GiB each for the film with `hevc_nvenc`). The output file holds the encoded video and every other stream of the source.
+
+Everything but the outputs goes to the temporary directory, `--tmp-dir`: the system's by default (`$TMPDIR`, or `/tmp` when it is not set, on Linux and macOS; `%TMP%` or `%TEMP%` on Windows). Point it to a disk that has the room: where `/tmp` is a tmpfs, it lives in memory, limited to half of it by default, far from what a film needs (`df -h /tmp` tells). It is deleted at the end of a run, or when you interrupt one, but a failed run leaves it in place for inspection, and so does `--debug`: its path is printed, delete it yourself.
 
 ## VMAF
 
@@ -84,14 +108,14 @@ Intermediate bands commonly cited elsewhere (e.g. "80–90 = good quality with m
 
 #### v1 against v0 on real content
 
-The same content cut in the same segments, encoded with `hevc_nvenc` behind the same gate (harmonic mean 93), once scored with v0.6.1 (sptenc v0.1.0) and once with v1, then each result scored with the other model:
+Two 8-bit Blu-ray remuxes, each cut in the same segments for both runs, encoded with `hevc_nvenc` behind the same gate (harmonic mean 93), once scored with v0.6.1 (sptenc v0.1.0, on the CPU) and once with v1, then each result scored with the other model:
 
 | Content | Video stream, v0 → v1 | Mean QP, v0 → v1 | v1 score of the v0 encode | v0 score of the v1 encode |
 |---|---|---|---|---|
 | 26 min anime episode, 1080p, dark gradients (163 segments) | 175.0 → 283.4 MiB (+62%) | 26.6 → 23.5 | 91.0 | 95.0 |
-| <!-- TODO(night): movie --> Film, TBD | TBD | TBD | TBD | TBD |
+| 101 min live-action film, 1080p (225 segments) | 1687.7 → 3387.1 MiB (+101%) | 24.5 → 21.2 | 90.1 | 95.6 |
 
-Mean QP is weighted by the frame count of each segment, scores are harmonic means. On the episode, v1 lowered the QP of 153 segments out of 163 (by up to 12), raised it on 7, and no segment ended as best effort: behind the same number, v1 was as demanding as v0 at 95. Content showing the defects v0 did not see (see [below](#what-vmaf-sees-and-what-it-does-not)) is where v1 is expected to depart from v0's scale; which of its features made the difference on this episode was not measured.
+Mean QP is weighted by the frame count of each segment, scores are harmonic means. v1 lowered the QP of 153 segments out of 163 on the episode (by up to 12) and raised it on 7, of 216 out of 225 on the film (by up to 11) and raised it on one. No segment ended as best effort. The shift is broad, not concentrated on a few segments: most of them lost 2 to 5 QP (69% of the episode's, 80% of the film's), about 3 on average on both. What a QP costs depends on the content: the segments that lost exactly 3 grew 1.44 times on the episode, 1.93 times on the film. Behind the same number, v1 was as demanding as v0 at 95 on both. Which of its features made the difference was not measured, except on one segment of the film (see [banding in the source](#what-vmaf-sees-and-what-it-does-not)).
 
 The defaults and the values recommended below still come from the v0 anchors. sptenc promises a quality floor, and a stricter floor is the side to err on: if yours proves more demanding than you need, encode a few segments of your content at a lower value, look at them, and lower the gate.
 
@@ -101,7 +125,7 @@ Every guarantee sptenc makes is a guarantee on a VMAF score: it is worth what th
 
 - **Color, partly.** v0 only measures luma. v1 has a chroma feature: a copy with its hues rotated by 90° scores 65.9 with v1 (99.6 / 99.6 with v0, the score of the untouched copy), one with heavily blurred chroma 66.0. But a fully desaturated (grayscale) copy still scores 100 with v1: the chroma feature reacts to changes within the chroma planes, not to the color being gone. In practice encoders quantize luma and chroma together, so a segment passing is not expected to be damaged on chroma alone: this is an expectation, not something sptenc verifies.
 - **Banding, seen.** A smooth dark gradient reduced to 18, 10 and 5 luma levels scores 100 at every step with v0 (the added edges count as an enhancement), 96 with its NEG variant, and 91.8, 86.0 and 76.5 with v1. v1 also fuses Netflix's banding detector, [CAMBI](https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md), into the score. CAMBI looks for fine staircases in smooth areas: a gradient in 8-bit steps reaches its ceiling of 17, while coarse posterization like the one above leaves it at 0 (the other features catch it). sptenc prints CAMBI's mean and maximum under every VMAF table (0 is no banding, and "a CAMBI score around 5 is where banding starts to become slightly annoying"): it is part of the score already, never a gate. The mandatory 10-bit output is still there to avoid creating banding in the first place.
-- **Banding in the source counts too.** CAMBI rates the encoded picture alone, not what the encoder changed: a picture that is banded already is marked down even compared with itself. Compared with itself, a still picture scores 100 with v1, a smooth 10-bit dark gradient 95.9 (CAMBI rates it 6.7). The ceiling of such a segment is below 100, and a gate above its ceiling can only end in best effort. On the anime episode [measured above](#v1-against-v0-on-real-content), no segment did at 93.
+- **Banding in the source counts too.** CAMBI rates the encoded picture alone, not what the encoder changed: a picture that is banded already is marked down even compared with itself. Compared with itself, a still picture scores 100 with v1, a smooth 10-bit dark gradient 95.9 (CAMBI rates it 6.7). On the film [measured above](#v1-against-v0-on-real-content), a dark scene of 9 seconds scored 91.8 against itself (98.2 with v0), CAMBI rating it 14.0: below the 93 gate. It passed all the same: its encodes are less banded than the source by CAMBI's measure (9.5 at QP 0, 7.1 at QP 9, 3.5 at QP 20) and score above it, up to a peak of 94.1 at QP 4, back down to 93.7 at QP 0. The search kept QP 9, where v0 had been satisfied at QP 20 with a stream 15 times smaller. A gate above such a peak can not be met at any QP: the segment ends as best effort, at the lowest QP of the encoder, which here scores below the peak with a stream 1.6 times larger. No segment of the episode or of the film ended as best effort at 93.
 - **What happens between frames.** Frames are scored one by one, then the scores are pooled. A quality changing from a frame to the next (flicker, keyframe pulsing) is not judged as such, only the score of each frame is. The [VMAF FAQ](https://github.com/Netflix/vmaf/blob/master/resource/doc/faq.md) itself mentions psycho-visual evidence that viewers weigh the worst frames more heavily than an arithmetic mean does: this is what the percentile and minimum gates are for.
 - **HDR.** Netflix has not released an HDR model, v1 included: "We also plan to release an HDR version enhanced by the v1 improvements" ([Netflix](https://netflixtechblog.com/vmaf-v1-good-is-not-good-enough-60d7e4244ea8)). sptenc computes VMAF on HDR sources as on any other, without any tone mapping: take these scores as an indication, not as a validated measure.
 
@@ -139,7 +163,7 @@ How to compose a profile:
 
 ### Recommended Values
 
-These values come from the [v0 anchors](#for-reference-the-v0-anchors): on content where v1 sees more than v0 did, they are stricter than they read (see [v1 against v0](#v1-against-v0-on-real-content)).
+These values come from the [v0 anchors](#for-reference-the-v0-anchors): on both contents measured, they are stricter than they read (see [v1 against v0](#v1-against-v0-on-real-content)), and a banded source can put a high gate out of reach of every QP (a segment of the film peaked at 94.1, see [banding in the source](#what-vmaf-sees-and-what-it-does-not)).
 
 | Use Case | Gate | Target value |
 |---|---|---|
@@ -153,13 +177,13 @@ These values come from the [v0 anchors](#for-reference-the-v0-anchors): on conte
 
 ² fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically.
 
-> **93 vs 95?** The 93 target comes from Rassool (RealNetworks, [IEEE BMSB 2017](https://doi.org/10.1109/BMSB.2017.7986143), [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to about 93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (the two best ratings of the 5-level scale of his test, on 4K clips). The 95 target comes from Kah et al. ([Proc. SPIE 11842, Applications of Digital Image Processing XLIV, 2021](https://doi.org/10.1117/12.2593952)): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV viewed from twice its height), a deliberately higher bar. In Ozer's test on the *Meridian* clip, choosing 95 over 93 cost about 1400 kbps on the top rung (clip-specific, not universal). The default targets the first; the jump to 95 remains an explicit opt-in. Both studies used the v0 models: on the anime episode [measured above](#v1-against-v0-on-real-content), the v1 gate at 93 already gave an encode v0 scores at 95.
+> **93 vs 95?** The 93 target comes from Rassool (RealNetworks, [IEEE BMSB 2017](https://doi.org/10.1109/BMSB.2017.7986143), [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to about 93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (the two best ratings of the 5-level scale of his test, on 4K clips). The 95 target comes from Kah et al. ([Proc. SPIE 11842, Applications of Digital Image Processing XLIV, 2021](https://doi.org/10.1117/12.2593952)): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV viewed from twice its height), a deliberately higher bar. In Ozer's test on the *Meridian* clip, choosing 95 over 93 cost about 1400 kbps on the top rung (clip-specific, not universal). The default targets the first; the jump to 95 remains an explicit opt-in. Both studies used the v0 models: on the episode and the film [measured above](#v1-against-v0-on-real-content), the v1 gate at 93 already gave encodes v0 scores at 95.0 and 95.6.
 
 ### VMAF runs on the CPU
 
 sptenc v0.1.0 could compute VMAF on an NVIDIA GPU (`--vmaf-cuda`, with `libvmaf_cuda`). The v1 models can not run there: libvmaf's CUDA code only covers the features of the v0 models, and loading a v1 model in `libvmaf_cuda` fails on its banding feature (`could not initialize feature extractor "Cambi_feature_cambi_score"`). VMAF is computed on the CPU, whatever the encoder; the GPU can still decode its inputs (see [Hardware decoding](#hardware-decoding)).
 
-That is the price of seeing banding and color. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, searched with `hevc_nvenc` and `-C 6`, the search took 11m13s with VMAF v0 on the GPU, 16m5s with v0 on the CPU and 17m10s with v1 on the CPU. v1 itself costs less CPU than v0 (libvmaf spent 0.040 CPU-seconds per 1080p frame against 0.067), but decoding the lossless intermediate twice per attempt costs the search more than VMAF does (0.03 to 0.05 CPU-seconds per frame each time), and v1 does not change that.
+That is the price of seeing banding and color. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, searched with `hevc_nvenc` and `-C 6`, the search took 11m13s with VMAF v0 on the GPU, 16m5s with v0 on the CPU and 17m10s with v1 on the CPU (on the [film](#v1-against-v0-on-real-content), 1h3m2s with v0 and 1h3m19s with v1, both on the CPU). v1 itself costs less CPU than v0 (libvmaf spent 0.040 CPU-seconds per 1080p frame against 0.067), but decoding the lossless intermediate twice per attempt costs the search more than VMAF does (0.03 to 0.05 CPU-seconds per frame each time), and v1 does not change that.
 
 In exchange, CPU scores are reproducible: the same encode compared with the same reference got the same scores in every run, whatever the number of threads and of computations running at once, and `-C 1` and `-C 2` produced the same file. `libvmaf_cuda`'s scores varied from one run to the next.
 
@@ -186,17 +210,17 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 | | CPU encoders (`libx265`, `libsvtav1`) | Hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) |
 |---|---|---|
-| Output file size | ✅ Smallest | ❌ Larger: <!-- TODO(night): libx265 run --> TBD× on the episode measured below |
+| Output file size | ✅ Smallest | ❌ Larger: 1.44× on the episode measured below |
 | Speed | Hours for a film | ✅ Several times faster: 26 min of 1080p searched in 17 minutes below, with several segments searched in parallel (`-C`, see below) |
-| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size (the CPU encode was TBD smaller below) |
+| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size (the CPU encode was 31% smaller below) |
 
 Same 26 min 1080p Blu-ray remux episode, same threshold (163 segments), cold cache, VMAF harmonic mean 93, on an RTX 5090 with a 16 cores / 32 threads CPU:
 
 | | `hevc_nvenc`, `-C 6` | `libx265` preset slow, `-C 3`, decoding on NVDEC |
 |---|---|---|
-| QP search | 17m10s | <!-- TODO(night): libx265 run --> TBD |
-| Video stream | 283.4 MiB | TBD |
-| Attempts per segment | 3.99 | TBD |
+| QP search | 17m10s | 1h1m15s |
+| Video stream | 283.4 MiB | 196.5 MiB |
+| Attempts per segment | 3.99 | 3.96 |
 
 One episode is one data point: the size ratio depends on the content, and the times on the machine. On this one, the GPU search was limited by the CPU (busy 81% of the time), which decodes the lossless FFV1 intermediate twice per attempt (once for the encode, once as the VMAF reference) and computes VMAF, not by the GPU (NVENC busy 24% of the time): a smaller CPU would have made it slower, smaller GPUs were not measured.
 
@@ -274,7 +298,7 @@ sptenc's per-segment QP search uses a 3-step algorithm that converges on the hig
 2. **Bracketing** — Steps away from the starting point, one standard deviation further at each encode, to find one valid QP (passes VMAF) and one invalid QP (fails VMAF), closing the search range around the boundary. The standard deviation comes from the same statistics as the mean; without any previous run, it starts at a quarter of the QP range (e.g. 13 for libx265's 0–51 range).
 3. **Interpolation** — Once bracketed, **Fritsch-Butland monotone cubic interpolation** forecasts the VMAF of the untested QPs within the range and picks the next one to encode, walking toward the highest valid QP without blind probing. A forecast only chooses the next encode: every QP kept was encoded and measured, and the next higher one encoded and found failing.
 
-This typically takes 3 to 5 encodes per segment (4.0 on average with `hevc_nvenc` on the [episode measured](#encoder-selection-vs-file-size)<!-- TODO(night): and X with libx265 -->), where a plain bisection of libx265's 0–51 range takes about 6 whatever the content.
+This typically takes 3 to 5 encodes per segment (4.0 on average on the [episode measured](#encoder-selection-vs-file-size), with `hevc_nvenc` as with `libx265`, and 3.7 on the [film](#v1-against-v0-on-real-content)), where a plain bisection of libx265's 0–51 range takes about 6 whatever the content.
 
 ### Persistent stats from previous runs
 
@@ -282,7 +306,7 @@ After each encode job finishes, sptenc stores QP statistics **per encoder, VMAF 
 
 These statistics only seed a search. In the run's own statistics they weigh a single segment, however many files they aggregate, so the file being encoded takes over within a handful of segments: a cache built on other content sets the starting point, it does not hold the search to its mean.
 
-What is at stake is the number of encodes per segment. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, a cold cache cost 4.0 attempts per segment with `hevc_nvenc`<!-- TODO(night): and X with libx265 -->, the run's own ephemeral statistics doing the learning from the first segments on. A segment can not take fewer than two, the QP kept and the next one failing, so what a warm cache can save is bounded by that: it has not been measured on that content yet.
+What is at stake is the number of encodes per segment. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, a cold cache cost 4.0 attempts per segment, with `hevc_nvenc` as with `libx265`, the run's own ephemeral statistics doing the learning from the first segments on. A segment can not take fewer than two, the QP kept and the next one failing, so what a warm cache can save is bounded by that: it has not been measured on that content yet.
 
 The cache provides:
 - **Mean QP** — a better-informed starting point than the encoder midpoint
@@ -408,7 +432,7 @@ Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc
 | Dial | The encoder's own quality setting: CRF (x264, x265, SVT-AV1), CQ level (aomenc, vpxenc), quantizer (rav1e) | Constant QP (see [why](#why-qp-instead-of-crf)) |
 | Encoders | aomenc, SVT-AV1, rav1e, vpxenc, x264, x265 (their command line tools), with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) through ffmpeg, with fixed opinionated parameters |
 | GPU | Decoding (DGDecNV), SSIMULACRA2 and Butteraugli (Vapoursynth-HIP) | Encoding (to search fast then encode the final file on CPU with `batchsearch --final-encode`, or as the final encoder) and decoding |
-| Scene cuts | av-scenechange, cuts 24 frames apart at least, scenes longer than 10 s split further (defaults). Frame exact chunks piped from a VapourSynth source plugin, no intermediate file; without one, keyframe cuts into intermediate files (`hybrid`, can lose frames with open GOPs) or `select`, exact but decoding the whole source for every chunk | ffmpeg `scdet`, scenes shorter than 5 s (by default) merged into their shorter neighbour, no maximum length; frame exact cuts of a lossless intermediate (large: count on disk space); a search of the scene threshold itself (`batchsearch`) |
+| Scene cuts | av-scenechange, cuts 24 frames apart at least, scenes longer than 10 s split further (defaults). Frame exact chunks piped from a VapourSynth source plugin, no intermediate file; without one, keyframe cuts into intermediate files (`hybrid`, can lose frames with open GOPs) or `select`, exact but decoding the whole source for every chunk | ffmpeg `scdet`, scenes shorter than 5 s (by default) merged into their shorter neighbour, no maximum length; frame exact cuts of a lossless intermediate (large: see [disk space](#disk-space)); a search of the scene threshold itself (`batchsearch`) |
 | Verification | Frame count of every chunk; optional VMAF plot of the result | Frame counts of every segment and of the final file, final VMAF of the whole file embedded in its tags |
 | Learning | None: every chunk starts its search from the middle of the quantizer range | QP statistics of the previous segments and encodes, to start the next searches closer |
 | Interrupted run | Can be resumed | Starts over |
@@ -420,7 +444,7 @@ In short: choose Av1an to encode fast and well, with the encoder, the parameters
 
 sptenc controls quality with **QP (Quantization Parameter)** in **CQP (Constant QP)** mode, not CRF.
 
-This is not because CRF could not be searched: for a given segment, both dials are deterministic (same value, same file) and monotonic in practice (VMAF goes down as the value goes up; no exception has been observed), which is all the interpolation search needs to converge in a few attempts. The reasons are elsewhere:
+This is not because CRF could not be searched: for a given segment, both dials are deterministic (same value, same file) and monotonic in practice (VMAF goes down as the value goes up; one exception has been measured, with QP and the v1 models on a source that is banded already, see [banding in the source](#what-vmaf-sees-and-what-it-does-not)), which is all the interpolation search needs to converge in a few attempts. The reasons are elsewhere:
 
 - **One dial for every encoder.** CRF is a software encoder concept. Hardware encoders expose a constant quantizer, or their own flavor of quality target, not CRF. With QP, the same search, the same statistics and the same workflow (search on a GPU encoder, final encode on its CPU counterpart) apply to every supported encoder.
 - **No rate control competing with the search.** CRF is a rate control: the encoder moves bits between frames and blocks following its own perceptual model (adaptive quantization, cu-tree), which is not VMAF. sptenc already has something deciding where quality must vary, against the metric you chose: the scene splitter, then the search of each segment. A segment being cut on scene changes (with short scenes merged into a neighbor), its content is mostly homogeneous: there is not much left for a rate control to adapt to. Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) article makes the same point: *"Within a homogeneous set of frames, such as those that belong to the same shot, there is much less need to use rate-control, since very simple coding schemes, such as the fixed-quantization parameter ("fixed QP") mode, supported by virtually all existing video encoders, offers a very consistent video quality, with almost minimal bitrate variation."*
