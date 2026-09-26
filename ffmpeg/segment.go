@@ -51,14 +51,8 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 	if config.OutputDir == "" {
 		return errors.New("output directory cannot be empty")
 	}
-	previous := 0
-	for _, frame := range config.ScenesFrames {
-		// A frame not above the previous one would make ffmpeg produce less segments than
-		// expected. It also catches scenes which did not get their frame index (0).
-		if frame <= previous {
-			return fmt.Errorf("scenes frames must be strictly increasing and above 0, got %d after %d", frame, previous)
-		}
-		previous = frame
+	if err = checkScenesFrames(config.ScenesFrames); err != nil {
+		return
 	}
 	// Prepare command
 	args := []string{
@@ -68,24 +62,7 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 		"-map", "0:v:0",
 		"-c:v", "copy",
 	}
-	if len(config.ScenesFrames) == 0 {
-		// Single scene input (or every boundary has been filtered out): nothing to cut.
-		// The segment muxer can not be used without cut points (it would fall back to
-		// its default fixed segment time), so copy the video track as the only segment.
-		args = append(args,
-			filepath.Join(config.OutputDir, fmt.Sprintf(SegmentOutputFormat, 0)),
-		)
-	} else {
-		args = append(args,
-			"-f", "segment",
-			"-segment_frames", formatScenesFrames(config.ScenesFrames),
-			// Each segment starts at 0. Keeping the source timestamps instead would not
-			// change how the segments are put back together: the concat demuxer offsets
-			// every file by the previous durations either way, see GenerateConcatList.
-			"-reset_timestamps", "1",
-			filepath.Join(config.OutputDir, SegmentOutputFormat),
-		)
-	}
+	args = append(args, segmentsOutputArgs(config.ScenesFrames, config.OutputDir)...)
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Scene splitting with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}
@@ -127,6 +104,41 @@ func Segment(ctx context.Context, config SegmentConfig) (err error) {
 		return
 	}
 	return
+}
+
+// checkScenesFrames validates the cut points of Segment and FFV1VideoMaster.
+func checkScenesFrames(scenesFrames []int) error {
+	previous := 0
+	for _, frame := range scenesFrames {
+		// A frame not above the previous one would make ffmpeg produce less segments than
+		// expected. It also catches scenes which did not get their frame index (0).
+		if frame <= previous {
+			return fmt.Errorf("scenes frames must be strictly increasing and above 0, got %d after %d", frame, previous)
+		}
+		previous = frame
+	}
+	return nil
+}
+
+// segmentsOutputArgs returns the output arguments writing the video stream into segments cut at
+// scenesFrames within outputDir. Shared by Segment, which cuts a master, and FFV1VideoMaster,
+// which can write the master already cut: both must produce the same segments.
+func segmentsOutputArgs(scenesFrames []int, outputDir string) []string {
+	if len(scenesFrames) == 0 {
+		// Single scene input (or every boundary has been filtered out): nothing to cut.
+		// The segment muxer can not be used without cut points (it would fall back to
+		// its default fixed segment time), so the video track is the only segment.
+		return []string{filepath.Join(outputDir, fmt.Sprintf(SegmentOutputFormat, 0))}
+	}
+	return []string{
+		"-f", "segment",
+		"-segment_frames", formatScenesFrames(scenesFrames),
+		// Each segment starts at 0. Keeping the source timestamps instead would not
+		// change how the segments are put back together: the concat demuxer offsets
+		// every file by the previous durations either way, see GenerateConcatList.
+		"-reset_timestamps", "1",
+		filepath.Join(outputDir, SegmentOutputFormat),
+	}
 }
 
 func formatScenesFrames(frames []int) (formatted string) {

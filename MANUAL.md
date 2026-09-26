@@ -44,8 +44,8 @@ Its size depends on the content, and a 4K source has four times as many pixels t
 
 | Command | At its peak | The film above |
 |---|---|---|
-| `encode` on a file | The master and its segments, about twice the master, until the end of the run | 119 GiB, plus the encodes |
-| `batchsearch` | The same: the master is kept for every candidate, the segments of a candidate are deleted once it is done | 119 GiB, plus the encodes |
+| `encode` on a file | The segments: the master is written directly as its segments, never whole | 59 GiB, plus the encodes |
+| `batchsearch` | The master, kept for every candidate, and the segments of the candidate being searched, deleted once it is done: about twice the master | 119 GiB, plus the encodes |
 | `encode` on a pre-split directory | The segments merged back into one file, the reference of the final VMAF | 59 GiB, plus the encodes |
 | `split` | The segments, about the master, in the output directory; given a source (without `--master`), the master too, until the end | 59 or 119 GiB |
 | `master` | The master, at its output path | 59 GiB |

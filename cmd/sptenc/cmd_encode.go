@@ -34,8 +34,8 @@ var encodeCommand = &cli.Command{
 	Usage:   "Encode video segments to meet perceptual quality targets at minimal file size",
 	Description: "INPUT\n" +
 		"The input path can be provided in two forms:\n" +
-		"  * Single video file: sptenc creates a lossless FFV1 master, splits it into scene-aligned\n" +
-		"    segments, and encodes each one (one-shot process).\n" +
+		"  * Single video file: sptenc creates a lossless FFV1 master, written directly as\n" +
+		"    scene-aligned segments, and encodes each one (one-shot process).\n" +
 		"  * Directory of pre-split video files: every file is treated as an already-segmented scene.\n" +
 		"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n" +
 		"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate.\n\n" +
@@ -369,21 +369,11 @@ var encodeCommand = &cli.Command{
 				}
 				scenes = filtered
 			}
-			// create master
-			var masterFile string
-			if masterFile, sourceTotalFrames, _, err = createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"),
+			// The master, written cut into its segments: see createMasterSegments
+			if sourceTotalFrames, err = createMasterSegments(ctx, inputPath, workingDir, scenes,
 				cmd.Bool(debugFlagName), decoderCfg); err != nil {
-				return fmt.Errorf("failed to create the master file: %w", err)
+				return fmt.Errorf("failed to create the master segments: %w", err)
 			}
-			// split
-			fmt.Fprintf(bypass, "Splitting scenes...\n")
-			start = time.Now()
-			if err = liveSplitScenes(ctx, masterFile, workingDir, totalDuration, scenes, cmd.Bool(debugFlagName)); err != nil {
-				return fmt.Errorf("failed to split scenes: %w", err)
-			}
-			fmt.Fprintf(bypass, "\tSplit %d scenes in %v\n",
-				1+len(scenes), time.Since(start).Round(time.Second),
-			)
 			// Build segment paths directly from known naming convention rather than
 			// scanning the directory, which avoids filesystem ordering issues.
 			segmentsPaths = make([]string, len(scenes)+1)

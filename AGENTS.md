@@ -99,7 +99,7 @@ The duration lines alone still leave frames up to 1 ms off: the demuxer rounds e
 
 Variable frame rate (VFR) content is rejected because the pipeline works on a constant frame grid: the encoders number the frames at the rate they read, and the concat rebuilds the timestamps from frame counts and the frame rate (duration lines and snap, see above). Measured on a Matroska file mixing 24 and 30 fps parts: the encode and its VMAF went fine (VMAF pairs frames by index, `-r` on its inputs, and the encoders run with `-fps_mode passthrough`, so no frame is dropped or duplicated), but the output had its 30 fps parts retimed to 24 fps, its video no longer lasting what its audio does (see `FFProbeBinaryStream.IsConstantFrameRate` in `ffmpeg/probe.go`).
 
-The check runs twice: `checkSourceVideo` at startup compares the frame rates the file declares (a VFR Matroska file declares the same ones as a constant one), then `createMaster` compares the measured frame durations once every frame has been counted, before the master is written. A pre-split directory only gets the first check, on its first segment, plus the search refusing segments whose declared rates differ.
+The check runs twice: `checkSourceVideo` at startup compares the frame rates the file declares (a VFR Matroska file declares the same ones as a constant one), then `countMasterFrames` (for `createMaster` and `createMasterSegments`) compares the measured frame durations once every frame has been counted, before the master is written. A pre-split directory only gets the first check, on its first segment, plus the search refusing segments whose declared rates differ.
 
 **Implication:** Adding VFR support means carrying every frame's own timestamp through the encodes and the concat, both of which rebuild a constant grid today. This is a design change, not a configuration flag.
 
@@ -129,6 +129,12 @@ Since v0.2.0 sptenc selects the VMAF v1 models (`vmaf_v1.0.16_3d0h` below 2160 l
 FFV1 is what keeps the decodes of every attempt (encode input, VMAF reference) on the CPU: no GPU decodes it. A lossless all-intra HEVC master (NVENC `-tune lossless -g 1`, or x265 `lossless=1:keyint=1`) keeps every property of the master (cut at any frame, bit-exact: checked frame by frame in software and on NVDEC) and NVDEC decodes it. Measured on the episode above (`hevc_nvenc -C 6`, VMAF v1, same segments cut from both masters): same QPs on all 163 segments and the same output, 65% less CPU time for the whole run, but 20m29s of search instead of 17m10s. NVDEC itself is the limit: 12 lossless segments decoded at once ran at 411 frames per second with NVDEC busy 87%, where the 32 threads of the CPU decode the same segments from FFV1 at 693. The HEVC master also takes 1.9 (x265 medium) to 2.6 times (NVENC) the space of FFV1, and the x265 flavor declares a range extensions profile (Main 10 Intra) that ffmpeg's VA-API and DXVA decoders refuse.
 
 **Implication:** a second mastering path is not worth maintaining without a dramatic speed gain. Reopen it only with a new fact, such as a much faster hardware decoder.
+
+### encode writes its master cut
+
+Given a file, `encode` has the FFV1 encode write the master directly as its segments (`createMasterSegments`: the segment muxer on the encoder's output), so the master and its segments, the same frames, are never on disk together: a run needs room for the master once, not twice. Deleting the master once cut would not have done it: the split is a single ffmpeg pass, both are whole on disk when it ends. The segments are the ones master then split give, same packets and same timestamps (`ffmpeg.TestFFV1VideoMasterSegments`), and encodes run both ways gave identical outputs, packets and timestamps, at 23.976 (Matroska), 59.94 and 25 (MP4) and 29.97 fps (MPEG-TS), and from a single scene. Only the duration a segment's container declares can end 1 ms later, which nothing but the progress bars reads. `batchsearch` keeps the master file, which it cuts once per candidate, and so do the `master` and `split` commands, which keep the phases apart for the user.
+
+**Implication:** both ways of making segments must stay the same: they share the FFV1 arguments (`ffmpeg.FFV1VideoMaster`) and the segment muxer ones (`segmentsOutputArgs`), and the test compares their segments packet by packet.
 
 ### Cache isolation
 

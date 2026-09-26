@@ -23,16 +23,23 @@ type FFV1VideoMasterConfig struct {
 	D3D12Dec        bool   // use D3D12VA for hardware-accelerated decoding
 	D3D12Device     int    // Direct3D 12 adapter index, see D3D12VADefaultDevice
 	VideoToolboxDec bool   // use VideoToolbox for hardware-accelerated decoding
-	// Output
+	// Output: the master file, or the master cut into its segments within SegmentsDir, at
+	// ScenesFrames (see SegmentConfig.ScenesFrames): the same segments Segment would cut from
+	// the master file. Exactly one of OutputFilePath and SegmentsDir must be set.
 	OutputFilePath string
+	SegmentsDir    string
+	ScenesFrames   []int
 	// Reporting
 	Debug        func(msg string)
 	RuntimeError func(err error) // non fatal errors
 	StatsReport  func(stats ProgressStats)
 }
 
-// FFV1VideoMaster encodes the input video file to FFV1 with intra frames and 10-bit YUV420P.
-// Only the first video stream is kept; all other streams are dropped.
+// FFV1VideoMaster encodes the input video file to FFV1 with intra frames and 10-bit YUV420P,
+// into one file or already cut into its segments (SegmentsDir): the segment muxer cuts the
+// packets of the encoder exactly as Segment cuts those of the master file, same packets and same
+// timestamps (see TestFFV1VideoMasterSegments), only the duration a segment's container declares
+// can end 1 ms later. Only the first video stream is kept; all other streams are dropped.
 // Intra frames only is what lets Segment cut at any frame: see Segment for why the source can
 // not be cut directly.
 func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err error) {
@@ -40,8 +47,13 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	if config.InputFilePath == "" {
 		return errors.New("input path cannot be empty")
 	}
-	if config.OutputFilePath == "" {
-		return errors.New("output file path cannot be empty")
+	if (config.OutputFilePath == "") == (config.SegmentsDir == "") {
+		return errors.New("exactly one of the output file path and the segments directory must be set")
+	}
+	if config.SegmentsDir != "" {
+		if err = checkScenesFrames(config.ScenesFrames); err != nil {
+			return
+		}
 	}
 	// Apply defaults
 	if config.NVDevice == 0 {
@@ -84,8 +96,12 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 		"-g", "1", // with every frame self contained
 		"-pix_fmt", "yuv420p10le", // in 10bits output
 		"-fps_mode", "passthrough", // preserve original timestamps
-		config.OutputFilePath,
 	)
+	if config.SegmentsDir != "" {
+		args = append(args, segmentsOutputArgs(config.ScenesFrames, config.SegmentsDir)...)
+	} else {
+		args = append(args, config.OutputFilePath)
+	}
 	// Prepare command
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))

@@ -135,29 +135,12 @@ var masterCommand = &cli.Command{
 // FFV1 master, both with the hardware decoder of decoderCfg (software decode when none).
 func createMaster(ctx context.Context, inputFilePath, outputFile string, debug bool, decoderCfg ffmpeg.HWDecoderConfig) (
 	outputFileResult string, totalFrames int, duration time.Duration, err error) {
-	// count frames
-	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
-	start := time.Now()
-	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, debug, decoderCfg)
-	if err != nil {
-		err = fmt.Errorf("failed to count number of frames: %w", err)
-		return
-	}
-	totalFrames = videoInfos.NbReadFrames
-	fmt.Fprintf(liveprogress.Bypass(), "\tCounted %d %s frames in %s\n",
-		totalFrames, videoInfos.CodecName, time.Since(start).Round(time.Second),
-	)
-	// The frame rates declared by the source have been checked already (checkSourceVideo), but
-	// they can not be trusted with every container: now that every frame has been read, check
-	// how long they really last (see FFProbeBinaryStream.IsConstantFrameRate).
-	if !videoInfos.IsConstantFrameRate() {
-		err = fmt.Errorf("variable frame rate (VFR) content is not supported: frames last from %s to %s while the source declares a constant frame rate (%s fps)",
-			videoInfos.ShortestFrameDuration, videoInfos.LongestFrameDuration, videoInfos.RFrameRate)
+	if totalFrames, duration, err = countMasterFrames(ctx, inputFilePath, debug, decoderCfg); err != nil {
 		return
 	}
 	// ffv1 encode
 	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
-	start = time.Now()
+	start := time.Now()
 	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, decoderCfg.ToFFV1MasterConfig()); err != nil {
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
 		return
@@ -181,5 +164,98 @@ func createMaster(ctx context.Context, inputFilePath, outputFile string, debug b
 		)
 	}
 	outputFileResult = outputFile
+	return
+}
+
+// createMasterSegments counts the frames of the source then encodes its video stream to the
+// FFV1 master already cut at the scenes, into outputDir: the very segments createMaster then
+// Segment give, same packets and same timestamps (see ffmpeg.TestFFV1VideoMasterSegments),
+// without the master ever being on disk whole. Both with the hardware decoder of decoderCfg.
+//
+// # WHY THIS EXISTS
+//
+// The master and its segments are the same frames. Written then cut, both are on disk whole at
+// the end of the split: a run needs room for twice the master. Written cut, for the master once.
+//
+// # WHY NOT DELETE THE MASTER ONCE CUT
+//
+// The split is a single ffmpeg pass: when it ends, the master and all its segments are on disk,
+// the peak is reached already. Deleting the master then only shortens the time spent there.
+//
+// # WHY NOT A PIPE FROM THE MASTER ENCODE TO SEGMENT
+//
+// It would reproduce the split exactly, but the standard output of both processes carries their
+// progress, and Go can not hand a child process another descriptor on Windows (exec.Cmd
+// ExtraFiles). It is not needed either: the segment muxer cuts the packets of an encoder as it
+// cuts those of a stream copy.
+//
+// # WHO WRITES THE MASTER CUT
+//
+// encode only. batchsearch cuts its master once per candidate. The master and split commands
+// keep the phases apart for the user to act between them, and split given a source detects the
+// scenes on the master it makes: they are not known before it is written.
+//
+// # EDGE CASES
+//
+//   - A single scene: the master is written as the only segment, as Segment would copy it.
+//   - The duration a segment's container declares can end 1 ms later than the one Segment
+//     writes (seen at 24000/1001 and 60000/1001 fps): the frames and their timestamps are the
+//     same, and nothing but the progress bars reads that duration.
+func createMasterSegments(ctx context.Context, inputFilePath, outputDir string, scenes []ffmpeg.Scene, debug bool,
+	decoderCfg ffmpeg.HWDecoderConfig) (totalFrames int, err error) {
+	if totalFrames, _, err = countMasterFrames(ctx, inputFilePath, debug, decoderCfg); err != nil {
+		return
+	}
+	fmt.Fprintln(liveprogress.Bypass(), "Creating the ffv1 lossless intra frames master, cut into its segments...")
+	start := time.Now()
+	masterConfig := decoderCfg.ToFFV1MasterConfig()
+	masterConfig.SegmentsDir = outputDir
+	masterConfig.ScenesFrames = scenesFrames(scenes)
+	if err = liveFFV1Master(ctx, inputFilePath, "", totalFrames, debug, masterConfig); err != nil {
+		err = fmt.Errorf("failed to encode the ffv1 master segments: %w", err)
+		return
+	}
+	var size int64
+	for i := range len(scenes) + 1 {
+		var fileInfos os.FileInfo
+		if fileInfos, err = os.Stat(filepath.Join(outputDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))); err != nil {
+			err = fmt.Errorf("failed to stat master segment: %w", err)
+			return
+		}
+		size += fileInfos.Size()
+	}
+	segments := "segments"
+	if len(scenes) == 0 {
+		segments = "segment"
+	}
+	fmt.Fprintf(liveprogress.Bypass(), "\tMaster created in %s, as %d %s (%s)\n",
+		time.Since(start).Round(time.Second), len(scenes)+1, segments, cunits.ImportInBytes(float64(size)))
+	return
+}
+
+// countMasterFrames counts the frames of the source a master is made from, and rejects it when
+// they do not last the same time, with the hardware decoder of decoderCfg.
+func countMasterFrames(ctx context.Context, inputFilePath string, debug bool, decoderCfg ffmpeg.HWDecoderConfig) (
+	totalFrames int, duration time.Duration, err error) {
+	// count frames
+	fmt.Fprintln(liveprogress.Bypass(), "Counting the exact number of frames...")
+	start := time.Now()
+	videoInfos, duration, err := liveProbeVideoCF(ctx, inputFilePath, debug, decoderCfg)
+	if err != nil {
+		err = fmt.Errorf("failed to count number of frames: %w", err)
+		return
+	}
+	totalFrames = videoInfos.NbReadFrames
+	fmt.Fprintf(liveprogress.Bypass(), "\tCounted %d %s frames in %s\n",
+		totalFrames, videoInfos.CodecName, time.Since(start).Round(time.Second),
+	)
+	// The frame rates declared by the source have been checked already (checkSourceVideo), but
+	// they can not be trusted with every container: now that every frame has been read, check
+	// how long they really last (see FFProbeBinaryStream.IsConstantFrameRate).
+	if !videoInfos.IsConstantFrameRate() {
+		err = fmt.Errorf("variable frame rate (VFR) content is not supported: frames last from %s to %s while the source declares a constant frame rate (%s fps)",
+			videoInfos.ShortestFrameDuration, videoInfos.LongestFrameDuration, videoInfos.RFrameRate)
+		return
+	}
 	return
 }

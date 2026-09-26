@@ -149,6 +149,8 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 	config := ffmpeg.FFV1VideoMasterConfig{
 		InputFilePath:   inputFilePath,
 		OutputFilePath:  finalFile,
+		SegmentsDir:     masterConfig.SegmentsDir,
+		ScenesFrames:    masterConfig.ScenesFrames,
 		NVDec:           masterConfig.NVDec,
 		NVDevice:        masterConfig.NVDevice,
 		VAAPIDec:        masterConfig.VAAPIDec,
@@ -213,6 +215,15 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 	return
 }
 
+// scenesFrames returns the frames to cut at (frames, not times: see ffmpeg.Scene).
+func scenesFrames(scenes []ffmpeg.Scene) (frames []int) {
+	frames = make([]int, len(scenes))
+	for i, scene := range scenes {
+		frames[i] = scene.Frame
+	}
+	return
+}
+
 func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration time.Duration, scenes []ffmpeg.Scene, debug bool) (err error) {
 	// live progress for splitting
 	var currentStats ffmpeg.ProgressStats
@@ -236,17 +247,12 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 		currentStats = stats
 		bar.CurrentSet(uint64(stats.Time))
 	}
-	// extract the frames to cut at (frames, not times: see ffmpeg.Scene)
-	scenesFrames := make([]int, len(scenes))
-	for i, scene := range scenes {
-		scenesFrames[i] = scene.Frame
-	}
 	// Execute segmentation
 	return ffmpeg.Segment(ctx, ffmpeg.SegmentConfig{
 		// Input
 		Input: path,
 		// Output
-		ScenesFrames: scenesFrames,
+		ScenesFrames: scenesFrames(scenes),
 		OutputDir:    outputDir,
 		// Reporting
 		Debug: func(s string) {
