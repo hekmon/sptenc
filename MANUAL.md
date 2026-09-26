@@ -47,7 +47,7 @@ Its size depends on the content, and a 4K source has four times as many pixels t
 | `encode` on a file | The segments: the master is written directly as its segments, never whole | 59 GiB, plus the encodes |
 | `batchsearch` | The master, kept for every candidate, and the segments of the candidate being searched, deleted once it is done: about twice the master | 119 GiB, plus the encodes |
 | `encode` on a pre-split directory | The segments merged back into one file, the reference of the final VMAF | 59 GiB, plus the encodes |
-| `split` | The segments, about the master, in the output directory; given a source (without `--master`), the master too, until the end | 59 or 119 GiB |
+| `split` | The segments, about the master, in the output directory: a source's master is written directly as its segments, never whole | 59 GiB |
 | `master` | The master, at its output path | 59 GiB |
 
 The encodes are the encoded segments kept for the output and their merge: twice the encoded video, small next to the master (3.3 GiB each for the film with `hevc_nvenc`). The output file holds the encoded video and every other stream of the source.
@@ -284,7 +284,9 @@ Use the `thresholds` command to preview the segment distributions a threshold wo
 
 ### Reusing a threshold
 
-`encode`, `thresholds`, and `batchsearch` all build scenes the same way: the threshold picks the boundaries first, then `--min-segment-length` merges the short segments that remain. The scenes a threshold produces therefore depend only on that threshold and on `--min-segment-length` — not on the `--min-threshold`/`--max-threshold` range a search was run with.
+`encode`, `split`, `thresholds`, and `batchsearch` all build scenes the same way, on the source file: the threshold picks the boundaries first, then `--min-segment-length` merges the short segments that remain. The scenes a threshold produces therefore depend only on that threshold and on `--min-segment-length` — not on the `--min-threshold`/`--max-threshold` range a search was run with.
+
+`split --master` detects the scenes on the master it is given. They are the source's when the master holds the source's luma without loss, the only plane scene detection reads: a limited range source of 8 or 10 bits. A full range source's luma is converted to the limited range (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)): on a test clip, its scene changes scored 14% lower on the master than on the source, and a threshold of 17 lost one of the four cuts `encode` kept. Split the source itself to cut where the other commands do.
 
 This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--min-segment-length`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season.
 

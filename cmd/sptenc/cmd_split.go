@@ -37,10 +37,14 @@ var splitCommand = &cli.Command{
 	Usage:    "Split a video file by scenes",
 	Description: "Detect scene changes in a video and split it into separate files at each transition.\n\n" +
 		"HOW IT WORKS\n" +
-		"By default, the command first creates a lossless FFV1 master to ensure frame-accurate cuts,\n" +
-		"then analyzes the video with ffmpeg's scdet filter to find scene boundaries.\n\n" +
-		"If the input has already been converted with the master command, use --" + masterFlagName + " to skip the\n" +
-		"master creation phase.\n" +
+		"The command analyzes the video with ffmpeg's scdet filter to find scene boundaries, as encode,\n" +
+		"batchsearch and thresholds do, then writes a lossless FFV1 master directly cut at them: every\n" +
+		"frame of such a master is self-contained, so every cut falls on the exact frame.\n\n" +
+		"If the input has already been converted with the master command, use --" + masterFlagName + ": it is cut as\n" +
+		"is, its scenes detected on it. They are the source's when the master holds the source's luma\n" +
+		"without loss, the only plane scdet reads: a limited range source of 8 or 10 bits. A full range\n" +
+		"source's luma is converted to the limited range, and scores its scene changes lower: split the\n" +
+		"source itself to cut where encode does.\n" +
 		"Use --" + listScenesFlagName + " to detect and print the actual scene list (frame, time, duration,\n" +
 		"and score) for a given threshold without creating any files. It is the fastest way to preview\n" +
 		"exactly where the cuts will fall before committing to an encode or split.\n\n" +
@@ -78,17 +82,6 @@ var splitCommand = &cli.Command{
 				Usage:    "Only detect and print scenes, do not split the file",
 				Value:    false,
 				OnlyOnce: true,
-			},
-			// Directories
-			&cli.StringFlag{
-				Name:             tmpDirFlagName,
-				Aliases:          []string{"t"},
-				Usage:            "Directory for temporary working files",
-				Value:            os.TempDir(),
-				OnlyOnce:         true,
-				Validator:        validateTmpDir,
-				ValidateDefaults: true,
-				Category:         "Directories",
 			},
 		}
 		flags = append(flags, segmentFilterFlag(""))
@@ -166,9 +159,8 @@ var splitCommand = &cli.Command{
 		bypass := liveprogress.Bypass()
 		liveprogress.AddCustomLine(func() string { return "" }) // separate logs from live status updates
 
-		// handle modes and master preparation
+		// probe the input
 		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
-		fileToProcess := inputFilePath
 		var stats ffmpeg.FFProbeStats
 		if stats, err = ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{
 			Path: inputFilePath,
@@ -201,54 +193,27 @@ var splitCommand = &cli.Command{
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "Min segment length: %s\n", minSegLen)
 		}
-		if !cmd.Bool(masterFlagName) && !cmd.Bool(listScenesFlagName) {
-			// create a temporary directory
-			var workingDir string
-			if workingDir, err = createTempDir(cmd.String(tmpDirFlagName)); err != nil {
-				return fmt.Errorf("failed to create temporary working directory in %s: %w",
-					shellescape.Quote(cmd.String(tmpDirFlagName)), err,
-				)
-			}
-			defer func() {
-				if (err != nil && ctx.Err() != context.Canceled) || cmd.Bool(debugFlagName) {
-					fmt.Fprintf(bypass, "Temporary directory left for inspection: %s\n",
-						shellescape.Quote(workingDir),
-					)
-				} else {
-					if removeErr := os.RemoveAll(workingDir); removeErr != nil {
-						fmt.Fprintf(bypass, "Failed to delete temporary working directory %s: %s\n",
-							shellescape.Quote(workingDir), removeErr,
-						)
-					}
-				}
-			}()
-			if cmd.Bool(debugFlagName) {
-				fmt.Fprintf(bypass, "DEBUG: Temporary directory created: %s\n", shellescape.Quote(workingDir))
-			}
-			// build optional hw decode config
-			decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)
-			if requestedDecoder.Enabled() && !decoderCfg.Enabled() {
-				fmt.Fprintf(bypass, "WARNING: input codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode\n", requestedDecoder.Name())
-			}
-			// create the master within
-			if fileToProcess, _, duration, err = createMaster(ctx, inputFilePath, filepath.Join(workingDir, "master.mkv"),
-				cmd.Bool(debugFlagName), decoderCfg); err != nil {
-				return fmt.Errorf("failed to create the master file: %w", err)
-			}
+		// Decoder of the input (scene detection, frame count, master), as encode has it: a master
+		// is FFV1, which no hardware decoder handles
+		decoderCfg := requestedDecoder.CompatibleWith(ctx, inputFilePath)
+		if requestedDecoder.Enabled() && !decoderCfg.Enabled() {
+			fmt.Fprintf(bypass, "WARNING: input codec is not decoded with %s (not supported, or not decoded exactly: see MANUAL.md, Hardware decoding), falling back to software decode\n", requestedDecoder.Name())
 		}
 
 		/*
 		 * Execute
 		 */
 
-		// detect
+		// Detect on the input itself, a source as encode, batchsearch and thresholds do. Its master,
+		// made first, would not always do: a full range source is converted to the limited range
+		// there, and its scene changes score lower (x0.856 on a test clip), so the same threshold
+		// could keep fewer boundaries than those commands and --list-scenes do.
 		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
-		// (the master, when made, is FFV1: ScenesDetection falls back to software decode by itself)
-		scenes, err := liveDetectScenes(ctx, fileToProcess, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName),
-			requestedDecoder.ToScenesDetectionConfig())
+		scenes, err := liveDetectScenes(ctx, inputFilePath, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName),
+			decoderCfg.ToScenesDetectionConfig())
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
@@ -272,11 +237,18 @@ var splitCommand = &cli.Command{
 			return
 		}
 
-		// split
 		outputDir := cmd.StringArg("outputdir")
+		if !cmd.Bool(masterFlagName) {
+			// The master, written cut into its segments: see createMasterSegments
+			if _, err = createMasterSegments(ctx, inputFilePath, outputDir, scenes, cmd.Bool(debugFlagName), decoderCfg); err != nil {
+				return fmt.Errorf("failed to create the master segments: %w", err)
+			}
+			return
+		}
+		// split the master given
 		fmt.Fprintf(bypass, "Splitting scenes...\n")
 		start = time.Now()
-		if err = liveSplitScenes(ctx, fileToProcess, outputDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
+		if err = liveSplitScenes(ctx, inputFilePath, outputDir, duration, scenes, cmd.Bool(debugFlagName)); err != nil {
 			return fmt.Errorf("failed to split scenes: %w", err)
 		}
 		fmt.Fprintf(bypass, "\tSplit %d scenes in %s\n",

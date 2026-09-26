@@ -191,9 +191,8 @@ func createMaster(ctx context.Context, inputFilePath, outputFile string, debug b
 //
 // # WHO WRITES THE MASTER CUT
 //
-// encode only. batchsearch cuts its master once per candidate. The master and split commands
-// keep the phases apart for the user to act between them, and split given a source detects the
-// scenes on the master it makes: they are not known before it is written.
+// encode and split given a source: both detect the scenes on the source first. batchsearch cuts
+// its master once per candidate, and the master command writes it for the user to act on.
 //
 // # EDGE CASES
 //
