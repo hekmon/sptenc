@@ -139,42 +139,58 @@ func (e *EncoderAdapter) Encode(ctx context.Context, input, output string, qp in
 	return err
 }
 
-// ComputeVMAF calculates VMAF between a reference and a distorted segment using ffmpeg libvmaf.
+// ComputeVMAF measures a distorted segment against its reference using ffmpeg libvmaf, in a
+// single pass: the VMAF score, the banding the distorted segment added, or both. A banding pass
+// measures a file the search already scored: its report goes next to the VMAF one, not over it.
 func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted string, stream core.VideoStream,
-	progress func(core.ProgressStats), debug func(string), runtimeError func(error)) (core.VMAFStats, error) {
+	measures core.VMAFMeasures, progress func(core.ProgressStats), debug func(string), runtimeError func(error)) (
+	vmafStats core.VMAFStats, banding core.BandingStats, err error) {
+	reportPath := distorted + "_vmaf.json"
+	if !measures.Score {
+		reportPath = distorted + "_banding.json"
+	}
 	report, err := ffmpeg.VMAFCompute(ctx, ffmpeg.VMAFComputeConfig{
 		ReferencePath:     reference,
 		DistortedPath:     distorted,
 		InputFrameRate:    stream.RFrameRate,
-		ReportPath:        distorted + "_vmaf.json",
+		ReportPath:        reportPath,
 		Model:             e.VMAFModel,
-		Measures:          ffmpeg.VMAFMeasures{Original: true},
+		Measures:          ffmpeg.VMAFMeasures{Original: measures.Score, Banding: measures.Banding},
 		HWDecoderConfig:   e.HWDecoder,
 		Debug:             debug,
 		RuntimeError:      runtimeError,
 		FFMPEGStatsReport: adaptProgress(progress),
 	})
 	if err != nil {
-		return core.VMAFStats{}, err
+		return
 	}
-	stats, err := report.Stats(ffmpeg.VMAFScoreOriginal)
-	if err != nil {
-		return core.VMAFStats{}, err
+	if measures.Score {
+		var stats ffmpeg.VMAFStats
+		if stats, err = report.Stats(ffmpeg.VMAFScoreOriginal); err != nil {
+			return
+		}
+		vmafStats = core.VMAFStats{
+			Version:      stats.Version,
+			Minimum:      stats.Minimum,
+			Percentile1:  stats.Percentile1,
+			Percentile5:  stats.Percentile5,
+			Percentile10: stats.Percentile10,
+			Percentile25: stats.Percentile25,
+			Median:       stats.Median,
+			HarmonicMean: stats.HarmonicMean,
+			Mean:         stats.Mean,
+			Maximum:      stats.Maximum,
+		}
 	}
-	return core.VMAFStats{
-		Version:      stats.Version,
-		Minimum:      stats.Minimum,
-		Percentile1:  stats.Percentile1,
-		Percentile5:  stats.Percentile5,
-		Percentile10: stats.Percentile10,
-		Percentile25: stats.Percentile25,
-		Median:       stats.Median,
-		HarmonicMean: stats.HarmonicMean,
-		Mean:         stats.Mean,
-		Maximum:      stats.Maximum,
-		CAMBIMean:    stats.CAMBIMean,
-		CAMBIMax:     stats.CAMBIMax,
-	}, nil
+	if measures.Banding {
+		banding = core.BandingStats{
+			AddedMean:  report.Pooled.Banding.Added.Mean,
+			AddedMax:   report.Pooled.Banding.Added.Max,
+			SourceMean: report.Pooled.Banding.Source.Mean,
+			EncodeMean: report.Pooled.Banding.Encode.Mean,
+		}
+	}
+	return
 }
 
 // ProbeStream extracts video stream information from a media file using ffprobe: metadata

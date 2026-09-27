@@ -464,7 +464,8 @@ var encodeCommand = &cli.Command{
 		if err != nil {
 			return // processSegments says which step failed
 		}
-		if _, _, err := statsCache.AddRun(results.QPs); err != nil {
+		// The QPs of the VMAF search, before the CAMBI stage: see core.QPSearchResults.VMAFSearchQPs
+		if _, _, err := statsCache.AddRun(results.VMAFSearchQPs); err != nil {
 			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
 		}
 

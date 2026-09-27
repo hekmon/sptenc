@@ -24,18 +24,22 @@ type mockEncoder struct {
 	qpMax         int
 	vmafResults   map[int]VMAFStats
 	vmafBySegment map[int]map[int]VMAFStats
-	encodeCalls   []mockEncodeCall
-	vmafCalls     []mockVMAFCall
-	encodeErr     error
-	vmafErr       error
-	probeErr      error
-	probeErrors   []error
-	probeResults  []VideoStream
-	probeCallIdx  int
-	countErr      error
-	counts        map[string]int // what CountFrames returns for each file, recorded by ProbeStream
-	frameRate     string         // declared by the default probe result (24/1 when empty)
-	validateQP    bool
+	// banding added by the encode of each QP (see bandingOf), for the passes measuring it
+	bandingResults   map[int]BandingStats
+	bandingBySegment map[int]map[int]BandingStats
+	encodeCalls      []mockEncodeCall
+	vmafCalls        []mockVMAFCall
+	encodeErr        error
+	vmafErr          error
+	probeErr         error
+	probeErrors      []error
+	probeResults     []VideoStream
+	probeCallIdx     int
+	countErr         error
+	counts           map[string]int // what CountFrames returns for each file, recorded by ProbeStream
+	probePaths       []string       // the files ProbeStream was called on, in order
+	frameRate        string         // declared by the default probe result (24/1 when empty)
+	validateQP       bool
 }
 
 type mockEncodeCall struct {
@@ -47,6 +51,7 @@ type mockEncodeCall struct {
 type mockVMAFCall struct {
 	reference string
 	distorted string
+	measures  VMAFMeasures
 }
 
 func (m *mockEncoder) Name() string { return m.name }
@@ -76,18 +81,37 @@ func (m *mockEncoder) Encode(_ context.Context, input, output string, qp int, _ 
 	return os.WriteFile(output, []byte("dummy"), 0644)
 }
 
-func (m *mockEncoder) ComputeVMAF(_ context.Context, reference, distorted string, _ VideoStream,
-	_ func(ProgressStats), _ func(string), _ func(error)) (VMAFStats, error) {
+func (m *mockEncoder) ComputeVMAF(_ context.Context, reference, distorted string, _ VideoStream, measures VMAFMeasures,
+	_ func(ProgressStats), _ func(string), _ func(error)) (stats VMAFStats, banding BandingStats, err error) {
 	if m.vmafErr != nil {
-		return VMAFStats{}, m.vmafErr
+		return VMAFStats{}, BandingStats{}, m.vmafErr
 	}
 	m.mu.Lock()
-	m.vmafCalls = append(m.vmafCalls, mockVMAFCall{reference, distorted})
+	m.vmafCalls = append(m.vmafCalls, mockVMAFCall{reference, distorted, measures})
 	m.mu.Unlock()
+	if !measures.Score && !measures.Banding {
+		return VMAFStats{}, BandingStats{}, fmt.Errorf("nothing to measure")
+	}
 	seg, qp, err := extractSegmentAndQP(distorted)
 	if err != nil {
-		return VMAFStats{}, err
+		return VMAFStats{}, BandingStats{}, err
 	}
+	// the file must have been encoded: a banding pass reuses the one of the VMAF search
+	if _, err = os.Stat(distorted); err != nil {
+		return VMAFStats{}, BandingStats{}, fmt.Errorf("no encode to measure: %w", err)
+	}
+	if measures.Score {
+		if stats, err = m.vmafOf(seg, qp); err != nil {
+			return
+		}
+	}
+	if measures.Banding {
+		banding, err = m.bandingOf(seg, qp)
+	}
+	return
+}
+
+func (m *mockEncoder) vmafOf(seg, qp int) (VMAFStats, error) {
 	if m.vmafBySegment != nil {
 		if segMap, ok := m.vmafBySegment[seg]; ok {
 			if stats, ok := segMap[qp]; ok {
@@ -102,6 +126,23 @@ func (m *mockEncoder) ComputeVMAF(_ context.Context, reference, distorted string
 		return VMAFStats{}, fmt.Errorf("no mock VMAF for QP %d", qp)
 	}
 	return stats, nil
+}
+
+func (m *mockEncoder) bandingOf(seg, qp int) (BandingStats, error) {
+	if m.bandingBySegment != nil {
+		if segMap, ok := m.bandingBySegment[seg]; ok {
+			if banding, ok := segMap[qp]; ok {
+				return banding, nil
+			}
+			return BandingStats{}, fmt.Errorf("no mock banding for segment %d QP %d", seg, qp)
+		}
+		return BandingStats{}, fmt.Errorf("no mock banding for segment %d", seg)
+	}
+	banding, ok := m.bandingResults[qp]
+	if !ok {
+		return BandingStats{}, fmt.Errorf("no mock banding for QP %d", qp)
+	}
+	return banding, nil
 }
 
 // ProbeStream returns the next probeResults entry (or the default 1000 frames stream). Its
@@ -126,6 +167,7 @@ func (m *mockEncoder) ProbeStream(_ context.Context, path string, _ func(string)
 		return VideoStream{}, err
 	}
 	m.probeCallIdx++
+	m.probePaths = append(m.probePaths, path)
 	if m.counts == nil {
 		m.counts = make(map[string]int)
 	}

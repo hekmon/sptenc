@@ -14,9 +14,11 @@ type SegmentEncoder interface {
 	// Encode produces an encoded segment at the given QP.
 	Encode(ctx context.Context, input, output string, qp int, stream VideoStream,
 		progress func(ProgressStats), debug func(string), runtimeError func(error)) error
-	// ComputeVMAF calculates VMAF between a reference and a distorted segment.
-	ComputeVMAF(ctx context.Context, reference, distorted string, stream VideoStream,
-		progress func(ProgressStats), debug func(string), runtimeError func(error)) (VMAFStats, error)
+	// ComputeVMAF measures a distorted segment against its reference in one pass: the VMAF
+	// score the thresholds gate, the banding the encode added, or both (see VMAFMeasures). What
+	// was not measured is returned zero.
+	ComputeVMAF(ctx context.Context, reference, distorted string, stream VideoStream, measures VMAFMeasures,
+		progress func(ProgressStats), debug func(string), runtimeError func(error)) (VMAFStats, BandingStats, error)
 	// ProbeStream extracts video stream information from a media file: its metadata only, no
 	// frame is decoded (NbReadFrames is not set, see CountFrames).
 	ProbeStream(ctx context.Context, path string, debug func(string), runtimeError func(error)) (VideoStream, error)

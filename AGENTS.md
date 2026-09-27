@@ -22,7 +22,7 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 | Package | What lives here | What to change carefully |
 |---|---|---|
-| `core/` | QP search algorithm, interpolation, cache, VMAF threshold checking, scene threshold candidate generation | Algorithmic changes. **Fully decoupled** from `ffmpeg` — do not re-introduce concrete `ffmpeg` imports here. |
+| `core/` | QP search algorithm, interpolation, cache, VMAF threshold checking, the CAMBI gate, scene threshold candidate generation | Algorithmic changes. **Fully decoupled** from `ffmpeg` — do not re-introduce concrete `ffmpeg` imports here. |
 | `ffmpeg/` | ffmpeg command builders, ffprobe parsers, encoder wrappers, VMAF computation, hardware detection | Platform-specific ffmpeg logic, new encoder support, hardware acceleration paths. |
 | `pipeline/` | `EncoderAdapter` — bridges `core.SegmentEncoder` to concrete `ffmpeg` encoder functions, choosing each encoder's function, preset and device. `scenes.go` converts scenes between `ffmpeg` and `core`, and turns scene scores into reusable thresholds | A new encoder or a preset change here must follow in `ffmpeg/` (its encoder function, `GetEncoderQPRange`, `GetCPURelative`) and in `metadata/tags.go`, whose preset tag must list the very presets the adapter uses. |
 | `metadata/` | `GenerateTags` — assembles ffmpeg metadata flags from `core` and `ffmpeg` results | Shared between CLI and any future front-ends (e.g. GUI). |
@@ -36,6 +36,7 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 - **`cmd/sptenc/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes the live progress UI, the pick of the smallest passing file and the `--strikes` early stop (the candidates themselves come from `searchCandidates` in `cmd/sptenc/helpers.go`, over `core.GetCandidates`).
 - **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.
+- **`core/cambi.go`** — The CAMBI gate: the "at most" thresholds on the banding the encoder added, and the stage run once the VMAF search of a segment found its QP (`searchSegmentCAMBI`: one measure there, the walk down one QP at a time when it fails, the best effort). The caches learn the QP of the VMAF search, never the walked one (`QPSearchResults.VMAFSearchQPs`).
 - **`core/predictor.go`** — Forecasts the VMAF record of an untested QP from the encoded ones, so the search picks its next encode inside the bracket instead of walking blind. A forecast is never accepted as a result. The 2024 benchmark in its comments is where Fritsch-Butland was chosen (the fewest attempts of four interpolators, on one clip); interpolating instead of bisecting the bracket only gains a little, depending on the content, and its attempt totals predate the ephemeral cache and are not the current cost.
 - **`core/cache_persistent.go`** and **`core/cache_ephemeral.go`** — Persistent QP history with profile isolation, plus in-memory ephemeral stats for the current encode run.
 - **`pipeline/encoder.go`** — The **adapter** that maps `core.SegmentEncoder` to the concrete ffmpeg encoder functions. Contains the explicit per-encoder switch choosing the function, preset and device of each encoder.
@@ -222,9 +223,9 @@ This was measured (2026-09-22, real `FindAllSegmentsQP` over synthetic segments 
 
 `core/` is fully decoupled from `ffmpeg/` behind the `core.SegmentEncoder` interface:
 
-- `core.SegmentEncoder` abstracts `Name`, `QPRange`, `Encode`, `ComputeVMAF`, `ProbeStream` and `CountFrames`
+- `core.SegmentEncoder` abstracts `Name`, `QPRange`, `Encode`, `ComputeVMAF` (told what to measure in its pass: the score, the banding the encode added, or both, `core.VMAFMeasures`), `ProbeStream` and `CountFrames`
 - `pipeline.EncoderAdapter` implements this interface by delegating to concrete `ffmpeg` functions
-- `core/` types (`VideoStream`, `VMAFStats`, `ProgressStats`, `Scene`) are owned by `core/` and have no `ffmpeg` imports
+- `core/` types (`VideoStream`, `VMAFStats`, `BandingStats`, `VMAFMeasures`, `ProgressStats`, `Scene`) are owned by `core/` and have no `ffmpeg` imports
 
 This means `core/` can be unit-tested with mocked encoders that return predetermined VMAF results — no real ffmpeg processes required.
 
@@ -235,7 +236,7 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 `core/` is tested with unit tests (scenario tests, and table-driven ones where cases line up) that use a `mockEncoder` implementing `core.SegmentEncoder`. No real ffmpeg processes are invoked.
 
 **Key test helpers (defined in `core/qpsearch_test.go`):**
-- `mockEncoder` — returns pre-computed VMAF results from a `map[int]VMAFStats` (one for all segments, or one per segment with `vmafBySegment`). Creates dummy files on disk so `getFileSize` succeeds. Tracks all `Encode` and `ComputeVMAF` calls for call-count assertions. Safe for concurrent use, and tracks how many encodes run at the same time (`maxActive`) for the tests using several workers.
+- `mockEncoder` — returns pre-computed VMAF results from a `map[int]VMAFStats` (one for all segments, or one per segment with `vmafBySegment`), and the banding added the same way (`bandingResults`, `bandingBySegment`) to the passes asking for it. Creates dummy files on disk so `getFileSize` succeeds, and refuses to measure a file that was not encoded. Tracks all `Encode` and `ComputeVMAF` calls (with what each pass measured) and the files probed, for call-count assertions. Safe for concurrent use, and tracks how many encodes run at the same time (`maxActive`) for the tests using several workers.
 - `linearVMAF(qp)` — generates a monotonic VMAF curve (`mean = 100 - 1.5*qp`) for predictable convergence tests.
 - `extractSegmentAndQP` — parses the segment index and the QP from encoded segment filenames (`seg_%06d_qp%03d.mkv`) so the mock can look up the right VMAF result.
 - `mockStatsCache` — returns a fixed, configurable mean and stddev (its `Snapshot` always reports a history). `mockCallbacks` — no-op implementation of the progress callbacks. `recordingCallbacks` records worker IDs and reported totals, from any number of workers.
@@ -245,6 +246,8 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 - `core/predictor_test.go` — Interpolation accuracy, extrapolation clamping, VMAF 100 ceiling adaptation, monotonicity, insufficient-point errors.
 - `core/cache_persistent_test.go` and `core/cache_ephemeral_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability, the one-segment seed weight.
 - `core/vmaf_test.go` — Checker construction errors, boundary values, active/inactive threshold combinations.
+- `core/cambi_test.go` — The CAMBI checker (off values, 0, boundaries), and the stage through `FindAllSegmentsQP`: the stage off calling the encoder as before, a pass at the VMAF search QP encoding nothing more, one step down, reuse of the VMAF search's encodes, a non-monotonic hump, both best efforts, a VMAF best effort measured, `KeepInvalidQP` with a walk, the frame count on the QP kept, the cache learning the VMAF search QP, concurrent segments, and QPs below the VMAF search QP failing the VMAF thresholds.
+- `pipeline/encoder_test.go` — The passes of the adapter against the real ffmpeg (skipped without it): what the search asks for is what it gets, and a banding pass writes its own report.
 - `core/scenes_test.go` — Candidate generation, deduplication, `minDrop` spacing, `GetOptimalMinDrop` edge cases.
 - `ffmpeg/vmaf_test.go` — Model names, selection and mismatch, the filter and report keys of every kind of pass, report parsing on explicit keys (both scores and the banding feature, a model without CAMBI, missing keys), and against the real ffmpeg: the probe of every model and of every kind of pass, unknown and invalid names, the minimum picture size of each kind of model and pass, which models feed on CAMBI (every v1 model, no v0 one), and the scores and banding of the 8-bit-like steps of BENCHMARKS.md (skipped when ffmpeg or the models are not there).
 

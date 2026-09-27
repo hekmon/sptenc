@@ -70,6 +70,9 @@ type QPSearchConfig struct {
 	SegmentsPaths []string
 	// Auditor validates whether a candidate QP meets the target quality (e.g. via VMAF).
 	Auditor VMAFChecker
+	// CAMBIAuditor gates the banding the encoder added to a segment, once its VMAF search found
+	// its QP (see searchSegmentCAMBI). Off, its zero value, no banding is measured.
+	CAMBIAuditor CAMBIChecker
 	// WorkingDir is the directory where temporary encoded segments and VMAF reports are written during the search.
 	WorkingDir string
 	// StatsCache holds previous QP search statistics to guide and accelerate the search.
@@ -112,6 +115,10 @@ type QPSearchResults struct {
 	EncodedSegmentsPaths []string
 	// QPs contains the selected QP value for each segment (aligned with EncodedSegmentsPaths).
 	QPs []int
+	// VMAFSearchQPs contains the QP the VMAF search of each segment found (aligned with
+	// EncodedSegmentsPaths): the selected one, unless the CAMBI stage lowered it. The QP caches
+	// learn these, not the selected ones (see FindAllSegmentsQP).
+	VMAFSearchQPs []int
 	// SegmentsFrames contains the exact number of frames of each segment (aligned with
 	// EncodedSegmentsPaths): the source segment was decoded to count them, and its encode
 	// was checked to hold as many.
@@ -131,6 +138,26 @@ type QPSearchResults struct {
 	TotalEncodedFrames int
 	// NbBestEfforts is the number of segments that stop at the minimum QP without reaching the target VMAF profile.
 	NbBestEfforts int
+	// NbCAMBIWalks is the number of segments whose VMAF search QP failed the CAMBI thresholds:
+	// the QPs below it were tried (see searchSegmentCAMBI).
+	NbCAMBIWalks int
+	// CAMBIWalkAttempts is the number of encodes the CAMBI walks made, counted in TotalNbAttempts
+	// too: the QPs the VMAF search had encoded are reused.
+	CAMBIWalkAttempts int
+	// NbCAMBIBestEfforts is the number of segments where no QP met the VMAF and the CAMBI
+	// thresholds together (see CAMBIBestEffort).
+	NbCAMBIBestEfforts int
+}
+
+// NbCAMBILowered returns the number of segments whose selected QP is lower than the one their
+// VMAF search found: the CAMBI stage lowered it.
+func (qpsr QPSearchResults) NbCAMBILowered() (lowered int) {
+	for segment, qp := range qpsr.QPs {
+		if qp < qpsr.VMAFSearchQPs[segment] {
+			lowered++
+		}
+	}
+	return
 }
 
 func (qpsr QPSearchResults) GetMinMaxQPs() (minQP, maxQP int) {
@@ -322,6 +349,7 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	)
 	results.EncodedSegmentsPaths = make([]string, len(config.SegmentsPaths))
 	results.QPs = make([]int, len(config.SegmentsPaths))
+	results.VMAFSearchQPs = make([]int, len(config.SegmentsPaths))
 	results.SegmentsFrames = make([]int, len(config.SegmentsPaths))
 	if config.NbConcurrentSegments < 1 {
 		config.NbConcurrentSegments = 1
@@ -337,24 +365,18 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	for workerID := range config.NbConcurrentSegments {
 		workers.Go(func(workerCtx context.Context, wID int, jobs <-chan job) func() error {
 			var (
-				segmentDuration   time.Duration
-				segmentFrames     int
-				segmentFrameRate  string
-				segmentQP         int
-				segmentSize       int64
-				segmentNbAttempts int
-				bestEffort        bool
+				segment     segmentOutcome
+				segmentSize int64
 			)
 			return func() (err error) {
 				for job := range jobs {
 					scb.OnSegmentStart(wID, job.segment, job.path)
 					// Find this segment QP
-					if segmentQP, segmentFrames, segmentFrameRate, segmentNbAttempts, bestEffort, segmentDuration, err =
-						findSegmentQP(workerCtx, scb, config, wID, job.segment, job.path); err != nil {
+					if segment, err = findSegmentQP(workerCtx, scb, config, wID, job.segment, job.path); err != nil {
 						err = fmt.Errorf("failed to find the right encoding QP for segment %d: %w", job.segment, err)
 						return
 					}
-					encodedSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, job.segment, segmentQP))
+					encodedSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, job.segment, segment.qp))
 					if segmentSize, err = getFileSize(encodedSegmentPath); err != nil {
 						err = fmt.Errorf("failed to get the size of segment %d: %w", job.segment, err)
 						return
@@ -362,34 +384,47 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 					// Update global stats
 					resultsAccess.Lock()
 					results.EncodedSegmentsPaths[job.segment] = encodedSegmentPath
-					results.QPs[job.segment] = segmentQP
-					results.SegmentsFrames[job.segment] = segmentFrames
+					results.QPs[job.segment] = segment.qp
+					results.VMAFSearchQPs[job.segment] = segment.vmafQP
+					results.SegmentsFrames[job.segment] = segment.frames
 					// One frame rate for the whole set: the concat durations and the final
 					// VMAF (-r) rely on it.
 					if results.FrameRate == "" {
-						results.FrameRate = segmentFrameRate
-					} else if segmentFrameRate != results.FrameRate {
+						results.FrameRate = segment.frameRate
+					} else if segment.frameRate != results.FrameRate {
 						resultsAccess.Unlock()
 						return fmt.Errorf("segment %d has a frame rate of %s while the previous ones have %s",
-							job.segment, segmentFrameRate, results.FrameRate)
+							job.segment, segment.frameRate, results.FrameRate)
 					}
-					results.TotalSegmentsFrames += segmentFrames
-					results.TotalEncodedFrames += segmentFrames * segmentNbAttempts
-					results.TotalNbAttempts += segmentNbAttempts
-					if bestEffort {
+					results.TotalSegmentsFrames += segment.frames
+					results.TotalEncodedFrames += segment.frames * segment.attempts
+					results.TotalNbAttempts += segment.attempts
+					if segment.bestEffort {
 						results.NbBestEfforts++
 					}
-					doneDuration += segmentDuration
+					if segment.cambi.walked {
+						results.NbCAMBIWalks++
+					}
+					results.CAMBIWalkAttempts += segment.cambi.encodes
+					if segment.cambi.bestEffort != CAMBIBestEffortNone {
+						results.NbCAMBIBestEfforts++
+					}
+					doneDuration += segment.duration
 					allSegmentSize += segmentSize
-					segmentWeights += segmentQP * segmentFrames
-					config.ephemeral.addQP(segmentQP)
+					segmentWeights += segment.qp * segment.frames
+					// The cache learns the QP of the VMAF search, not the one the CAMBI stage may
+					// have lowered it to: what it predicts is where the VMAF search of the next
+					// segments starts, and the CAMBI thresholds are not part of the identity of
+					// the persistent cache it seeds from (runs with different ones share its
+					// file). The walk has nothing to learn: it starts right below that QP.
+					config.ephemeral.addQP(segment.vmafQP)
 					// The totals to report must be read while the lock is held: another worker
 					// can be updating them as soon as it is released. The callback itself is
 					// called without the lock, a slow callback must not hold the other workers.
 					currentTotalDuration, currentTotalSize := doneDuration, allSegmentSize
 					resultsAccess.Unlock()
 					// Done
-					scb.OnSegmentDone(wID, segmentQP, segmentFrames, segmentNbAttempts, currentTotalDuration, currentTotalSize)
+					scb.OnSegmentDone(wID, segment.qp, segment.frames, segment.attempts, currentTotalDuration, currentTotalSize)
 				}
 				return
 			}
@@ -428,9 +463,20 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 	return
 }
 
+// segmentOutcome is what findSegmentQP found for a segment.
+type segmentOutcome struct {
+	qp         int           // the QP kept
+	vmafQP     int           // the QP the VMAF search found, which the CAMBI stage can only lower
+	frames     int           // the frames of the segment, checked in the encode kept
+	frameRate  string        // the frame rate the segment declares
+	attempts   int           // the encodes, the CAMBI walk's included
+	bestEffort bool          // no QP passed the VMAF thresholds: qpMin is kept
+	cambi      cambiOutcome  // what the CAMBI stage did, zero when it is off
+	duration   time.Duration // how long the segment lasts
+}
+
 func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	workerID, segment int, segmentPath string) (
-	finalQP, segmentFrames int, frameRate string, nbAttempts int, bestEffort bool, duration time.Duration, err error) {
+	workerID, segment int, segmentPath string) (outcome segmentOutcome, err error) {
 	scb.Debug(workerID, "Segment %d: Search for the right QP", segment)
 	// Prepare
 	videoTrack, err := probeVideoStream(ctx, scb, config, workerID, segmentPath)
@@ -438,19 +484,19 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		err = fmt.Errorf("failed to get streams infos: %w", err)
 		return
 	}
-	duration = videoTrack.Duration
-	frameRate = videoTrack.RFrameRate
+	outcome.duration = videoTrack.Duration
+	outcome.frameRate = videoTrack.RFrameRate
 	// Before any encode: a segment whose frame rate is not its source's is refused here (a
 	// Matroska file below 5 fps, whose rate ffmpeg guesses, a directory mixing segments of
 	// different files)
 	if config.SourceFrameRate != "" {
 		var same bool
-		if same, err = SameFrameRate(config.SourceFrameRate, frameRate); err != nil {
+		if same, err = SameFrameRate(config.SourceFrameRate, outcome.frameRate); err != nil {
 			return
 		}
 		if !same {
 			err = fmt.Errorf("the segment declares a frame rate of %s while its source is at %s: its frames can not be put back on the source's frame grid",
-				frameRate, config.SourceFrameRate)
+				outcome.frameRate, config.SourceFrameRate)
 			return
 		}
 	}
@@ -458,37 +504,37 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	totalFrames := videoTrack.NbReadFrames
 	if totalFrames <= 0 {
 		err = fmt.Errorf("segment %d: frame count is 0 or negative (NbReadFrames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
-			segment, totalFrames, duration, videoTrack.RFrameRate,
+			segment, totalFrames, outcome.duration, videoTrack.RFrameRate,
 		)
 		return
 	}
-	// Verify output files frames count when done
+	// Verify output files frames count when done: on the QP kept, after the CAMBI stage
 	defer func() {
 		if err != nil {
 			// if we exit with an error, no need to check that everything is fine
 			return
 		}
-		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, finalQP))
+		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, outcome.qp))
 		var finalStream VideoStream
 		if finalStream, err = probeVideoStream(ctx, scb, config, workerID, finalQPSegmentPath); err != nil {
 			// make findSegmentQP return an error
 			err = fmt.Errorf("failed to get streams infos of final segment: %w", err)
 			return
 		}
-		if segmentFrames = finalStream.NbReadFrames; segmentFrames != totalFrames {
+		if outcome.frames = finalStream.NbReadFrames; outcome.frames != totalFrames {
 			// make findSegmentQP return an error
-			err = fmt.Errorf("final segment has %d frames instead of %d", segmentFrames, totalFrames)
+			err = fmt.Errorf("final segment has %d frames instead of %d", outcome.frames, totalFrames)
 			return
 		}
-		scb.Debug(workerID, "Final segment has %d frames, as original GOP.", segmentFrames)
+		scb.Debug(workerID, "Final segment has %d frames, as original GOP.", outcome.frames)
 	}()
 	// Search
-	var testedQPs []int
+	var testedQPs []int // the CAMBI walk adds its encodes
 	if !config.KeepInvalidQP {
 		// Delete invalid QPs once finished
 		defer func() {
 			for _, testedQP := range testedQPs {
-				if testedQP == finalQP {
+				if testedQP == outcome.qp {
 					continue
 				}
 				invalidQPPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, testedQP))
@@ -498,12 +544,34 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 			}
 		}()
 	}
-	if finalQP, nbAttempts, bestEffort, testedQPs, err = searchSegmentQP(ctx, scb, config, workerID, segment, segmentPath, videoTrack); err != nil {
+	var results map[int]VMAFStats
+	if outcome.vmafQP, outcome.attempts, outcome.bestEffort, testedQPs, results, err =
+		searchSegmentQP(ctx, scb, config, workerID, segment, segmentPath, videoTrack); err != nil {
 		err = fmt.Errorf("failed to search segment QP: %w", err)
 		return
 	}
-	if bestEffort {
+	outcome.qp = outcome.vmafQP
+	if outcome.bestEffort {
 		scb.Warning(workerID, "Segment %d: Impossible to validate VMAF config with lowest possible QP (highest quality), keeping it anyway", segment+1)
+	}
+	// The banding the encoder added, with the files of the VMAF search still there
+	if !config.CAMBIAuditor.Enabled() {
+		return
+	}
+	if outcome.cambi, err = searchSegmentCAMBI(ctx, scb, config, workerID, segment, segmentPath, videoTrack,
+		outcome.vmafQP, results, &testedQPs); err != nil {
+		err = fmt.Errorf("failed to check the banding added to the segment: %w", err)
+		return
+	}
+	outcome.qp = outcome.cambi.qp
+	outcome.attempts += outcome.cambi.encodes
+	switch outcome.cambi.bestEffort {
+	case CAMBIBestEffortMax:
+		scb.Warning(workerID, "Segment %d: Impossible to validate the CAMBI worst frame threshold down to the lowest possible QP, giving it up: keeping QP %d, the highest validating the VMAF config and the CAMBI mean threshold",
+			segment+1, outcome.qp)
+	case CAMBIBestEffortMean:
+		scb.Warning(workerID, "Segment %d: Impossible to validate the CAMBI mean threshold down to the lowest possible QP, giving it up: keeping QP %d found by the VMAF search anyway",
+			segment+1, outcome.qp)
 	}
 	return
 }
@@ -545,7 +613,7 @@ func probeVideoStream(ctx context.Context, scb QPSearchCallbacks, config QPSearc
 // the peak, when the bracketing steps straight to qpMin, although a QP in between passes.
 func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, segment int, segmentPath string, videoTrack VideoStream) (
-	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, err error) {
+	finalQP int, nbAttempts int, bestEffort bool, testedQPs []int, results map[int]VMAFStats, err error) {
 	// Keep track of tested QPs
 	qpMin, qpMax, found := config.Encoder.QPRange()
 	if !found {
@@ -553,7 +621,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		return
 	}
 	testedQPs = make([]int, 0, qpMax-qpMin+1) // ordered
-	results := make(map[int]VMAFStats, qpMax-qpMin+1)
+	results = make(map[int]VMAFStats, qpMax-qpMin+1)
 	defer func() {
 		scb.Debug(workerID, "QPs tested: %+v", testedQPs)
 	}()
@@ -689,7 +757,8 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		}
 		// Test candidate and narrow the search
 		scb.OnSegmentNewCandidate(workerID, candidateQP)
-		if vmafStats, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, candidateQP, videoTrack); err != nil {
+		if vmafStats, _, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, candidateQP, videoTrack,
+			VMAFMeasures{Score: true}); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
@@ -751,9 +820,10 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	return
 }
 
+// segmentQP encodes a segment at qp and measures its encode (see measureSegment).
 func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
-	input string, workerID, segment, qp int, videoTrack VideoStream) (
-	vmafStats VMAFStats, err error) {
+	input string, workerID, segment, qp int, videoTrack VideoStream, measures VMAFMeasures) (
+	vmafStats VMAFStats, banding BandingStats, err error) {
 	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	// Encode
 	scb.OnSegmentEncodeStart(workerID, videoTrack.NbReadFrames)
@@ -769,9 +839,25 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 		err = fmt.Errorf("failed to encode segment: %w", encodeErr)
 		return
 	}
-	// Compute VMAF
+	return measureSegment(ctx, scb, config, input, workerID, segment, qp, videoTrack, measures)
+}
+
+// segmentBanding measures the banding the encode of a segment at qp added, on the file the
+// search already encoded (see searchSegmentCAMBI).
+func segmentBanding(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
+	input string, workerID, segment, qp int, videoTrack VideoStream) (banding BandingStats, err error) {
+	_, banding, err = measureSegment(ctx, scb, config, input, workerID, segment, qp, videoTrack, VMAFMeasures{Banding: true})
+	return
+}
+
+// measureSegment measures the encode of a segment at qp against the segment, in a single pass:
+// its VMAF score, the banding it added, or both (see VMAFMeasures).
+func measureSegment(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
+	input string, workerID, segment, qp int, videoTrack VideoStream, measures VMAFMeasures) (
+	vmafStats VMAFStats, banding BandingStats, err error) {
+	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
 	scb.OnSegmentVMAFStart(workerID, videoTrack.NbReadFrames)
-	vmafStats, vmafErr := config.Encoder.ComputeVMAF(ctx, input, output, videoTrack, func(stats ProgressStats) {
+	vmafStats, banding, vmafErr := config.Encoder.ComputeVMAF(ctx, input, output, videoTrack, measures, func(stats ProgressStats) {
 		scb.OnSegmentVMAFProgress(workerID, stats)
 	}, func(msg string) {
 		scb.Debug(workerID, msg)
@@ -783,6 +869,14 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 		err = fmt.Errorf("failed to compute VMAF for segment: %w", vmafErr)
 		return
 	}
-	scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s", segment, qp, vmafStats)
+	// What was measured only: a banding pass has no score, a score pass no banding
+	switch {
+	case measures.Score && measures.Banding:
+		scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s, banding: %s", segment, qp, vmafStats, banding)
+	case measures.Score:
+		scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s", segment, qp, vmafStats)
+	case measures.Banding:
+		scb.Debug(workerID, "Segment %d: QP %d: banding: %s", segment, qp, banding)
+	}
 	return
 }

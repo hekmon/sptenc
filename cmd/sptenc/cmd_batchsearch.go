@@ -557,7 +557,7 @@ var batchsearchCommand = &cli.Command{
 			if err != nil {
 				return fmt.Errorf("candidate %s: %w", candidateStr, err)
 			}
-			runCache.AddRun(batch.results[batch.currentCandidateIndex].QPs)
+			runCache.AddRun(batch.results[batch.currentCandidateIndex].VMAFSearchQPs) // see core.QPSearchResults.VMAFSearchQPs
 
 			// Step 3.D - Ending this candidate
 			var encodedStats os.FileInfo
@@ -622,7 +622,7 @@ var batchsearchCommand = &cli.Command{
 		// this file in the history. The winner is saved even when a final encode replaces its
 		// file: the cache is about which QPs this encoder needs for this VMAF profile, and that
 		// stays valid data whatever happens to the file.
-		if _, _, err := statsCache.AddRun(results.QPs); err != nil {
+		if _, _, err := statsCache.AddRun(results.VMAFSearchQPs); err != nil {
 			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
 		}
 		if finalEncoder != "" {
@@ -682,7 +682,7 @@ var batchsearchCommand = &cli.Command{
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}
 			// The final encode feeds the stats cache of its own encoder.
-			if _, _, err := finalStatsCache.AddRun(results.QPs); err != nil {
+			if _, _, err := finalStatsCache.AddRun(results.VMAFSearchQPs); err != nil {
 				fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
 			}
 
