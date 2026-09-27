@@ -190,7 +190,7 @@ These values come from the [v0 anchors](#for-reference-the-v0-anchors): on both 
 
 | Use Case | Gate | Target value |
 |---|---|---|
-| "I am afraid of deleting my lossless master file" | `--vmaf-mean` + `--vmaf-min` | `99` + `93` ¹ |
+| "I am afraid of deleting my lossless master file" | `--vmaf-mean` + `--vmaf-min` | `99` + `94` ¹ ³ |
 | Archival / mastering | `--vmaf-hmean` | `95` |
 | General viewing, streaming, VOD | `--vmaf-hmean` | `93` (default) ² |
 | Mobile / bandwidth-constrained | `--vmaf-hmean` | `85–90` |
@@ -199,6 +199,8 @@ These values come from the [v0 anchors](#for-reference-the-v0-anchors): on both 
 ¹ With `--vmaf-hmean -1`: the tail gate bounds the bad frames, the mean sets the level (see above).
 
 ² fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically.
+
+³ A minimum one JND below the source, which fidelity scores 100: about 6 points, the rule of thumb of [sptenc thresholds](#sptenc-thresholds), given for the rungs of a bitrate ladder (whole encodes) and applied here to single frames. At a mean of 99 it rarely acts: on 20 segments of the two contents measured, the worst frame stayed at 95 or above on 19, and 94 cost 1% more than 93 (see [BENCHMARKS](BENCHMARKS.md#gates-on-the-two-contents)).
 
 > **93 vs 95?** The 93 target comes from Rassool (RealNetworks, [IEEE BMSB 2017](https://doi.org/10.1109/BMSB.2017.7986143), [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to about 93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (the two best ratings of the 5-level scale of his test, on 4K clips). The 95 target comes from Kah et al. ([Proc. SPIE 11842, Applications of Digital Image Processing XLIV, 2021](https://doi.org/10.1117/12.2593952)): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV viewed from twice its height), a deliberately higher bar. In Ozer's test on the *Meridian* clip, choosing 95 over 93 cost about 1400 kbps on the top rung (clip-specific, not universal). The default targets the first; the jump to 95 remains an explicit opt-in. Both studies used the v0 models: on the episode and the film [measured above](#fidelity-against-v0-on-real-content), v0 scores the fidelity encodes above the gate, at 93 as at 95.
 

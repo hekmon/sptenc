@@ -51,6 +51,8 @@ Per segment, at 93:
 
 At 95, v0 scores 95 or more the segments of fidelity holding 65.1% of the episode's frames (117 segments out of 163) and 93.8% of the film's (208 out of 225).
 
+The master profile of the manual, a mean of 99 and a minimum of 94, estimated on the 20 segments encoded every 2 QPs from 0 to 40 for [the banding survey](#sources-against-themselves), fidelity's harmonic mean standing for its mean (it is never higher): at the highest QP reaching 99, the worst frame is at 95.1 to 98.6 on 19 segments, and at 91.7 on the last one, which a minimum of 93 takes 2 QPs lower and one of 94 4 QPs lower. Over the 20 segments, a minimum of 93 adds 0.7% to the size a mean of 99 gives alone, one of 94 1.7%.
+
 ## Search time
 
 The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93:
