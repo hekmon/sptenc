@@ -105,9 +105,9 @@ Set a threshold to `-1` to disable it, both to turn the gate off; 0 is a thresho
 
 When no QP passes down to the encoder's lowest, the segment is a **CAMBI best effort**, counted apart from the VMAF ones: it keeps the highest QP passing the VMAF thresholds and the mean one, the worst frame threshold given up, and the QP the VMAF search found if even the mean could not be met. A best effort must not buy size for a threshold nothing meets. Knowing that nothing passes takes trying every QP down to the lowest. A segment that is a VMAF best effort has its banding measured all the same, and can be both.
 
-**A mean of 1 is a safety net.** On the two contents measured, no segment came near it at the QPs the VMAF search picked, and the gate lowered none. It is there for smooth gradients, where encoders add bands while fidelity passes: on synthetic ones, it cost almost nothing on clean gradients and made a grainy one over 100 times larger (see [BENCHMARKS](BENCHMARKS.md#the-cambi-gate-on-smooth-gradients)). A lower default would chase CAMBI's own floor: NVENC adds more than 0.5 to a clean radial gradient at every QP from 6 to 42.
+**A mean of 1 is a safety net.** On the two contents measured, no segment came near it at the QPs the VMAF search picked, and the gate lowered none. It is there for smooth gradients, where encoders add bands while fidelity passes: on synthetic ones, it cost almost nothing on clean gradients and made a grainy one over 100 times the size fidelity alone gave it (see [BENCHMARKS](BENCHMARKS.md#the-cambi-gate-on-smooth-gradients)). A lower default would chase CAMBI's own floor: NVENC adds more than 0.5 to a clean radial gradient at every QP from 6 to 42.
 
-**The worst frame is for strict limits**, master encodes for instance. What it catches on real content is short bursts of a few frames, hard to see: a studio logo whose fine texture the encoder flattened into plateaus one code apart, grain on a near-black background turned into flat blocks. Removing that last one made a segment of the episode four times larger (see [BENCHMARKS](BENCHMARKS.md#the-worst-frame-threshold)).
+**The worst frame is for strict limits**, master encodes for instance. What it catches on real content is short bursts of a few frames, hard to see: a studio logo whose fine texture the encoder flattened into plateaus one code apart, grain on a near-black background turned into flat blocks. Removing that last one made a segment of the episode four times the size the VMAF search gave it (see [BENCHMARKS](BENCHMARKS.md#the-worst-frame-threshold)).
 
 **What it costs:** 12 to 15% more search time on both contents (`hevc_nvenc -C 6`), the banding being measured once per segment, at the QP the VMAF search found (see [BENCHMARKS](BENCHMARKS.md#search-time)).
 
@@ -233,15 +233,15 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 ### Encoder selection vs file size
 
-Measured on a 26 min 1080p episode at the default, `hevc_nvenc` against `libx265` preset slow, on an RTX 5090 with a 16 cores / 32 threads CPU (see [BENCHMARKS](BENCHMARKS.md#encoders)):
-
 | | CPU encoders (`libx265`, `libsvtav1`) | Hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) |
 |---|---|---|
-| Output file size | ✅ Smallest | ❌ Larger: 1.18× on the episode |
-| Speed | The episode searched in 62 minutes, 2.4 times its duration | ✅ 3.3 times faster: 18 to 19 minutes, with several segments searched in parallel (`-C`, see below) |
+| Output file size | ✅ Smallest | ❌ Larger |
+| Speed | Slower | ✅ Several times faster |
 | Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size |
 
-One episode is one data point: the size ratio depends on the content and on the score gated (1.44× gated on the model's original score), and the times on the machine. On this one, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
+Measured on one machine, an RTX 5090 with a 16 cores / 32 threads CPU, searching a 26 min 1080p episode at the default (see [BENCHMARKS](BENCHMARKS.md#encoders)): `hevc_nvenc` at preset p7, 6 segments at a time (`-C 6`), took 18 to 19 minutes; `libx265` at preset slow, 3 segments at a time (`-C 3`) and decoding on NVDEC, took 62 minutes, for a video stream 15% smaller than `hevc_nvenc`'s. The times compare these two setups, concurrency included, not the encoders alone (see below).
+
+One episode is one data point: the size gap depends on the content and on the score gated (31% gated on the model's original score), and the times on the machine and on `-C`. On this one, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
 
 > **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes.
 >

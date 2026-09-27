@@ -77,7 +77,7 @@ Where that CPU time goes, per 1080p frame, on a segment of the episode (886 fram
 
 ## Encoders
 
-The episode, `hevc_nvenc` with `-C 6` and `libx265` preset slow with `-C 3` (decoding on NVDEC), at the default (fidelity at 93, the CAMBI gate at a mean of 1) and gated on the v1 original score at 93:
+The episode, `hevc_nvenc` with `-C 6` and `libx265` with `-C 3` (decoding on NVDEC), at sptenc's presets (p7 and slow), at the default (fidelity at 93, the CAMBI gate at a mean of 1) and gated on the v1 original score at 93:
 
 | | `hevc_nvenc`, default | `libx265`, default | `hevc_nvenc`, v1 original | `libx265`, v1 original |
 |---|---|---|---|---|
