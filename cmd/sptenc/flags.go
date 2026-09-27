@@ -376,6 +376,33 @@ func vmafModelFlag(category string) cli.Flag {
 	}
 }
 
+// vmafOriginalFlagName is the flag gating the model's original score instead of fidelity (see
+// setupVMAF).
+//
+// # WHY THIS NAME
+//
+// It is there to compare with published VMAF v1 figures, not to encode: the banding the source
+// already has counts against every encode (see ffmpeg.VMAFScore). Its name says which score it
+// is, the one of the model as libvmaf computes it, and must not make it look like the better
+// setting ("official", "full", "complete" would).
+const vmafOriginalFlagName = "vmaf-original"
+
+// vmafOriginalFlag returns the flag gating (reporting, for a command that gates nothing) the
+// model's original score instead of fidelity.
+func vmafOriginalFlag(category string, gate bool) cli.Flag {
+	usage := "Report the model's original score, its banding feature (CAMBI) included, instead of fidelity: the banding the reference already has then counts against the distorted video (see MANUAL.md, Fidelity and banding)"
+	if gate {
+		usage = "Gate the model's original score, its banding feature (CAMBI) included, instead of fidelity, to compare with published VMAF v1 figures: the banding the source already has then counts against every encode (see MANUAL.md, Fidelity and banding)"
+	}
+	return &cli.BoolFlag{
+		Name:     vmafOriginalFlagName,
+		Usage:    usage,
+		Value:    false,
+		OnlyOnce: true,
+		Category: category,
+	}
+}
+
 // vmafModelValidator refuses the names that can not be handed to libvmaf. Whether libvmaf
 // knows the model is checked before anything starts (see checkLibVMAF).
 func vmafModelValidator(v string) error {
@@ -389,6 +416,7 @@ func vmafModelValidator(v string) error {
 func VMAFFlags() []cli.Flag {
 	return []cli.Flag{
 		vmafModelFlag(vmafProfileCategoryName),
+		vmafOriginalFlag(vmafProfileCategoryName, true),
 		&cli.Float64Flag{
 			Name:      vmafMinFlagName,
 			Usage:     "Minimum acceptable VMAF score for the worst frame.",

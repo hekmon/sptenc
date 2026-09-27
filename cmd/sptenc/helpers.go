@@ -178,11 +178,13 @@ func (vs vmafSetup) passes() []ffmpeg.VMAFMeasures {
 // every pass of the run on pictures of the source's size (see checkVMAFPictures), before any long
 // step.
 //
-// # WHY FIDELITY, ALWAYS
+// # WHY FIDELITY BY DEFAULT
 //
 // The thresholds gate what the encoder did, and a model fed with CAMBI also scores the banding
 // the source already has (see ffmpeg.VMAFScore): fidelity takes it out. A model without CAMBI has
-// a single score, which is its fidelity score: nothing to take out, nothing to say.
+// a single score, which is its fidelity score: nothing to take out, nothing to say. The original
+// score is for comparisons with published v1 figures (see vmafOriginalFlagName): with a model
+// without CAMBI, it is the same score, and the flag only earns a warning.
 func setupVMAF(ctx context.Context, cmd *cli.Command, out io.Writer, model ffmpeg.VMAFModel,
 	stream *ffmpeg.FFProbeBinaryStream, gate bool) (setup vmafSetup, err error) {
 	setup.model = model
@@ -194,13 +196,29 @@ func setupVMAF(ctx context.Context, cmd *cli.Command, out io.Writer, model ffmpe
 		return
 	}
 	setup.score = ffmpeg.VMAFScoreFidelity
-	if setup.modelCAMBI {
+	switch original := cmd.Bool(vmafOriginalFlagName); {
+	case setup.modelCAMBI && original:
+		setup.score = ffmpeg.VMAFScoreOriginal
+		lead, against := "Scoring with the original score", "the reference already has counts against the distorted video"
+		if gate {
+			lead, against = "The VMAF thresholds gate the original score", "the source already has counts against every encode"
+		}
+		fmt.Fprintf(out, "%s of %s (--%s), its banding feature (CAMBI) included: the banding %s (see MANUAL.md, Fidelity and banding)\n",
+			lead, model, vmafOriginalFlagName, against)
+	case setup.modelCAMBI:
 		lead := "Scoring fidelity"
 		if gate {
 			lead = "The VMAF thresholds gate fidelity"
 		}
 		fmt.Fprintf(out, "%s: the score of %s with its banding feature (CAMBI) set to zero, 100 for the source against itself (see MANUAL.md, Fidelity and banding)\n",
 			lead, model)
+	case original:
+		verb := "reports"
+		if gate {
+			verb = "gates on"
+		}
+		fmt.Fprintf(out, "WARNING: --%s has no effect with %s: this model has no CAMBI term, so the score sptenc %s is already its original one\n",
+			vmafOriginalFlagName, model, verb)
 	}
 	if gate {
 		if setup.cambi, err = resolveCAMBIGate(cmd, setup.modelCAMBI); err != nil {

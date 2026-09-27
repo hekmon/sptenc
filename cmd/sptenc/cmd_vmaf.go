@@ -36,6 +36,7 @@ var vmafCommand = &cli.Command{
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		flags = append(flags,
 			vmafModelFlag("VMAF"),
+			vmafOriginalFlag("VMAF", false),
 			&cli.StringFlag{
 				Name:             tmpDirFlagName,
 				Aliases:          []string{"t"},

@@ -44,8 +44,8 @@ var cacheCommand = &cli.Command{
 	Usage:    "Manage the persistent QP search statistics cache",
 	Description: "Inspect and delete the QP history cache files that speed up future encodes.\n\n" +
 		"Each cache file is named after the encoder, the VMAF model and the score it gated (fidelity,\n" +
-		"or the model's original score), the VMAF profile, and the optional cache profile that\n" +
-		"produced it. The cache command decodes these filenames so you can see exactly which\n" +
+		"or the model's original score with --" + vmafOriginalFlagName + "), the VMAF profile, and the optional\n" +
+		"cache profile that produced it. The cache command decodes these filenames so you can see exactly which\n" +
 		"thresholds and content types each entry represents without guessing from opaque hashes.\n" +
 		"Entries are designated by the index 'list' shows in its first column.",
 	Commands: []*cli.Command{
