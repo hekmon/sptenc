@@ -8,6 +8,7 @@ The measurements behind the quality, banding, search time, file size and disk sp
 4. [Encoders](#encoders)
 5. [Banding](#banding)
 6. [Synthetic clips](#synthetic-clips)
+7. [Minimum picture sizes](#minimum-picture-sizes)
 
 ## Setup
 
@@ -161,3 +162,16 @@ CAMBI rates the dark gradient 6.65 and its 8-bit-like steps 22.48: 15.83 added. 
 - dark gradient, one 10-bit code every 12 pixels from 64 to 223: `geq=lum='64+floor(X/12)':cb=512:cr=512` on a 1920×1080 `color=black`
 - posterized to N levels: `lum='64+floor(floor((X/12)/S)*S)'` with S = 160/N
 - 8-bit-like steps, 4 codes every 48 pixels, the same slope: `lum='64+4*floor(X/48)'`
+
+## Minimum picture sizes
+
+Below a minimum size, libvmaf can not measure a picture, and it does not always say so. Tested with libvmaf 3.2.1 the way sptenc's probe does: two frames of `testsrc2` at that size, in 10 bits, scored against themselves; a size passes when ffmpeg exits successfully with a report holding every metric the pass asks for. The sizes on each side of the limits found:
+
+| Pass | Passes | Fails |
+|---|---|---|
+| `vmaf_v1.0.16_3d0h` and `vmaf_v1.0.16_1d5h_2160`, the models sptenc selects | 216×160, 1864×160 | 216×159 (crash), 215×160 (no report, ffmpeg exits successfully), 1872×160 and 1920×160 (crash once the report is written) |
+| `vmaf_v1.0.16_5d0h`, phone | 472×266, 480×270 | 472×265, 470×264 (crash) |
+| `vmaf_v1.0.16_3d0h_2160`, 4K at 3 times the height | 566×318, 568×320 | 564×317 (crash) |
+| The banding measure, whatever the model | 216×160, 160×216 | 215×160, 215×215 (a report without frames, ffmpeg exits successfully) |
+
+The banding measure needs 216 pixels on one side at least, as libvmaf's CAMBI requires (`libvmaf/src/feature/cambi.c`). The v1 models feed on CAMBI, hence their 216 pixels too: a v0 model, without CAMBI, scores 215×160.
