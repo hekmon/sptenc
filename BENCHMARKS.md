@@ -1,6 +1,6 @@
 # Split Encoder - Benchmarks
 
-The measurements behind the figures of the [manual](MANUAL.md). One machine, two contents, synthetic clips: they tell what happened there, not what will happen on yours.
+The measurements behind the quality, banding, search time, file size and disk space figures of the [README](README.md) and the [manual](MANUAL.md). One machine, two contents, synthetic clips: they tell what happened there, not what will happen on yours.
 
 1. [Setup](#setup)
 2. [Gates on the two contents](#gates-on-the-two-contents)
@@ -12,7 +12,7 @@ The measurements behind the figures of the [manual](MANUAL.md). One machine, two
 ## Setup
 
 - **Machine:** AMD Ryzen 9 9950X3D (16 cores, 32 threads), NVIDIA RTX 5090, Linux under WSL2 on Windows. ffmpeg n9.0.2 with libvmaf f85a8536 (a September 2026 build).
-- **Contents:** two 8-bit 1080p Blu-ray remuxes at 23.976 fps. A 26 min anime episode with dark gradients (37,393 frames, cut in 163 segments at threshold 8.0055) and a 101 min live-action film (145,397 frames, 225 segments at threshold 10), both with the default 5 s minimum segment length. Every run of a content encoded the very same segments.
+- **Contents:** two 8-bit 1080p Blu-ray remuxes at 23.976 fps. A 26 min anime episode with dark gradients (37,393 frames, cut in 163 segments at threshold 8.0055) and a 101 min live-action film (145,397 frames, 225 segments at threshold 10), both with the default 5 s minimum segment length. Every run of a content encoded the very same segments. Source files of 4.04 and 23.77 GiB, lossless FFV1 masters of 14.29 and 59.30 GiB (33.0 and 35.2 GiB per hour).
 - **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others.
 - **Scores of the outputs:** each output scored against its source (or its lossless master, the same pictures), the whole file at once, then split back into its segments.
 - **Durations** are wall clock times, read from the timestamps of the logs. The Linux kernel of that machine had its clock tick adjusted, running from 3% slow to 10% fast depending on the day, and every duration measured on it ran with it, the ones sptenc prints included: only the timestamps follow the host's clock.

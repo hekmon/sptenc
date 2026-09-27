@@ -160,7 +160,7 @@ Run `sptenc check` to verify everything is found and usable: it loads both VMAF 
 
 ## Going further
 
-Still here? The [manual](MANUAL.md) covers everything else: VMAF models and thresholds, encoder choice and file size, scene detection, the QP search and its cache, the output and its tags, and how sptenc compares to other approaches.
+Still here? The [manual](MANUAL.md) covers everything else: VMAF models and thresholds, encoder choice and file size, scene detection, the QP search and its cache, the output and its tags, and how sptenc compares to other approaches. The measurements behind the figures, on two real contents and synthetic clips, are in [BENCHMARKS](BENCHMARKS.md).
 
 ## License
 

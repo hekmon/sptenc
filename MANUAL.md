@@ -1,6 +1,6 @@
 # Split Encoder - Manual
 
-Start with the [README](README.md). This is the "tell me everything" page.
+Start with the [README](README.md). This is the "tell me everything" page. The measurements behind its figures on quality, banding, search time, file size and disk space are in [BENCHMARKS](BENCHMARKS.md).
 
 1. [Input Requirements](#input-requirements)
 2. [Disk space](#disk-space)
@@ -87,7 +87,7 @@ Forcing one is for comparisons: scoring the way the [published anchors](#for-ref
 
 ### Fidelity and banding
 
-The v1 models put two different measures into one score. Their full-reference features (ADM with an additive impairment term, motion, chroma) measure what the encode lost against its source. CAMBI, fed to the same model, rates how banded the encoded picture is on its own, without looking at the source: the banding a source already has counts as if the encoder had made it. A banded source scores below 100 against itself: a smooth 10-bit gradient 95.9, a dark scene of the film [measured below](#fidelity-against-v0-on-real-content) 91.8. Scored against themselves with the model's own score, the segments of that film have a median of 98.8, those of the anime episode 96.9, down to 90.9. Behind a gate, that is a penalty for something the encoder did not do, and it even bends the search: an encoder smooths the source's steps, so CAMBI finds the encodes less banded as the QP rises, and the score of that dark scene peaked at 94.1 at QP 4 before falling back to 93.6 at QP 0. sptenc promises a floor on what the encoder did, so it takes the two measures apart:
+The v1 models put two different measures into one score. Their full-reference features (ADM with an additive impairment term, motion, chroma) measure what the encode lost against its source. CAMBI, fed to the same model, rates how banded the encoded picture is on its own, without looking at the source: the banding a source already has counts as if the encoder had made it. A banded source scores below 100 against itself: a smooth 10-bit gradient 95.9, a dark scene of the film 91.8 (see [BENCHMARKS](BENCHMARKS.md#sources-against-themselves)). Scored against themselves with the model's own score, the segments of that film have a median of 98.8, those of the anime episode 96.9, down to 90.9. Behind a gate, that is a penalty for something the encoder did not do, and it even bends the search: an encoder smooths the source's steps, so CAMBI finds the encodes less banded as the QP rises, and the score of that dark scene peaked at 94.1 at QP 4 before falling back to 93.6 at QP 0. sptenc promises a floor on what the encoder did, so it takes the two measures apart:
 
 - **The VMAF thresholds gate fidelity**: the score of the same model with its CAMBI term set to zero (libvmaf's `cambi_max_val` option), which scores a source 100 against itself. It never rose with the QP on 20 segments of the two contents sampled from QP 0 to 40, where the model's own score rose on 15 of them. On pictures CAMBI rates 0, coarse posterization included, both scores are the same.
 - **The banding the encoder added is gated on its own**, by CAMBI in full-reference mode: it rates each frame of the encode and the same frame of the source, with the settings of the v1 models, and keeps the difference when the encode is more banded (none when the encoder removed some). Fidelity alone does not see it well: the smooth gradient above turned into 8-bit-like steps scores 95.2 with fidelity, a pass at 95, while CAMBI rates the steps 22.5, against 6.7 for the gradient (see [What VMAF sees](#what-vmaf-sees-and-what-it-does-not)).
@@ -160,7 +160,7 @@ If your content is exposed to one of these (flicker, HDR), have a look at a few 
 
 ### sptenc thresholds
 
-VMAF scores range from 0 to 100 with the models sptenc offers. A difference of about 6 points is often quoted as one Just Noticeable Difference (JND): a rule of thumb from a contact at Netflix ([quoted by Ozer](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html)), established with the v0 models, not a threshold measured on your content.
+VMAF scores range from 0 to 100 with the models sptenc selects. A difference of about 6 points is often quoted as one Just Noticeable Difference (JND): a rule of thumb from a contact at Netflix ([quoted by Ozer](https://streaminglearningcenter.com/codecs/finding-the-just-noticeable-difference-with-netflix-vmaf.html)), established with the v0 models, not a threshold measured on your content.
 
 | Metric | Flag | Default | Meaning (threshold T) |
 |---|---|---|---|
@@ -304,7 +304,7 @@ If you care more about tight quality control than file size, skip `batchsearch`.
 
 ### The `--min-segment-length` guardrail
 
-The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbour.
+The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbor.
 
 It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
 
@@ -474,7 +474,7 @@ Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc
 | Dial | The encoder's own quality setting: CRF (x264, x265, SVT-AV1), CQ level (aomenc, vpxenc), quantizer (rav1e) | Constant QP (see [why](#why-qp-instead-of-crf)) |
 | Encoders | aomenc, SVT-AV1, rav1e, vpxenc, x264, x265 (their command line tools), with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) through ffmpeg, with fixed opinionated parameters |
 | GPU | Decoding (DGDecNV), SSIMULACRA2 and Butteraugli (Vapoursynth-HIP) | Encoding (to search fast then encode the final file on CPU with `batchsearch --final-encode`, or as the final encoder) and decoding |
-| Scene cuts | av-scenechange, cuts 24 frames apart at least, scenes longer than 10 s split further (defaults). Frame exact chunks piped from a VapourSynth source plugin, no intermediate file; without one, keyframe cuts into intermediate files (`hybrid`, can lose frames with open GOPs) or `select`, exact but decoding the whole source for every chunk | ffmpeg `scdet`, scenes shorter than 5 s (by default) merged into their shorter neighbour, no maximum length; frame exact cuts of a lossless intermediate (large: see [disk space](#disk-space)); a search of the scene threshold itself (`batchsearch`) |
+| Scene cuts | av-scenechange, cuts 24 frames apart at least, scenes longer than 10 s split further (defaults). Frame exact chunks piped from a VapourSynth source plugin, no intermediate file; without one, keyframe cuts into intermediate files (`hybrid`, can lose frames with open GOPs) or `select`, exact but decoding the whole source for every chunk | ffmpeg `scdet`, scenes shorter than 5 s (by default) merged into their shorter neighbor, no maximum length; frame exact cuts of a lossless intermediate (large: see [disk space](#disk-space)); a search of the scene threshold itself (`batchsearch`) |
 | Verification | Frame count of every chunk; optional VMAF plot of the result | Frame counts of every segment and of the final file, final VMAF of the whole file embedded in its tags |
 | Learning | None: every chunk starts its search from the middle of the quantizer range | QP statistics of the previous segments and encodes, to start the next searches closer |
 | Interrupted run | Can be resumed | Starts over |
