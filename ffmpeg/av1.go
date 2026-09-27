@@ -208,7 +208,8 @@ const (
 	AV1SVTAV1PresetMin = 1
 	// AV1SVTAV1PresetMax is the fastest preset.
 	AV1SVTAV1PresetMax = 13
-	// AV1SVTAV1PresetDefault corresponds to the libx265 "slow" preset, recommended for final encoding.
+	// AV1SVTAV1PresetDefault is the preset sptenc encodes with: a compromise between compression
+	// and the time of a search that encodes every segment several times, as libx265's "slow" is.
 	AV1SVTAV1PresetDefault = 3
 )
 

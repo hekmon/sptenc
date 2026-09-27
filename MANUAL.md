@@ -381,9 +381,9 @@ The CAMBI tags are written when the gate is on.
 
 ## Base ffmpeg encode options
 
-These are the opinionated defaults sptenc passes to ffmpeg. They are intentionally not configurable: the goal is to let you tune **VMAF thresholds** and **scene detection**, not encoder minutiae. If you need full control over every ffmpeg flag, ffmpeg itself is the right tool.
+These are the options sptenc passes to ffmpeg. They are fixed, not defaults: the QP is the only dial, so that the search, its statistics and the [QP cache](#persistent-stats-from-previous-runs) work the same way on every run, and what you tune is the **VMAF thresholds** and the **scene detection**, not encoder minutiae. If you need full control over every ffmpeg flag, ffmpeg itself is the right tool.
 
-The defaults are selected for a single goal: **a VMAF target met by every segment, at the smallest file size**. Every option is chosen with that trade-off in mind.
+They aim at **a VMAF target met by every segment, at the smallest file size**, with one compromise: the search encodes every segment several times, so `libx265` runs at preset `slow` and `libsvtav1` at preset 3, not at their slowest settings. NVENC runs at its best preset, `p7`, the VA-API, D3D12VA and VideoToolbox encoders at their default settings. What the other options do has been checked, not always what they are worth at a VMAF target: NVENC's lookahead makes smaller files at the same QP, and its adaptive quantization stays active under constant QP (see [Why QP instead of CRF?](#why-qp-instead-of-crf)), but whether that adaptive quantization saves or costs size at a given VMAF has not been measured.
 
 > **10-bit output is mandatory.** Every encoder gets 10-bit 4:2:0 frames (`main10` for HEVC, `main` for AV1 which includes 10-bit): `yuv420p10le` for the CPU encoders, and `p010` for the hardware ones, the layout their APIs require (the same samples, with the chroma planes interleaved and the values stored in the high bits). Repacking one into the other is lossless: checked frame by frame for the CUDA and software conversions sptenc uses (VA-API converts on the GPU, not checked). 10-bit greatly reduces banding and improves compression efficiency at low bitrates — it is the modern baseline for quality encoding.
 >
