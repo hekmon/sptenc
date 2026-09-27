@@ -73,7 +73,9 @@ var batchsearchCommand = &cli.Command{
 		"     N scenes compared to the previous one. N is auto-tuned so the total never exceeds your\n" +
 		"     --" + maxCandidatesFlagName + " budget, but it will not go below --" + minDropFlagName + ".\n" +
 		"  3. Encodes each candidate threshold and tracks resulting file size.\n" +
-		"  4. Stops after --" + strikesFlagName + " consecutive candidates fail to reduce file size.\n\n" +
+		"  4. Stops after --" + strikesFlagName + " consecutive candidates fail to reduce file size.\n" +
+		"Every candidate is searched against the VMAF and banding (CAMBI) thresholds, as encode does\n" +
+		"(see 'sptenc encode --help'), and so is the final encode: the sizes compared are final sizes.\n\n" +
 		"WHAT THIS IS NOT\n" +
 		"There is no single right threshold. Finer splitting gives hard passages their own QP and\n" +
 		"keeps VMAF metrics honest, but inflates file size with keyframe overhead and starves B/P-frame\n" +
@@ -182,7 +184,8 @@ var batchsearchCommand = &cli.Command{
 		"to expect from a CPU encoder). Being the longest encode of the whole process, it is the one\n" +
 		"gaining the most from it.\n\n" +
 		"CACHE ISOLATION\n" +
-		"By default all encodes for the same encoder + VMAF profile combo share a single QP history cache.\n" +
+		"By default all encodes for the same encoder, VMAF model, score gated and VMAF profile share a\n" +
+		"single QP history cache.\n" +
 		"If you encode content with wildly different visual characteristics (e.g. grainy film vs. clean CGI),\n" +
 		"sharing history can pollute the model and slow convergence. Use --" + cacheProfileFlagName + " to create\n" +
 		"a separate cache namespace for a specific type of content (e.g. pixar_animation, sopranos_s01, grainy_90s).",

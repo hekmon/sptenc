@@ -22,8 +22,13 @@ var vmafCommand = &cli.Command{
 	Category: "Tooling",
 	Usage:    "Compute VMAF between a reference and a distorted video",
 	Description: "Compare a distorted (encoded) video against its reference (original) using VMAF.\n\n" +
-		"This computes the full VMAF report and prints summary statistics including percentiles,\n" +
-		"mean, harmonic mean, min and max scores.\n\n" +
+		"This computes the full VMAF report and prints the statistics of fidelity, the score of the\n" +
+		"model without its banding feature (CAMBI), including percentiles, mean, harmonic mean, min and\n" +
+		"max: the banding the reference already has does not count against the distorted video.\n" +
+		"--" + vmafOriginalFlagName + " prints the model's own score instead. The harmonic mean of the other score\n" +
+		"follows, then the banding the distorted video adds to the reference, as CAMBI rates it (see\n" +
+		"MANUAL.md, Fidelity and banding). A VMAF model without CAMBI (a v0 one) has a single score,\n" +
+		"printed alone.\n\n" +
 		"MODEL\n" +
 		"The VMAF model is selected from the height of the reference (see MANUAL.md, Models):\n" +
 		"--" + vmafModelFlagName + " forces one. libvmaf 3.2.0 or newer is required (VMAF v1 models).\n\n" +

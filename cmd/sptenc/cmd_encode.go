@@ -49,10 +49,21 @@ var encodeCommand = &cli.Command{
 		fmt.Sprintf("Each VMAF metric flag sets the minimum acceptable VMAF score (%d-%d). If a segment falls\n", core.VMAFMinValue, core.VMAFMaxValue) +
 		fmt.Sprintf("below any enabled threshold, it is re-encoded at a lower QP. Set a value to %d to disable\n", core.VMAFOffValue) +
 		"that metric. The VMAF model (v1, libvmaf 3.2.0 or newer) is selected from the height of the\n" +
-		"source, --" + vmafModelFlagName + " forces one.\n\n" +
+		"source, --" + vmafModelFlagName + " forces one. The thresholds gate fidelity, the score of the model\n" +
+		"without its banding feature (CAMBI): the banding the source already has does not count against\n" +
+		"the encode. --" + vmafOriginalFlagName + " gates the model's own score instead, to compare with published\n" +
+		"VMAF v1 figures (see MANUAL.md, Fidelity and banding).\n\n" +
+		"BANDING\n" +
+		"Fidelity does not see the fine bands an encoder can leave on smooth gradients: CAMBI measures\n" +
+		"the banding the encoder added, once per segment, at the QP the VMAF search found. Above\n" +
+		"--" + cambiMeanFlagName + " (its average over the frames, 1 by default) or --" + cambiMaxFlagName + " (its worst frame, off by\n" +
+		"default), the QPs below are tried one at a time until one passes both. -1 disables a threshold,\n" +
+		"both turn the gate off, 0 allows no added banding at all. With a VMAF model without CAMBI (a v0\n" +
+		"one), the gate is off unless a CAMBI threshold is set.\n\n" +
 		"STATS CACHE\n" +
-		"The cache records QP search statistics to speed up future encodes with the same encoder\n" +
-		"and VMAF profile. Different content types (clean animation vs grainy film) need very\n" +
+		"The cache records QP search statistics to speed up future encodes with the same encoder,\n" +
+		"VMAF model, score gated and VMAF profile: the QPs the VMAF search found, before the banding\n" +
+		"gate could lower them. Different content types (clean animation vs grainy film) need very\n" +
 		"different QP distributions, so mixing them slows convergence. Use --" + cacheProfileFlagName + " to keep\n" +
 		"these histories separate.\n\n" +
 		"HARDWARE: USE EVERYTHING YOU HAVE\n" +
