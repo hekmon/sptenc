@@ -229,21 +229,15 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 ### Encoder selection vs file size
 
+Measured on a 26 min 1080p episode at the default, `hevc_nvenc` against `libx265` preset slow, on an RTX 5090 with a 16 cores / 32 threads CPU (see [BENCHMARKS](BENCHMARKS.md#encoders)):
+
 | | CPU encoders (`libx265`, `libsvtav1`) | Hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) |
 |---|---|---|
-| Output file size | ✅ Smallest | ❌ Larger: 1.18× on the episode measured below |
-| Speed | The 26 min episode below searched in 62 minutes, 2.4 times its duration | ✅ 3.3 times faster: the same episode searched in 18 to 19 minutes, with several segments searched in parallel (`-C`, see below) |
-| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size (the CPU encode was 15% smaller below) |
+| Output file size | ✅ Smallest | ❌ Larger: 1.18× on the episode |
+| Speed | The episode searched in 62 minutes, 2.4 times its duration | ✅ 3.3 times faster: 18 to 19 minutes, with several segments searched in parallel (`-C`, see below) |
+| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size |
 
-Same 26 min 1080p Blu-ray remux episode, same threshold (163 segments), cold cache, on an RTX 5090 with a 16 cores / 32 threads CPU, at the default (fidelity at harmonic mean 93, the CAMBI gate at a mean of 1):
-
-| | `hevc_nvenc`, `-C 6` | `libx265` preset slow, `-C 3`, decoding on NVDEC |
-|---|---|---|
-| QP search | 18m20s, 18m51s (two runs) | 1h2m6s |
-| Video stream | 200.9 MiB | 170.5 MiB |
-| Attempts per segment | 3.72 | 3.88 |
-
-One episode is one data point: the size ratio depends on the content and on the score gated (on the model's original score, the same encoders gave 283.4 and 196.5 MiB, the CPU encode 31% smaller, see [BENCHMARKS](BENCHMARKS.md#encoders)), and the times on the machine. On this one, the GPU search was limited by the CPU (busy 83% of the time), which decodes the lossless FFV1 intermediate twice per attempt (once for the encode, once as the VMAF reference) and computes VMAF, not by the GPU (NVENC busy 22 to 23% of the time): a smaller CPU would have made it slower, smaller GPUs were not measured.
+One episode is one data point: the size ratio depends on the content and on the score gated (1.44× gated on the model's original score), and the times on the machine. On this one, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
 
 > **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes.
 >
