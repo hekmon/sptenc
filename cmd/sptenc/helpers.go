@@ -153,6 +153,13 @@ func (vs vmafSetup) scoreMeasures(banding bool) ffmpeg.VMAFMeasures {
 	}
 }
 
+// cachesOriginalScore reports whether the QP statistics of the run are the ones of the model's
+// original score, which a cache keeps apart (see core.NewStatsCacheHistory): the score gated is
+// the original one, and it is not the model's fidelity score (the model feeds on CAMBI).
+func (vs vmafSetup) cachesOriginalScore() bool {
+	return vs.modelCAMBI && vs.score == ffmpeg.VMAFScoreOriginal
+}
+
 // passes returns every kind of libvmaf pass the run makes (see checkVMAFPictures): the gated score
 // (the VMAF search, the final score), and with the CAMBI gate on, the banding alone (at the QP of
 // the VMAF search) and both at once (the walk below it, see core.QPSearchConfig.CAMBIAuditor).

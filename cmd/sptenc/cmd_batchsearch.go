@@ -464,7 +464,7 @@ var batchsearchCommand = &cli.Command{
 			return fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
 		}
 		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax,
-			setup.model.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
+			setup.model.String(), setup.cachesOriginalScore(), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to create stats cache: %w", err)
 		}
@@ -673,7 +673,7 @@ var batchsearchCommand = &cli.Command{
 				return fmt.Errorf("unsupported final encoder %s", finalEncoderAdapter.Name())
 			}
 			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter.Name(), finalQPMin, finalQPMax,
-				setup.model.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
+				setup.model.String(), setup.cachesOriginalScore(), vmafAuditor, cmd.String(cacheProfileFlagName))
 			if err != nil {
 				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
 			}

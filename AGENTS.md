@@ -244,7 +244,7 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 **Critical test files:**
 - `core/qpsearch_test.go` — Convergence, best-effort fallback, cache guidance, ephemeral convergence, multi-segment runs, error propagation from `Encode`/`ComputeVMAF`/`ProbeStream`, `KeepInvalidQP` behavior.
 - `core/predictor_test.go` — Interpolation accuracy, extrapolation clamping, VMAF 100 ceiling adaptation, monotonicity, insufficient-point errors.
-- `core/cache_persistent_test.go` and `core/cache_ephemeral_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability, the one-segment seed weight.
+- `core/cache_persistent_test.go` and `core/cache_ephemeral_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability and golden names (the original score marker, fidelity without one), the one-segment seed weight.
 - `core/vmaf_test.go` — Checker construction errors, boundary values, active/inactive threshold combinations.
 - `core/cambi_test.go` — The CAMBI checker (off values, 0, boundaries), and the stage through `FindAllSegmentsQP`: the stage off calling the encoder as before, a pass at the VMAF search QP encoding nothing more, one step down, reuse of the VMAF search's encodes, a non-monotonic hump, both best efforts, a VMAF best effort measured, `KeepInvalidQP` with a walk, the frame count on the QP kept, the cache learning the VMAF search QP, concurrent segments, and QPs below the VMAF search QP failing the VMAF thresholds.
 - `pipeline/encoder_test.go` — The passes of the adapter against the real ffmpeg (skipped without it): what the search asks for is what it gets, and a banding pass writes its own report.

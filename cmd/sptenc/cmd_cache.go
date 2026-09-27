@@ -43,7 +43,8 @@ var cacheCommand = &cli.Command{
 	Category: "Tooling",
 	Usage:    "Manage the persistent QP search statistics cache",
 	Description: "Inspect and delete the QP history cache files that speed up future encodes.\n\n" +
-		"Each cache file is named after the encoder, VMAF profile, and optional cache profile that\n" +
+		"Each cache file is named after the encoder, the VMAF model and the score it gated (fidelity,\n" +
+		"or the model's original score), the VMAF profile, and the optional cache profile that\n" +
 		"produced it. The cache command decodes these filenames so you can see exactly which\n" +
 		"thresholds and content types each entry represents without guessing from opaque hashes.\n" +
 		"Entries are designated by the index 'list' shows in its first column.",
@@ -57,12 +58,12 @@ var cacheListCommand = &cli.Command{
 	Name:    "list",
 	Aliases: []string{"l"},
 	Usage:   "List all cached QP history entries",
-	Description: "Scan the cache directory, decode each filename to show the encoder, VMAF profile,\n" +
-		"and optional cache profile, then read the JSON contents to display run count, total segments,\n" +
-		"and mean QP.\n\n" +
+	Description: "Scan the cache directory, decode each filename to show the encoder, VMAF model and\n" +
+		"score gated, VMAF profile, and optional cache profile, then read the JSON contents to display\n" +
+		"run count, total segments, and mean QP.\n\n" +
 		"The first column is the index 'sptenc cache delete' takes. Entries are sorted by encoder, VMAF\n" +
-		"model, cache profile, then VMAF thresholds: an index only changes when a cache file is created\n" +
-		"or deleted, not when an encode adds a run to one.\n\n" +
+		"model, score, cache profile, then VMAF thresholds: an index only changes when a cache file is\n" +
+		"created or deleted, not when an encode adds a run to one.\n\n" +
 		"Cache files that can not be read are listed below the table with their own index: an encode\n" +
 		"needing one of them stops until it is deleted.",
 	Flags: []cli.Flag{
@@ -266,11 +267,38 @@ func sortCacheEntries(entries []cacheEntry) {
 		return cmp.Or(
 			strings.Compare(a.identity.Encoder, b.identity.Encoder),
 			strings.Compare(a.identity.VMAFModel, b.identity.VMAFModel),
+			compareScores(a.identity, b.identity),
 			strings.Compare(a.identity.CacheProfile, b.identity.CacheProfile),
 			compareThresholds(a.identity.Profile, b.identity.Profile),
 			strings.Compare(a.filename, b.filename),
 		)
 	})
+}
+
+// compareScores puts the fidelity statistics of a model before the ones of its original score.
+func compareScores(a, b core.CacheFileIdentity) int {
+	switch {
+	case a.OriginalScore == b.OriginalScore:
+		return 0
+	case b.OriginalScore:
+		return -1
+	default:
+		return 1
+	}
+}
+
+// cacheScore returns the score a cache file's statistics were gathered on: fidelity, the only
+// score of a model without CAMBI, unless the name has the original score marker (see
+// core.NewStatsCacheHistory). Nothing for the files named before the model was.
+func cacheScore(identity core.CacheFileIdentity) string {
+	switch {
+	case identity.OriginalScore:
+		return "original"
+	case identity.VMAFModel == "":
+		return "-"
+	default:
+		return "fidelity"
+	}
 }
 
 // thresholdsOrder is the order VMAF thresholds are displayed and sorted in.
@@ -343,7 +371,7 @@ func printCacheEntries(entries []cacheEntry) {
 			},
 		}),
 	)
-	t.Header("#", "Encoder", "Model", "Profile", "VMAF Thresholds", "Runs", "Segments", "Mean QP", "Stddev QP", "Size", "Modified")
+	t.Header("#", "Encoder", "Model", "Score", "Profile", "VMAF Thresholds", "Runs", "Segments", "Mean QP", "Stddev QP", "Size", "Modified")
 	var (
 		rows       int
 		unreadable []cacheEntry
@@ -372,6 +400,7 @@ func printCacheEntries(entries []cacheEntry) {
 			strconv.Itoa(e.index),
 			e.identity.Encoder,
 			model,
+			cacheScore(e.identity),
 			profile,
 			thresholdStr,
 			strconv.Itoa(e.runs),
@@ -402,6 +431,9 @@ func describeCacheIdentity(identity core.CacheFileIdentity) string {
 	parts := []string{identity.Encoder}
 	if identity.VMAFModel != "" {
 		parts = append(parts, identity.VMAFModel)
+	}
+	if identity.OriginalScore {
+		parts = append(parts, "original score")
 	}
 	if identity.CacheProfile != "" {
 		parts = append(parts, "profile "+strconv.Quote(identity.CacheProfile))

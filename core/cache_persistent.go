@@ -29,12 +29,13 @@ type StatsCache interface {
 }
 
 // NewStatsCacheHistory initializes a stats cache for the given encoder name, QP range, VMAF model,
-// VMAF profile, and optional user-provided cache profile. It loads any existing cache from disk or
+// score gated (originalScore: the model's original score, see computeCacheStatsFileName), VMAF
+// profile, and optional user-provided cache profile. It loads any existing cache from disk or
 // starts with an empty history.
-func NewStatsCacheHistory(dir string, encoderName string, qpMin, qpMax int, vmafModel string, profile VMAFChecker, cacheProfile string) (
-	sch *StatsCacheHistory, err error) {
+func NewStatsCacheHistory(dir string, encoderName string, qpMin, qpMax int, vmafModel string, originalScore bool,
+	profile VMAFChecker, cacheProfile string) (sch *StatsCacheHistory, err error) {
 	sch = &StatsCacheHistory{
-		path:  filepath.Join(dir, computeCacheStatsFileName(encoderName, vmafModel, profile, cacheProfile)),
+		path:  filepath.Join(dir, computeCacheStatsFileName(encoderName, vmafModel, originalScore, profile, cacheProfile)),
 		qpMin: qpMin,
 		qpMax: qpMax,
 	}
@@ -229,19 +230,23 @@ func (sch *StatsCacheHistory) saveStats() error {
 
 // CacheFileIdentity holds the decoded components of a cache filename.
 type CacheFileIdentity struct {
-	Encoder      string
-	VMAFModel    string
-	Profile      VMAFChecker
-	CacheProfile string
+	Encoder   string
+	VMAFModel string
+	// OriginalScore tells that the statistics are of the model's original score, not of its
+	// fidelity score (see computeCacheStatsFileName).
+	OriginalScore bool
+	Profile       VMAFChecker
+	CacheProfile  string
 }
 
 const (
-	CacheFilePrefix        = "qphistory_"
-	cacheFileMarker        = "_vmaf-"
-	cacheFileModelMarker   = ".model~"
-	cacheFileVMAFSeparator = "|"
-	CacheFileExtension     = ".json"
-	cacheLockExtension     = ".lock"
+	CacheFilePrefix              = "qphistory_"
+	cacheFileMarker              = "_vmaf-"
+	cacheFileModelMarker         = ".model~"
+	cacheFileOriginalScoreMarker = "~original"
+	cacheFileVMAFSeparator       = "|"
+	CacheFileExtension           = ".json"
+	cacheLockExtension           = ".lock"
 )
 
 // ErrCacheFileBusy is returned by RemoveCacheFile when another process holds the cache file lock.
@@ -306,7 +311,10 @@ func ParseCacheFilename(name string) (identity CacheFileIdentity, ok bool) {
 		ok = false
 		return
 	}
-	// Extract optional model from beforeMarker
+	// Extract the optional original score marker, then the optional model, from beforeMarker
+	if identity.OriginalScore = strings.HasSuffix(beforeMarker, cacheFileOriginalScoreMarker); identity.OriginalScore {
+		beforeMarker = strings.TrimSuffix(beforeMarker, cacheFileOriginalScoreMarker)
+	}
 	if modelIdx := strings.LastIndex(beforeMarker, cacheFileModelMarker); modelIdx != -1 {
 		identity.Encoder = beforeMarker[:modelIdx]
 		identity.VMAFModel = beforeMarker[modelIdx+len(cacheFileModelMarker):]
@@ -367,10 +375,25 @@ func parseVMAFBlob(blob string) (VMAFChecker, bool) {
 	return vc, true
 }
 
-func computeCacheStatsFileName(encoderName string, vmafModel string, profile VMAFChecker, cacheProfile string) (filename string) {
+// computeCacheStatsFileName returns the name of the cache file of an encoder, a VMAF model, the
+// score gated, a VMAF profile and a cache profile:
+// qphistory_<encoder>.model~<model>[~original]_vmaf-<thresholds>[_<cache profile>].json.
+//
+// # WHY A MARKER FOR THE ORIGINAL SCORE ONLY
+//
+// The two scores of a model fed with CAMBI need different QPs for the same thresholds: the
+// original one counts the banding of the source against every encode, and at a harmonic mean of
+// 93 it kept a mean QP 2.3 lower than fidelity on the anime episode of BENCHMARKS.md, 1.3 lower on
+// the film. Their statistics can not seed each other. Fidelity is what sptenc gates on: its files
+// have no marker. A model without CAMBI has a single score, which is its fidelity score, and never
+// gets one either: the files sptenc v0.1.0 wrote for the v0 models keep their names.
+func computeCacheStatsFileName(encoderName string, vmafModel string, originalScore bool, profile VMAFChecker, cacheProfile string) (filename string) {
 	filename = CacheFilePrefix + encoderName
 	if vmafModel != "" {
 		filename += cacheFileModelMarker + vmafModel
+	}
+	if originalScore {
+		filename += cacheFileOriginalScoreMarker
 	}
 	filename += cacheFileMarker
 	// vmaf profile

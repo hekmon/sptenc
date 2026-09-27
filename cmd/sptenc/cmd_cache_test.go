@@ -23,9 +23,9 @@ func mustVMAFChecker(t *testing.T, hmean, mean float64) core.VMAFChecker {
 }
 
 // writeCacheFile creates a cache file the way an encode does, so its name is the real one.
-func writeCacheFile(t *testing.T, dir, encoder, vmafModel, cacheProfile string, profile core.VMAFChecker) string {
+func writeCacheFile(t *testing.T, dir, encoder, vmafModel string, originalScore bool, cacheProfile string, profile core.VMAFChecker) string {
 	t.Helper()
-	sch, err := core.NewStatsCacheHistory(dir, encoder, 0, 51, vmafModel, profile, cacheProfile)
+	sch, err := core.NewStatsCacheHistory(dir, encoder, 0, 51, vmafModel, originalScore, profile, cacheProfile)
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory: %v", err)
 	}
@@ -49,6 +49,7 @@ func TestLoadCacheEntriesOrderIgnoresModificationTime(t *testing.T) {
 	const v0 = "vmaf_v0.6.1"
 	for _, f := range []struct {
 		encoder, vmafModel, cacheProfile string
+		originalScore                    bool
 		hmean, mean                      float64
 		unreadable                       bool
 	}{
@@ -62,9 +63,12 @@ func TestLoadCacheEntriesOrderIgnoresModificationTime(t *testing.T) {
 		{encoder: "libx265", vmafModel: "vmaf_4k_v0.6.1", hmean: 95, mean: -1},
 		{encoder: "libx265", vmafModel: "", hmean: 97, mean: -1}, // files from before the model was in the name
 		{encoder: "hevc_videotoolbox", vmafModel: v0, hmean: 93, mean: -1},
+		// The original score of a model comes after its fidelity, whatever the thresholds
+		{encoder: "hevc_videotoolbox", vmafModel: "vmaf_v1.0.16_3d0h", originalScore: true, hmean: 90, mean: -1},
+		{encoder: "hevc_videotoolbox", vmafModel: "vmaf_v1.0.16_3d0h", hmean: 95, mean: -1},
 		{encoder: "hevc_nvenc", vmafModel: v0, hmean: 93, mean: -1, unreadable: true},
 	} {
-		path := writeCacheFile(t, dir, f.encoder, f.vmafModel, f.cacheProfile, mustVMAFChecker(t, f.hmean, f.mean))
+		path := writeCacheFile(t, dir, f.encoder, f.vmafModel, f.originalScore, f.cacheProfile, mustVMAFChecker(t, f.hmean, f.mean))
 		if f.unreadable {
 			// Truncated, as a crash in the middle of a write would leave it
 			if err := os.WriteFile(path, []byte(`[{"mean": 30,`), 0o644); err != nil {
@@ -74,17 +78,19 @@ func TestLoadCacheEntriesOrderIgnoresModificationTime(t *testing.T) {
 	}
 	want := []string{
 		"#1 hevc_videotoolbox / vmaf_v0.6.1 / hmean=93 unreadable=false",
-		"#2 libx265 / hmean=97 unreadable=false",
-		"#3 libx265 / vmaf_4k_v0.6.1 / hmean=95 unreadable=false",
-		"#4 libx265 / vmaf_v0.6.1 / hmean=93 unreadable=false",
+		"#2 hevc_videotoolbox / vmaf_v1.0.16_3d0h / hmean=95 unreadable=false",
+		"#3 hevc_videotoolbox / vmaf_v1.0.16_3d0h / original score / hmean=90 unreadable=false",
+		"#4 libx265 / hmean=97 unreadable=false",
+		"#5 libx265 / vmaf_4k_v0.6.1 / hmean=95 unreadable=false",
+		"#6 libx265 / vmaf_v0.6.1 / hmean=93 unreadable=false",
 		// Numeric, not lexical: 100 comes after 93
-		"#5 libx265 / vmaf_v0.6.1 / hmean=100 unreadable=false",
+		"#7 libx265 / vmaf_v0.6.1 / hmean=100 unreadable=false",
 		// An inactive threshold comes before any value
-		"#6 libx265 / vmaf_v0.6.1 / mean=80, hmean=93 unreadable=false",
-		"#7 libx265 / vmaf_v0.6.1 / profile \"grainy_90s\" / hmean=95 unreadable=false",
+		"#8 libx265 / vmaf_v0.6.1 / mean=80, hmean=93 unreadable=false",
+		"#9 libx265 / vmaf_v0.6.1 / profile \"grainy_90s\" / hmean=95 unreadable=false",
 		// Unreadable ones last, whatever their identity, sorted the same way among themselves
-		"#8 hevc_nvenc / vmaf_v0.6.1 / hmean=93 unreadable=true",
-		"#9 libx265 / vmaf_v0.6.1 / hmean=90 unreadable=true",
+		"#10 hevc_nvenc / vmaf_v0.6.1 / hmean=93 unreadable=true",
+		"#11 libx265 / vmaf_v0.6.1 / hmean=90 unreadable=true",
 	}
 
 	entries, err := loadCacheEntries(dir)
@@ -112,7 +118,7 @@ func TestLoadCacheEntriesOrderIgnoresModificationTime(t *testing.T) {
 	if got := entryKeys(entries); !slices.Equal(got, want) {
 		t.Fatalf("listing after the modification times changed:\n got %q\nwant %q", got, want)
 	}
-	for _, e := range entries[7:] {
+	for _, e := range entries[9:] {
 		if e.readErr == nil || strings.Contains(errorWithoutPath(e.readErr), dir) {
 			t.Fatalf("unreadable entry #%d error = %v, want a JSON error without the path", e.index, e.readErr)
 		}
@@ -126,7 +132,7 @@ func TestLoadCacheEntriesLargeCache(t *testing.T) {
 	dir := t.TempDir()
 	var readable, unreadable []string
 	for hmean := 60; hmean < 100; hmean++ {
-		path := writeCacheFile(t, dir, "libx265", "vmaf_v0.6.1", "", mustVMAFChecker(t, float64(hmean), -1))
+		path := writeCacheFile(t, dir, "libx265", "vmaf_v0.6.1", false, "", mustVMAFChecker(t, float64(hmean), -1))
 		key := fmt.Sprintf("libx265 / vmaf_v0.6.1 / hmean=%d unreadable=%t", hmean, hmean%7 == 0)
 		if hmean%7 != 0 {
 			readable = append(readable, key)
@@ -214,5 +220,23 @@ func TestErrorWithoutPath(t *testing.T) {
 	}
 	if got, want := errorWithoutPath(core.ErrCacheFileBusy), core.ErrCacheFileBusy.Error(); got != want {
 		t.Fatalf("errorWithoutPath = %q, want %q", got, want)
+	}
+}
+
+func TestCacheScore(t *testing.T) {
+	for _, tc := range []struct {
+		identity core.CacheFileIdentity
+		want     string
+	}{
+		{core.CacheFileIdentity{VMAFModel: "vmaf_v1.0.16_3d0h"}, "fidelity"},
+		{core.CacheFileIdentity{VMAFModel: "vmaf_v1.0.16_3d0h", OriginalScore: true}, "original"},
+		// a v0 model has a single score, its fidelity score
+		{core.CacheFileIdentity{VMAFModel: "vmaf_v0.6.1"}, "fidelity"},
+		// named before the model was: nothing to tell
+		{core.CacheFileIdentity{}, "-"},
+	} {
+		if got := cacheScore(tc.identity); got != tc.want {
+			t.Errorf("%+v: want %q, got %q", tc.identity, tc.want, got)
+		}
 	}
 }

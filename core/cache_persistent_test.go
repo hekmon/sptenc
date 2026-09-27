@@ -28,7 +28,7 @@ func TestNewStatsCacheHistory(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestStatsCacheHistory_AddRunAndDedup(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestStatsCacheHistory_AddRunConcurrent(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestStatsCacheHistory_GetMeanStdDev_Empty(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestStatsCacheHistory_GetMeanStdDev_Weighted(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestStatsCacheHistory_Snapshot_Empty(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestStatsCacheHistory_Snapshot_Weighted(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestStatsCacheHistory_SaveLoadRoundtrip(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch1, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch1, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestStatsCacheHistory_SaveLoadRoundtrip(t *testing.T) {
 	}
 
 	// Create a new cache pointing to the same file
-	sch2, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch2, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory second instance failed: %v", err)
 	}
@@ -291,26 +291,57 @@ func TestComputeCacheStatsFileName_Stability(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	name1 := computeCacheStatsFileName("mock", "", profile1, "")
-	name1again := computeCacheStatsFileName("mock", "", profile1, "")
+	name1 := computeCacheStatsFileName("mock", "", false, profile1, "")
+	name1again := computeCacheStatsFileName("mock", "", false, profile1, "")
 	if name1 != name1again {
 		t.Errorf("same inputs produced different filenames: %s vs %s", name1, name1again)
 	}
 
-	name2 := computeCacheStatsFileName("mock", "", profile2, "")
+	name2 := computeCacheStatsFileName("mock", "", false, profile2, "")
 	if name1 == name2 {
 		t.Error("different profiles produced the same filename")
 	}
 
-	name3 := computeCacheStatsFileName("mock", "", profile1, "profileA")
+	name3 := computeCacheStatsFileName("mock", "", false, profile1, "profileA")
 	if name1 == name3 {
 		t.Error("different cache profiles produced the same filename")
 	}
 
 	// Model should affect filename
-	name4 := computeCacheStatsFileName("mock", "vmaf_v0.6.1neg", profile1, "")
+	name4 := computeCacheStatsFileName("mock", "vmaf_v0.6.1neg", false, profile1, "")
 	if name1 == name4 {
 		t.Error("different vmaf models produced the same filename")
+	}
+
+	// So should the score gated
+	name5 := computeCacheStatsFileName("mock", "vmaf_v1.0.16_3d0h", true, profile1, "")
+	if name5 == computeCacheStatsFileName("mock", "vmaf_v1.0.16_3d0h", false, profile1, "") {
+		t.Error("different scores produced the same filename")
+	}
+}
+
+// TestComputeCacheStatsFileName_Golden pins the names: fidelity has no marker, so the files
+// sptenc v0.1.0 wrote (v0 models, whose single score is their fidelity score) keep theirs.
+func TestComputeCacheStatsFileName_Golden(t *testing.T) {
+	hmean93, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, 93, VMAFOffValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		model         string
+		originalScore bool
+		cacheProfile  string
+		want          string
+	}{
+		{"vmaf_v0.6.1", false, "", "qphistory_libx265.model~vmaf_v0.6.1_vmaf-LTF8LTF8LTF8LTF8LTF8LTF8OTN8LTE.json"},
+		{"vmaf_v1.0.16_3d0h", false, "", "qphistory_libx265.model~vmaf_v1.0.16_3d0h_vmaf-LTF8LTF8LTF8LTF8LTF8LTF8OTN8LTE.json"},
+		{"vmaf_v1.0.16_3d0h", true, "", "qphistory_libx265.model~vmaf_v1.0.16_3d0h~original_vmaf-LTF8LTF8LTF8LTF8LTF8LTF8OTN8LTE.json"},
+		{"vmaf_v1.0.16_3d0h", true, "anime", "qphistory_libx265.model~vmaf_v1.0.16_3d0h~original_vmaf-LTF8LTF8LTF8LTF8LTF8LTF8OTN8LTE_YW5pbWU.json"},
+	} {
+		if got := computeCacheStatsFileName("libx265", tc.model, tc.originalScore, hmean93, tc.cacheProfile); got != tc.want {
+			t.Errorf("want %s, got %s", tc.want, got)
+		}
 	}
 }
 
@@ -325,7 +356,7 @@ func TestStatsCacheHistory_AddRunInvalidDir(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -345,7 +376,7 @@ func TestStatsCacheHistory_FileCorruption(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -356,7 +387,7 @@ func TestStatsCacheHistory_FileCorruption(t *testing.T) {
 	}
 
 	// NewStatsCacheHistory should fail to load corrupted stats
-	_, err = NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	_, err = NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err == nil {
 		t.Fatal("expected error loading corrupted cache file, got nil")
 	}
@@ -388,12 +419,12 @@ func TestLoadRunStats_AgreesWithEncode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			path := filepath.Join(tmpDir, computeCacheStatsFileName("mockenc", "", profile, ""))
+			path := filepath.Join(tmpDir, computeCacheStatsFileName("mockenc", "", false, profile, ""))
 			if err := os.WriteFile(path, []byte(tt.content), 0644); err != nil {
 				t.Fatalf("failed to write cache file: %v", err)
 			}
 			runs, listErr := LoadRunStats(path)
-			sch, encodeErr := NewStatsCacheHistory(tmpDir, "mockenc", 0, 51, "", profile, "")
+			sch, encodeErr := NewStatsCacheHistory(tmpDir, "mockenc", 0, 51, "", false, profile, "")
 			for name, err := range map[string]error{"LoadRunStats": listErr, "NewStatsCacheHistory": encodeErr} {
 				if tt.wantErr == "" && err != nil {
 					t.Errorf("%s: unexpected error: %v", name, err)
@@ -420,7 +451,7 @@ func TestStatsCacheHistory_QPRangeBoundary(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -438,24 +469,47 @@ func TestStatsCacheHistory_QPRangeBoundary(t *testing.T) {
 
 func TestParseCacheFilename_Roundtrip(t *testing.T) {
 	tests := []struct {
-		name         string
-		encoder      string
-		model        string
-		min          float64
-		p1           float64
-		p5           float64
-		p10          float64
-		p25          float64
-		median       float64
-		mean         float64
-		hmean        float64
-		cacheProfile string
+		name          string
+		encoder       string
+		model         string
+		min           float64
+		p1            float64
+		p5            float64
+		p10           float64
+		p25           float64
+		median        float64
+		mean          float64
+		hmean         float64
+		cacheProfile  string
+		originalScore bool
 	}{
 		{
 			name:    "no profile",
 			encoder: "libx265",
 			mean:    93,
 			hmean:   93,
+		},
+		{
+			name:          "original score",
+			encoder:       "hevc_nvenc",
+			model:         "vmaf_v1.0.16_3d0h",
+			hmean:         93,
+			originalScore: true,
+		},
+		{
+			name:          "original score and profile",
+			encoder:       "libx265",
+			model:         "vmaf_v1.0.16_1d5h_2160",
+			hmean:         95,
+			cacheProfile:  "grainy_90s",
+			originalScore: true,
+		},
+		{
+			// no model in the name: the marker follows the encoder
+			name:          "original score without model",
+			encoder:       "hevc_nvenc",
+			hmean:         93,
+			originalScore: true,
 		},
 		{
 			name:         "with profile",
@@ -500,7 +554,7 @@ func TestParseCacheFilename_Roundtrip(t *testing.T) {
 				t.Fatalf("failed to create profile: %v", err)
 			}
 
-			filename := computeCacheStatsFileName(tt.encoder, tt.model, profile, tt.cacheProfile)
+			filename := computeCacheStatsFileName(tt.encoder, tt.model, tt.originalScore, profile, tt.cacheProfile)
 			identity, ok := ParseCacheFilename(filename)
 			if !ok {
 				t.Fatalf("ParseCacheFilename failed for %s", filename)
@@ -511,6 +565,9 @@ func TestParseCacheFilename_Roundtrip(t *testing.T) {
 			}
 			if identity.VMAFModel != tt.model {
 				t.Errorf("vmafModel: want %q, got %q", tt.model, identity.VMAFModel)
+			}
+			if identity.OriginalScore != tt.originalScore {
+				t.Errorf("originalScore: want %t, got %t", tt.originalScore, identity.OriginalScore)
 			}
 			if identity.CacheProfile != tt.cacheProfile {
 				t.Errorf("cacheProfile: want %q, got %q", tt.cacheProfile, identity.CacheProfile)
@@ -567,7 +624,7 @@ func TestStatsCacheHistory_CacheProfileInFilename(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch1, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "profileA")
+	sch1, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "profileA")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -576,7 +633,7 @@ func TestStatsCacheHistory_CacheProfileInFilename(t *testing.T) {
 		t.Fatalf("AddRun failed: %v", err)
 	}
 
-	sch2, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "profileB")
+	sch2, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "profileB")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -628,7 +685,7 @@ func TestParseCacheFilename_BackwardCompatibility(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filename := computeCacheStatsFileName(tt.encoder, "", profile, tt.cacheProfile)
+			filename := computeCacheStatsFileName(tt.encoder, "", false, profile, tt.cacheProfile)
 			identity, ok := ParseCacheFilename(filename)
 			if !ok {
 				t.Fatalf("ParseCacheFilename failed for %s", filename)
@@ -658,7 +715,7 @@ func TestStatsCacheHistory_AddRunSingleQP(t *testing.T) {
 		t.Fatalf("failed to create profile: %v", err)
 	}
 
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}
@@ -691,7 +748,7 @@ func TestRemoveCacheFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create profile: %v", err)
 	}
-	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", profile, "")
+	sch, err := NewStatsCacheHistory(tmpDir, encoder.name, encoder.qpMin, encoder.qpMax, "", false, profile, "")
 	if err != nil {
 		t.Fatalf("NewStatsCacheHistory failed: %v", err)
 	}

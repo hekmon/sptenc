@@ -449,7 +449,7 @@ var encodeCommand = &cli.Command{
 			err = fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
 			return
 		}
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, setup.model.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, setup.model.String(), setup.cachesOriginalScore(), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create stats cache: %w", err)
 			return
