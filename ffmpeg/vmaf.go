@@ -989,8 +989,9 @@ const (
 )
 
 // Stats returns the statistics of a score over the frames: the pooled ones of libvmaf, and the
-// percentiles libvmaf does not compute. The model's CAMBI goes with them when the report holds it.
-// A score the report does not hold is an error.
+// percentiles libvmaf does not compute. The model's CAMBI goes with the original score when the
+// report holds it: the fidelity clip sets it to 0 whatever the picture, a "no banding" that
+// would say nothing. A score the report does not hold is an error.
 func (vr VMAFReport) Stats(score VMAFScore) (vs VMAFStats, err error) {
 	var (
 		pooled VMAFPooledMetric
@@ -1011,9 +1012,10 @@ func (vr VMAFReport) Stats(score VMAFScore) (vs VMAFStats, err error) {
 	vs.HarmonicMean = pooled.HarmonicMean
 	vs.Mean = pooled.Mean
 	vs.Maximum = pooled.Max
-	vs.CAMBIMean = vr.Pooled.ModelCAMBI.Mean
-	vs.CAMBIMax = vr.Pooled.ModelCAMBI.Max
-	vs.HasCAMBI = vr.HasModelCAMBI
+	if vs.HasCAMBI = vr.HasModelCAMBI && score == VMAFScoreOriginal; vs.HasCAMBI {
+		vs.CAMBIMean = vr.Pooled.ModelCAMBI.Mean
+		vs.CAMBIMax = vr.Pooled.ModelCAMBI.Max
+	}
 	// Compute the missing ones
 	scores := make([]float64, len(vr.Frames))
 	for i, frame := range vr.Frames {

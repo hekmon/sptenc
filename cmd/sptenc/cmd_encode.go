@@ -315,7 +315,7 @@ var encodeCommand = &cli.Command{
 			videoStream       *ffmpeg.FFProbeBinaryStream
 			sourceTotalFrames int
 			sourceFrameRate   string // see core.QPSearchConfig.SourceFrameRate
-			vmafModel         ffmpeg.VMAFModel
+			setup             vmafSetup
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
@@ -341,10 +341,9 @@ var encodeCommand = &cli.Command{
 			}
 			sourceFrameRate = videoStream.RFrameRate
 			totalDuration = sourceStats.Format.Duration
-			// The VMAF model of the run, and whether libvmaf scores pictures of this size with
-			// it: better now than after the master
-			vmafModel = resolveVMAFModel(cmd, bypass, videoStream)
-			if err = checkVMAFPictures(ctx, cmd, vmafModel, videoStream); err != nil {
+			// The VMAF model of the run and how it scores, checked on pictures of this size:
+			// better now than after the master
+			if setup, err = setupVMAF(ctx, cmd, bypass, resolveVMAFModel(cmd, bypass, videoStream), videoStream, true); err != nil {
 				return
 			}
 			// Detect scenes on the original file to take advantage of hw decoding
@@ -433,15 +432,16 @@ var encodeCommand = &cli.Command{
 		if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 			return
 		}
-		// The VMAF model of the run, now that the resolution is known (a file had it resolved
-		// and checked before its master already)
-		if vmafModel == "" {
-			vmafModel = resolveVMAFModel(cmd, bypass, videoStream)
-			if err = checkVMAFPictures(ctx, cmd, vmafModel, videoStream); err != nil {
+		// The VMAF model of the run and how it scores, now that the resolution is known (a file
+		// had it set up before its master already)
+		if setup.model == "" {
+			if setup, err = setupVMAF(ctx, cmd, bypass, resolveVMAFModel(cmd, bypass, videoStream), videoStream, true); err != nil {
 				return
 			}
 		}
-		encoderAdapter.VMAFModel = vmafModel
+		encoderAdapter.VMAFModel = setup.model
+		encoderAdapter.VMAFModelCAMBI = setup.modelCAMBI
+		encoderAdapter.VMAFScore = setup.score
 
 		// Get the stats cache (after probing so we know the VMAF model)
 		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
@@ -449,7 +449,7 @@ var encodeCommand = &cli.Command{
 			err = fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
 			return
 		}
-		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, vmafModel.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
+		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax, setup.model.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			err = fmt.Errorf("failed to create stats cache: %w", err)
 			return
@@ -460,7 +460,7 @@ var encodeCommand = &cli.Command{
 
 		// Step 2 - Process segments
 		results, encodedSegmentsMerged, err := processSegments(ctx, segmentsPaths, workingDir, totalDuration,
-			sourceFrameRate, vmafAuditor, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+			sourceFrameRate, vmafAuditor, setup.cambi, statsCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 		if err != nil {
 			return // processSegments says which step failed
 		}
@@ -528,19 +528,14 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tFrame counts verified in %s.\n", duration.Round(time.Second))
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
-		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, vmafModel, cmd.Bool(debugFlagName), hwDecoder,
+		finalVMAFStats, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
+			results.TotalSegmentsFrames, setup, cmd.Bool(debugFlagName), hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)
 			return
 		}
 		duration = time.Since(start)
-		finalVMAFStats, err := finalVMAFreport.Stats(ffmpeg.VMAFScoreOriginal)
-		if err != nil {
-			err = fmt.Errorf("failed to read the final vmaf: %w", err)
-			return
-		}
 		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n\n%s\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 5 - remux final file
@@ -565,7 +560,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		tags := metadata.GenerateTags(vmafAuditor, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-			results, finalVMAFStats, vmafModel, len(segmentsPaths))
+			results, finalVMAFStats, setup.model, len(segmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {
@@ -623,7 +618,8 @@ var encodeCommand = &cli.Command{
 
 // processSegments runs QP search on the given segments and concatenates the encoded results.
 func processSegments(ctx context.Context, segmentsPaths []string, workingDir string, totalDuration time.Duration,
-	sourceFrameRate string, vmafAuditor core.VMAFChecker, statsCache core.StatsCache, encoder core.SegmentEncoder, concurrency int, debug bool) (
+	sourceFrameRate string, vmafAuditor core.VMAFChecker, cambiAuditor core.CAMBIChecker, statsCache core.StatsCache,
+	encoder core.SegmentEncoder, concurrency int, debug bool) (
 	results core.QPSearchResults, encodedSegmentsMerged string, err error) {
 	bypass := liveprogress.Bypass()
 	fmt.Fprintln(bypass, "Finding optimal QP for each segment...")
@@ -645,6 +641,7 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 		core.QPSearchConfig{
 			SegmentsPaths:        segmentsPaths,
 			Auditor:              vmafAuditor,
+			CAMBIAuditor:         cambiAuditor,
 			WorkingDir:           workingDir,
 			StatsCache:           statsCache,
 			KeepInvalidQP:        debug,

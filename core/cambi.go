@@ -56,6 +56,21 @@ func (cc CAMBIChecker) ValidateMean(bs BandingStats) bool {
 	return cc.mean == CAMBIOffValue || bs.AddedMean <= cc.mean
 }
 
+// Thresholds returns the active thresholds by name, "mean" and "max": none when the gate is off.
+func (cc CAMBIChecker) Thresholds() map[string]float64 {
+	thresholds := make(map[string]float64, 2)
+	if !cc.on {
+		return thresholds
+	}
+	if cc.mean != CAMBIOffValue {
+		thresholds["mean"] = cc.mean
+	}
+	if cc.max != CAMBIOffValue {
+		thresholds["max"] = cc.max
+	}
+	return thresholds
+}
+
 // CAMBIBestEffort tells which CAMBI threshold a segment gave up, when no QP passed the VMAF and
 // the CAMBI thresholds together (see searchSegmentCAMBI).
 type CAMBIBestEffort int

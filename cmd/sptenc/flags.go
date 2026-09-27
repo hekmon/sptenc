@@ -351,6 +351,13 @@ const (
 	vmafHMeanFlagName       = "vmaf-hmean"
 	vmafMeanFlagName        = "vmaf-mean"
 	vmafProfileCategoryName = "VMAF Profile"
+	// The CAMBI gate, on the banding the encoder adds (see core.CAMBIChecker). A mean of 1 is a
+	// safety net: no segment of the two real contents of BENCHMARKS.md came near it at the QPs
+	// their VMAF search picked (0.10 at most), and it catches the smooth gradients fidelity
+	// passes with bands added. The worst frame is for strict limits, off by default.
+	cambiMeanFlagName = "cambi-mean"
+	cambiMaxFlagName  = "cambi-max"
+	cambiMeanDefault  = 1
 )
 
 // vmafModelFlag returns the flag forcing the VMAF model. Not set, the model is selected from
@@ -446,12 +453,38 @@ func VMAFFlags() []cli.Flag {
 			Category:  vmafProfileCategoryName,
 			Validator: vmafValueValidator,
 		},
+		&cli.Float64Flag{
+			Name: cambiMeanFlagName,
+			Usage: fmt.Sprintf("Maximum banding the encoder may add to a segment, on average over its frames (CAMBI, 0 = none). %d to disable (see MANUAL.md, Fidelity and banding)",
+				core.CAMBIOffValue),
+			Value:     cambiMeanDefault,
+			OnlyOnce:  true,
+			Category:  vmafProfileCategoryName,
+			Validator: cambiValueValidator,
+		},
+		&cli.Float64Flag{
+			Name: cambiMaxFlagName,
+			Usage: fmt.Sprintf("Maximum banding the encoder may add to the worst frame of a segment (CAMBI, 0 = none). %d to disable",
+				core.CAMBIOffValue),
+			Value:     core.CAMBIOffValue,
+			OnlyOnce:  true,
+			Category:  vmafProfileCategoryName,
+			Validator: cambiValueValidator,
+		},
 	}
 }
 
 func vmafValueValidator(v float64) error {
 	if v != core.VMAFOffValue && (v < core.VMAFMinValue || v > core.VMAFMaxValue) {
 		return fmt.Errorf("must be between %d and %d, or %d to disable", core.VMAFMinValue, core.VMAFMaxValue, core.VMAFOffValue)
+	}
+	return nil
+}
+
+// cambiValueValidator refuses what core.NewCAMBIChecker refuses, before anything starts.
+func cambiValueValidator(v float64) error {
+	if _, err := core.NewCAMBIChecker(v, core.CAMBIOffValue); err != nil {
+		return fmt.Errorf("must be 0 or more, or %d to disable", core.CAMBIOffValue)
 	}
 	return nil
 }

@@ -16,6 +16,11 @@ type EncoderAdapter struct {
 	VAAPIRendererPath string
 	D3D12VAGPUIndex   int
 	VMAFModel         ffmpeg.VMAFModel
+	// VMAFModelCAMBI tells whether the model feeds on CAMBI (see ffmpeg.VMAFCAMBIProbe), and
+	// VMAFScore which of its scores the thresholds gate (see ffmpeg.VMAFScore): fidelity, which
+	// is the only score of a model without CAMBI.
+	VMAFModelCAMBI bool
+	VMAFScore      ffmpeg.VMAFScore
 	// Hardware decoder of the run (see ffmpeg.ResolveHWDecoder): applied by the ffmpeg functions
 	// to every input whose codec it can decode, software decode for the others (FFV1 segments).
 	HWDecoder ffmpeg.HWDecoderConfig
@@ -140,11 +145,24 @@ func (e *EncoderAdapter) Encode(ctx context.Context, input, output string, qp in
 }
 
 // ComputeVMAF measures a distorted segment against its reference using ffmpeg libvmaf, in a
-// single pass: the VMAF score, the banding the distorted segment added, or both. A banding pass
-// measures a file the search already scored: its report goes next to the VMAF one, not over it.
+// single pass: the gated VMAF score, the banding the distorted segment added, or both. A banding
+// pass measures a file the search already scored: its report goes next to the VMAF one, not over
+// it.
 func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted string, stream core.VideoStream,
 	measures core.VMAFMeasures, progress func(core.ProgressStats), debug func(string), runtimeError func(error)) (
 	vmafStats core.VMAFStats, banding core.BandingStats, err error) {
+	passMeasures := ffmpeg.VMAFMeasures{Banding: measures.Banding}
+	if measures.Score {
+		switch e.VMAFScore {
+		case ffmpeg.VMAFScoreFidelity:
+			passMeasures.Fidelity = true
+		case ffmpeg.VMAFScoreOriginal:
+			passMeasures.Original = true
+		default:
+			err = fmt.Errorf("no VMAF score to gate (%q)", e.VMAFScore)
+			return
+		}
+	}
 	reportPath := distorted + "_vmaf.json"
 	if !measures.Score {
 		reportPath = distorted + "_banding.json"
@@ -155,7 +173,8 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		InputFrameRate:    stream.RFrameRate,
 		ReportPath:        reportPath,
 		Model:             e.VMAFModel,
-		Measures:          ffmpeg.VMAFMeasures{Original: measures.Score, Banding: measures.Banding},
+		ModelCAMBI:        e.VMAFModelCAMBI,
+		Measures:          passMeasures,
 		HWDecoderConfig:   e.HWDecoder,
 		Debug:             debug,
 		RuntimeError:      runtimeError,
@@ -166,7 +185,7 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 	}
 	if measures.Score {
 		var stats ffmpeg.VMAFStats
-		if stats, err = report.Stats(ffmpeg.VMAFScoreOriginal); err != nil {
+		if stats, err = report.Stats(e.VMAFScore); err != nil {
 			return
 		}
 		vmafStats = core.VMAFStats{

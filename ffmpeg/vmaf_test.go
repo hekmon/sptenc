@@ -356,6 +356,10 @@ func TestVMAFReport_BothScoresAndBanding(t *testing.T) {
 	if fidelity.HarmonicMean != 95.187485 || original.HarmonicMean != 84.518463 || fidelity.Median != 95.187485 {
 		t.Errorf("unexpected stats: fidelity %+v, original %+v", fidelity, original)
 	}
+	// the clipped CAMBI of fidelity is not a banding measure: no banding line
+	if strings.Contains(fidelity.String(), "Banding") {
+		t.Errorf("no banding line expected with fidelity:\n%s", fidelity)
+	}
 	// the same report read for the fidelity and banding pass would miss its "vmaf" key
 	if _, err := decodeVMAFReport(strings.NewReader(bothBandingReportSample), vmafPass{model: VMAFModelFHD, modelCAMBI: true,
 		measures: VMAFMeasures{Fidelity: true, Banding: true}}); err == nil || !strings.Contains(err.Error(), `"vmaf"`) {
@@ -389,6 +393,10 @@ func TestVMAFReport_FidelityAndBanding(t *testing.T) {
 	// the model's CAMBI is its own key, not the first "cambi" one
 	if !report.HasModelCAMBI || frame.ModelCAMBI != 0 || report.Pooled.ModelCAMBI.Max != 0 {
 		t.Errorf("the model's clipped CAMBI should be read as 0: %+v", report)
+	}
+	// and it is no banding measure: the statistics of fidelity do not carry it
+	if stats, err := report.Stats(VMAFScoreFidelity); err != nil || stats.HasCAMBI {
+		t.Errorf("fidelity should not carry the clipped CAMBI: %+v, %v", stats, err)
 	}
 }
 

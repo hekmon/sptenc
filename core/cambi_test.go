@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -32,6 +33,15 @@ func TestNewCAMBIChecker(t *testing.T) {
 	}
 	if off.Enabled() || (CAMBIChecker{}).Enabled() {
 		t.Error("the gate should be off")
+	}
+	if len(off.Thresholds()) != 0 || len((CAMBIChecker{}).Thresholds()) != 0 {
+		t.Error("an off gate has no threshold")
+	}
+	if both, _ := NewCAMBIChecker(0, 2.5); !maps.Equal(both.Thresholds(), map[string]float64{"mean": 0, "max": 2.5}) {
+		t.Errorf("unexpected thresholds: %v", both.Thresholds())
+	}
+	if maxOnly, _ := NewCAMBIChecker(CAMBIOffValue, 3); !maps.Equal(maxOnly.Thresholds(), map[string]float64{"max": 3}) {
+		t.Errorf("unexpected thresholds: %v", maxOnly.Thresholds())
 	}
 	for _, tc := range []struct {
 		name            string

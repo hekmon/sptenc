@@ -450,11 +450,13 @@ var batchsearchCommand = &cli.Command{
 		// The VMAF model of the run (search and final encode alike), now that the resolution is
 		// known, and whether libvmaf scores pictures of this size with it: better now than after
 		// the master
-		vmafModel := resolveVMAFModel(cmd, bypass, videoStream)
-		if err = checkVMAFPictures(ctx, cmd, vmafModel, videoStream); err != nil {
+		setup, err := setupVMAF(ctx, cmd, bypass, resolveVMAFModel(cmd, bypass, videoStream), videoStream, true)
+		if err != nil {
 			return err
 		}
-		encoderAdapter.VMAFModel = vmafModel
+		encoderAdapter.VMAFModel = setup.model
+		encoderAdapter.VMAFModelCAMBI = setup.modelCAMBI
+		encoderAdapter.VMAFScore = setup.score
 
 		// Get the stats cache (after probing so we know the VMAF model)
 		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
@@ -462,7 +464,7 @@ var batchsearchCommand = &cli.Command{
 			return fmt.Errorf("unsupported encoder %s", encoderAdapter.Name())
 		}
 		statsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), encoderAdapter.Name(), qpMin, qpMax,
-			vmafModel.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
+			setup.model.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to create stats cache: %w", err)
 		}
@@ -553,7 +555,7 @@ var batchsearchCommand = &cli.Command{
 
 			// Step 3.C - QP search on this candidate scenes
 			batch.results[batch.currentCandidateIndex], batch.encoded[batch.currentCandidateIndex], err = processSegments(
-				ctx, segmentsPaths, candidateWorkdir, totalDuration, videoStream.RFrameRate, vmafAuditor, runCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+				ctx, segmentsPaths, candidateWorkdir, totalDuration, videoStream.RFrameRate, vmafAuditor, setup.cambi, runCache, encoderAdapter, cmd.Int(concurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("candidate %s: %w", candidateStr, err)
 			}
@@ -661,7 +663,9 @@ var batchsearchCommand = &cli.Command{
 				NVIDIAGPUIndex:    cmd.Int(nvidiaGPUIndexFlagName),
 				VAAPIRendererPath: cmd.String(vaapiRendererPathFlagName),
 				D3D12VAGPUIndex:   cmd.Int(d3d12vaGPUIndexFlagName),
-				VMAFModel:         vmafModel,
+				VMAFModel:         setup.model,
+				VMAFModelCAMBI:    setup.modelCAMBI,
+				VMAFScore:         setup.score,
 				HWDecoder:         hwDecoder, // the one of the search, see above
 			}
 			finalQPMin, finalQPMax, finalQPFound := finalEncoderAdapter.QPRange()
@@ -669,7 +673,7 @@ var batchsearchCommand = &cli.Command{
 				return fmt.Errorf("unsupported final encoder %s", finalEncoderAdapter.Name())
 			}
 			finalStatsCache, err := core.NewStatsCacheHistory(cmd.String(statsCacheDirFlagName), finalEncoderAdapter.Name(), finalQPMin, finalQPMax,
-				vmafModel.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
+				setup.model.String(), vmafAuditor, cmd.String(cacheProfileFlagName))
 			if err != nil {
 				return fmt.Errorf("failed to create stats cache for final encoder: %w", err)
 			}
@@ -677,7 +681,7 @@ var batchsearchCommand = &cli.Command{
 			// Run QP search with final encoder
 			// Not --concurrent-segments: see finalConcurrentSegmentsFlagName
 			results, encodedSegmentsMerged, err = processSegments(ctx, finalSegments, finalWorkdir, totalDuration,
-				videoStream.RFrameRate, vmafAuditor, finalStatsCache, finalEncoderAdapter, cmd.Int(finalConcurrentSegmentsFlagName), cmd.Bool(debugFlagName))
+				videoStream.RFrameRate, vmafAuditor, setup.cambi, finalStatsCache, finalEncoderAdapter, cmd.Int(finalConcurrentSegmentsFlagName), cmd.Bool(debugFlagName))
 			if err != nil {
 				return fmt.Errorf("final encode with %s: %w", finalEncoder, err)
 			}
@@ -724,18 +728,14 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintf(bypass, "\tFrame counts verified in %s.\n", time.Since(start).Round(time.Second))
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
-		finalVMAFreport, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, vmafModel, cmd.Bool(debugFlagName), hwDecoder,
+		finalVMAFStats, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
+			results.TotalSegmentsFrames, setup, cmd.Bool(debugFlagName), hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)
 			return
 		}
 		duration := time.Since(start)
-		finalVMAFStats, err := finalVMAFreport.Stats(ffmpeg.VMAFScoreOriginal)
-		if err != nil {
-			return fmt.Errorf("failed to read the final vmaf: %w", err)
-		}
 		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n\n%s\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 6 - remuxing
@@ -756,7 +756,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		videoStream = sourceStats.VideoTrack()
 		tags := metadata.GenerateTags(vmafAuditor, usedEncoder,
-			results, finalVMAFStats, vmafModel, len(results.EncodedSegmentsPaths))
+			results, finalVMAFStats, setup.model, len(results.EncodedSegmentsPaths))
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, inputPath, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {

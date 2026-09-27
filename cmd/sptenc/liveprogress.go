@@ -750,20 +750,26 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 	})
 }
 
-// liveFinalVMAF computes the final VMAF on the fully encoded/concatenated output.
-// It is used by the encode and batch-search pipelines as the last quality-check step.
-// Both files are decoded by dec when their codec allows it (software decode otherwise).
+// liveFinalVMAF computes the final VMAF on the fully encoded/concatenated output: the score the
+// thresholds gated (see vmafSetup). It is used by the encode and batch-search pipelines as the
+// last quality-check step. Both files are decoded by dec when their codec allows it (software
+// decode otherwise).
 func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *ffmpeg.FFProbeBinaryStream, totalFrames int,
-	model ffmpeg.VMAFModel, debug bool, dec ffmpeg.HWDecoderConfig) (stats ffmpeg.VMAFReport, err error) {
-	return liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
+	setup vmafSetup, debug bool, dec ffmpeg.HWDecoderConfig) (stats ffmpeg.VMAFStats, err error) {
+	report, err := liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
 		ReferencePath:   source,
 		DistortedPath:   distorted,
 		InputFrameRate:  videoStream.RFrameRate,
 		ReportPath:      distorted + "_vmaf.json",
-		Model:           model,
-		Measures:        ffmpeg.VMAFMeasures{Original: true},
+		Model:           setup.model,
+		ModelCAMBI:      setup.modelCAMBI,
+		Measures:        setup.scoreMeasures(false),
 		HWDecoderConfig: dec,
 	}, totalFrames, debug)
+	if err != nil {
+		return
+	}
+	return report.Stats(setup.score)
 }
 
 /*

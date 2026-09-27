@@ -134,21 +134,143 @@ func checkLibVMAF(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// checkVMAFPictures verifies, once the source is known and before any long step, that libvmaf
-// can score pictures of its size with the model of the run. Below a minimum size libvmaf
-// crashes, or writes no report, and that minimum depends on the model and on the aspect ratio
-// (see ffmpeg.VMAFProbeConfig): two frames of that very size are scored for real rather than
-// held against a fixed floor. Refused later, the source would fail at its first VMAF, after
-// the master and a first encode.
-func checkVMAFPictures(ctx context.Context, cmd *cli.Command, model ffmpeg.VMAFModel, stream *ffmpeg.FFProbeBinaryStream) error {
-	if _, err := ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
+// vmafSetup is how a run scores the encodes of its segments, decided once its VMAF model is known
+// (see setupVMAF).
+type vmafSetup struct {
+	model      ffmpeg.VMAFModel
+	modelCAMBI bool              // the model feeds on CAMBI (see ffmpeg.VMAFCAMBIProbe)
+	score      ffmpeg.VMAFScore  // the score the VMAF thresholds gate
+	cambi      core.CAMBIChecker // the CAMBI gate, off (its zero value) for a command that gates nothing
+}
+
+// scoreMeasures returns the measures of a pass computing the gated score, and the banding the
+// encode added when banding is set.
+func (vs vmafSetup) scoreMeasures(banding bool) ffmpeg.VMAFMeasures {
+	return ffmpeg.VMAFMeasures{
+		Fidelity: vs.score == ffmpeg.VMAFScoreFidelity,
+		Original: vs.score == ffmpeg.VMAFScoreOriginal,
+		Banding:  banding,
+	}
+}
+
+// passes returns every kind of libvmaf pass the run makes (see checkVMAFPictures): the gated score
+// (the VMAF search, the final score), and with the CAMBI gate on, the banding alone (at the QP of
+// the VMAF search) and both at once (the walk below it, see core.QPSearchConfig.CAMBIAuditor).
+func (vs vmafSetup) passes() []ffmpeg.VMAFMeasures {
+	passes := []ffmpeg.VMAFMeasures{vs.scoreMeasures(false)}
+	if vs.cambi.Enabled() {
+		passes = append(passes, ffmpeg.VMAFMeasures{Banding: true}, vs.scoreMeasures(true))
+	}
+	return passes
+}
+
+// setupVMAF decides how a run scores the encodes of its segments, now that its VMAF model is
+// known, and says so: whether the model feeds on CAMBI, probed for real (see
+// ffmpeg.VMAFCAMBIProbe), the score the VMAF thresholds gate, and for a command that gates (gate
+// set: encode, batchsearch) the CAMBI gate (see resolveCAMBIGate). It then checks that libvmaf runs
+// every pass of the run on pictures of the source's size (see checkVMAFPictures), before any long
+// step.
+//
+// # WHY FIDELITY, ALWAYS
+//
+// The thresholds gate what the encoder did, and a model fed with CAMBI also scores the banding
+// the source already has (see ffmpeg.VMAFScore): fidelity takes it out. A model without CAMBI has
+// a single score, which is its fidelity score: nothing to take out, nothing to say.
+func setupVMAF(ctx context.Context, cmd *cli.Command, out io.Writer, model ffmpeg.VMAFModel,
+	stream *ffmpeg.FFProbeBinaryStream, gate bool) (setup vmafSetup, err error) {
+	setup.model = model
+	if setup.modelCAMBI, err = ffmpeg.VMAFCAMBIProbe(ctx, ffmpeg.VMAFCAMBIProbeConfig{
 		Model:     model,
-		Measures:  ffmpeg.VMAFMeasures{Original: true},
-		Width:     stream.Width,
-		Height:    stream.Height,
 		ReportDir: cmd.String(tmpDirFlagName),
 	}); err != nil {
-		return fmt.Errorf("libvmaf can not score %dx%d pictures with the VMAF model %s: %w", stream.Width, stream.Height, model, err)
+		err = fmt.Errorf("failed to tell whether the VMAF model %s feeds on CAMBI: %w", model, err)
+		return
+	}
+	setup.score = ffmpeg.VMAFScoreFidelity
+	if setup.modelCAMBI {
+		lead := "Scoring fidelity"
+		if gate {
+			lead = "The VMAF thresholds gate fidelity"
+		}
+		fmt.Fprintf(out, "%s: the score of %s with its banding feature (CAMBI) set to zero, 100 for the source against itself (see MANUAL.md, Fidelity and banding)\n",
+			lead, model)
+	}
+	if gate {
+		if setup.cambi, err = resolveCAMBIGate(cmd, setup.modelCAMBI); err != nil {
+			return
+		}
+		if setup.cambi.Enabled() {
+			fmt.Fprintf(out, "The banding the encoder adds is gated too (CAMBI, 0 = none, ~5 = slightly annoying): %s\n",
+				describeCAMBIGate(setup.cambi))
+		}
+	}
+	err = checkVMAFPictures(ctx, cmd, setup, stream)
+	return
+}
+
+// resolveCAMBIGate returns the CAMBI gate of a run out of the CAMBI flags: on by default with a
+// model feeding on CAMBI, off with both thresholds at -1.
+//
+// # WHY OFF BY DEFAULT WITH A MODEL WITHOUT CAMBI
+//
+// sptenc selects models feeding on CAMBI. A model without it (a v0 one) is forced to score as the
+// published VMAF anchors were measured, or as sptenc v0.1.0 did: its default is v0.1.0's, no
+// banding measured, printed, tagged nor cached. A CAMBI threshold turns the gate on for any model,
+// the banding feature needing nothing from the model: then it is the gate with its thresholds, the
+// defaults included.
+func resolveCAMBIGate(cmd *cli.Command, modelCAMBI bool) (gate core.CAMBIChecker, err error) {
+	mean, max := cmd.Float64(cambiMeanFlagName), cmd.Float64(cambiMaxFlagName)
+	if !modelCAMBI && !(cmd.IsSet(cambiMeanFlagName) && mean != core.CAMBIOffValue) &&
+		!(cmd.IsSet(cambiMaxFlagName) && max != core.CAMBIOffValue) {
+		return // no threshold asked for: the gate stays off
+	}
+	if gate, err = core.NewCAMBIChecker(mean, max); err != nil {
+		err = fmt.Errorf("invalid CAMBI thresholds: %w", err)
+	}
+	return
+}
+
+// describeCAMBIGate returns the active thresholds of a CAMBI gate, in words.
+func describeCAMBIGate(gate core.CAMBIChecker) string {
+	thresholds := gate.Thresholds()
+	mean, hasMean := thresholds["mean"]
+	max, hasMax := thresholds["max"]
+	switch {
+	case hasMean && hasMax:
+		return fmt.Sprintf("at most %s on average over the frames of a segment, and %s on its worst frame",
+			strconv.FormatFloat(mean, 'f', -1, 64), strconv.FormatFloat(max, 'f', -1, 64))
+	case hasMean:
+		return fmt.Sprintf("at most %s on average over the frames of a segment", strconv.FormatFloat(mean, 'f', -1, 64))
+	case hasMax:
+		return fmt.Sprintf("at most %s on the worst frame of a segment", strconv.FormatFloat(max, 'f', -1, 64))
+	default:
+		return "off"
+	}
+}
+
+// checkVMAFPictures verifies, once the source is known and before any long step, that libvmaf
+// runs every kind of pass of the run on pictures of its size (see vmafSetup.passes). Below a
+// minimum size libvmaf crashes, or writes no report, or one without some metrics, and that
+// minimum depends on the model, on the aspect ratio and on the pass (see ffmpeg.VMAFProbeConfig):
+// two frames of that very size go through each pass for real rather than being held against a
+// fixed floor. Refused later, the source would fail at its first VMAF, or at its first banding
+// measure, after the master and a first encode.
+func checkVMAFPictures(ctx context.Context, cmd *cli.Command, setup vmafSetup, stream *ffmpeg.FFProbeBinaryStream) error {
+	for _, measures := range setup.passes() {
+		if _, err := ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
+			Model:      setup.model,
+			ModelCAMBI: setup.modelCAMBI,
+			Measures:   measures,
+			Width:      stream.Width,
+			Height:     stream.Height,
+			ReportDir:  cmd.String(tmpDirFlagName),
+		}); err != nil {
+			if measures.Banding {
+				return fmt.Errorf("libvmaf can not measure the banding added to %dx%d pictures: %w\nThe CAMBI gate can be turned off with --%s %d --%s %d",
+					stream.Width, stream.Height, err, cambiMeanFlagName, core.CAMBIOffValue, cambiMaxFlagName, core.CAMBIOffValue)
+			}
+			return fmt.Errorf("libvmaf can not score %dx%d pictures with the VMAF model %s: %w", stream.Width, stream.Height, setup.model, err)
+		}
 	}
 	return nil
 }

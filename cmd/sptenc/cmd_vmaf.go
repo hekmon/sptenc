@@ -173,8 +173,8 @@ var vmafCommand = &cli.Command{
 			return fmt.Errorf("variable frame rate (VFR) content is not supported: reference frames last from %s to %s while it declares a constant frame rate (%s fps)",
 				videoStream.ShortestFrameDuration, videoStream.LongestFrameDuration, videoStream.RFrameRate)
 		}
-		model := resolveVMAFModel(cmd, bypass, videoStream)
-		if err = checkVMAFPictures(ctx, cmd, model, videoStream); err != nil {
+		setup, err := setupVMAF(ctx, cmd, bypass, resolveVMAFModel(cmd, bypass, videoStream), videoStream, false)
+		if err != nil {
 			return err
 		}
 
@@ -225,15 +225,16 @@ var vmafCommand = &cli.Command{
 			DistortedPath:   distortedPath,
 			InputFrameRate:  videoStream.RFrameRate,
 			ReportPath:      filepath.Join(workingDir, "vmaf.json"),
-			Model:           model,
-			Measures:        ffmpeg.VMAFMeasures{Original: true},
+			Model:           setup.model,
+			ModelCAMBI:      setup.modelCAMBI,
+			Measures:        setup.scoreMeasures(false),
 			HWDecoderConfig: decoderCfg,
 		}, totalFrames, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to compute VMAF: %w", err)
 		}
 
-		stats, err := report.Stats(ffmpeg.VMAFScoreOriginal)
+		stats, err := report.Stats(setup.score)
 		if err != nil {
 			return fmt.Errorf("failed to read the VMAF report: %w", err)
 		}
