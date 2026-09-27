@@ -226,13 +226,17 @@ var vmafCommand = &cli.Command{
 			InputFrameRate:  videoStream.RFrameRate,
 			ReportPath:      filepath.Join(workingDir, "vmaf.json"),
 			Model:           model,
+			Measures:        ffmpeg.VMAFMeasures{Original: true},
 			HWDecoderConfig: decoderCfg,
 		}, totalFrames, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to compute VMAF: %w", err)
 		}
 
-		stats := report.GetStats()
+		stats, err := report.Stats(ffmpeg.VMAFScoreOriginal)
+		if err != nil {
+			return fmt.Errorf("failed to read the VMAF report: %w", err)
+		}
 		fmt.Fprintf(bypass, "\tVMAF computed in %s:\n\n%s\n",
 			time.Since(start).Round(time.Second),
 			stats,

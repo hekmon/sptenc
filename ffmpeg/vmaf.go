@@ -1,11 +1,13 @@
 package ffmpeg
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -172,22 +174,177 @@ func (m VMAFModel) ResolutionMismatch(height int) string {
 }
 
 /*
- * Filter
+ * Pass
  */
 
-// vmafFilter returns the libvmaf filter of a computation, to be fed the distorted stream then
-// the reference one.
-func vmafFilter(model VMAFModel, reportPath string, threads int) string {
-	return fmt.Sprintf("libvmaf=model=version=%s:log_fmt=json:log_path=%s:n_threads=%d",
-		model, adaptVMAFPath(reportPath), threads)
+// VMAFScore names one of the two scores sptenc computes with a model fed with CAMBI.
+//
+// # WHY TWO SCORES
+//
+// A v1 model scores two different things with one number. Its full-reference features (ADM and
+// its additive impairment term, motion, chroma) measure what the encode lost against its source.
+// CAMBI, fed to the same model, rates the banding of the distorted picture alone: the banding
+// already in the source counts as if the encoder had made it, and a banded source scores below
+// 100 against itself (95.89 for the dark gradient of BENCHMARKS.md). Fidelity is the score of the
+// same model with its CAMBI clipped to 0: 100 for a source against itself, what the encode lost
+// otherwise. The banding the encoder added is measured apart (see VMAFMeasures.Banding). A model
+// without CAMBI (a v0 one) has a single score, which is both. See AGENTS.md, "VMAF fidelity and
+// added banding".
+type VMAFScore string
+
+const (
+	// VMAFScoreFidelity is the model's score with its CAMBI clipped to 0.
+	VMAFScoreFidelity VMAFScore = "fidelity"
+	// VMAFScoreOriginal is the model's own score, CAMBI included, as libvmaf computes it.
+	VMAFScoreOriginal VMAFScore = "original"
+)
+
+// VMAFMeasures is what a libvmaf pass computes.
+type VMAFMeasures struct {
+	Fidelity bool // The model's score with its CAMBI clipped to 0 (see VMAFScoreFidelity).
+	Original bool // The model's own score (see VMAFScoreOriginal).
+	// Banding adds CAMBI in full-reference mode, fed to no model: per frame, the banding of the
+	// distorted picture, of the reference, and what the first adds to the second (see
+	// VMAFBanding). Alone, the pass loads no model.
+	Banding bool
+}
+
+// libvmafParamSeparator separates the parameters of a model or of a feature in the model and
+// feature options of the libvmaf filter: a ':' escaped for the option value (\:), then again for
+// the filtergraph (\\:), as ffmpeg's documentation of the filter writes it (see vmafPathEscaper).
+const libvmafParamSeparator = `\\:`
+
+// cambiClipParam clips the CAMBI a model is fed with to 0, for its fidelity score. A model
+// parameter "<feature>.<option>" sets an option of one of the model's features (ffmpeg's
+// vf_libvmaf.c hands it to vmaf_model_feature_overload), and cambi_max_val caps the CAMBI of the
+// feature. A model without CAMBI has no such feature, and libvmaf ignores the parameter without a
+// word, ffmpeg exiting successfully: whether a model feeds on CAMBI is for VMAFCAMBIProbe to tell,
+// from its report.
+const cambiClipParam = "cambi.cambi_max_val=0"
+
+// bandingFeature is the CAMBI extractor measuring the banding the distorted video adds to the
+// reference: CAMBI in full-reference mode (libvmaf 2.3.1 and newer), with the options of the
+// v1.0.16 models (the eight of them share them) without their clip.
+//
+// # WHY NOT THE OPTIONS OF THE MODELS, CLIP INCLUDED
+//
+// The models clip their CAMBI at 17 (cambi_max_val=17). libvmaf keys a feature by a name built
+// from the options that are feature parameters, and full_ref is not one (libvmaf's
+// src/feature/cambi.c): given the very options of a model in the same pass, the extractor is taken
+// for the model's CAMBI, and the source's CAMBI and the added banding are gone from the report
+// (verified with libvmaf f85a8536, a September 2026 build). Without the clip, the options differ
+// from those of the v1.0.16 models, clipped to 0 for fidelity or at 17 for the original score, and
+// the CAMBI of the distorted picture is not capped at 17 (libvmaf's default cap is 1000): the
+// 8-bit-like steps of BENCHMARKS.md rate 22.48, where the models see 17. A model whose CAMBI would
+// have the options of the feature takes it the same way: the report lacks the source's CAMBI and
+// the added banding, which readVMAFReport refuses.
+//
+// # WHY THE SPEEDUP OF THE MODELS
+//
+// cambi_high_res_speedup=1080 downsamples the pictures of 1920×1080 pixels and more (smaller ones
+// are computed at full resolution), and libvmaf's documentation expects "some loss of accuracy".
+// Against full resolution, on the 776 segment encodes of BENCHMARKS.md, the means of a segment
+// stay within 0.085 of each other, never on opposite sides of 0.5, 1, 2 or 3. Full resolution
+// rates grain on a near-black background as banding in the source, and then sees none added where
+// an encoder turned that grain into flat blocks, which the speedup flags. It is also what the
+// models see.
+const bandingFeature = "name=cambi" +
+	libvmafParamSeparator + "full_ref=true" +
+	libvmafParamSeparator + "cambi_high_res_speedup=1080" +
+	libvmafParamSeparator + "cambi_vis_lum_threshold=0.06"
+
+// Report keys of bandingFeature. The key of the distorted picture's CAMBI is built by libvmaf
+// from the options of the feature (hrs for cambi_high_res_speedup, vlt for
+// cambi_vis_lum_threshold): it goes with bandingFeature.
+const (
+	bandingEncodeKey = "cambi_hrs_1080_vlt_0.06"
+	bandingSourceKey = "cambi_source"
+	bandingAddedKey  = "cambi_full_reference"
+)
+
+// Report keys of the scores: "vmaf" when a pass loads a single model. Two models in a pass must
+// be named, and their scores are then keyed by their names (see vmafPass.filter).
+const vmafScoreKey = "vmaf"
+
+// cambiMetricPrefix starts the key of any CAMBI feature (see modelCAMBIKeys).
+const cambiMetricPrefix = "cambi"
+
+// vmafPass describes a libvmaf pass. The filter is built from it (see filter), and its report is
+// read with it (see readVMAFReport): the report holds the keys the pass asks for.
+type vmafPass struct {
+	model      VMAFModel
+	modelCAMBI bool // the model feeds on CAMBI (see VMAFCAMBIProbe)
+	measures   VMAFMeasures
+}
+
+// validate refuses a pass measuring nothing, and a model name that can not be handed to libvmaf.
+func (p vmafPass) validate() error {
+	if !p.measures.Fidelity && !p.measures.Original && !p.measures.Banding {
+		return errors.New("the VMAF pass measures nothing: a score or the banding must be asked for")
+	}
+	if clipped, asIs := p.models(); (clipped || asIs) && !p.model.Valid() {
+		return fmt.Errorf("invalid VMAF model name %q", p.model)
+	}
+	return nil
+}
+
+// models returns the models the pass loads: clipped for fidelity, as is for the original score. A
+// model without CAMBI is loaded once, as is, whichever score is asked: its score is both, and
+// libvmaf would ignore the clip anyway (see cambiClipParam).
+func (p vmafPass) models() (clipped, asIs bool) {
+	if !p.modelCAMBI {
+		return false, p.measures.Fidelity || p.measures.Original
+	}
+	return p.measures.Fidelity, p.measures.Original
+}
+
+// scoreKeys returns the report keys of the fidelity and of the original score, empty for a score
+// the pass does not compute. A model without CAMBI has the same key for both: it is loaded once.
+func (p vmafPass) scoreKeys() (fidelity, original string) {
+	switch clipped, asIs := p.models(); {
+	case clipped && asIs:
+		return string(VMAFScoreFidelity), string(VMAFScoreOriginal)
+	case clipped:
+		return vmafScoreKey, ""
+	case asIs && !p.modelCAMBI:
+		return vmafScoreKey, vmafScoreKey
+	case asIs:
+		return "", vmafScoreKey
+	default:
+		return "", ""
+	}
+}
+
+// filter returns the libvmaf filter of the pass, to be fed the distorted stream then the
+// reference one. A model loaded alone is not named, its score keyed "vmaf" as libvmaf does by
+// default: a pass computing the original score alone is the filter sptenc v0.1.0 ran.
+func (p vmafPass) filter(reportPath string, threads int) string {
+	clippedModel := "version=" + p.model.String() + libvmafParamSeparator + cambiClipParam
+	asIsModel := "version=" + p.model.String()
+	var models string
+	switch clipped, asIs := p.models(); {
+	case clipped && asIs:
+		models = clippedModel + libvmafParamSeparator + "name=" + string(VMAFScoreFidelity) + "|" +
+			asIsModel + libvmafParamSeparator + "name=" + string(VMAFScoreOriginal)
+	case clipped:
+		models = clippedModel
+	case asIs:
+		models = asIsModel
+	}
+	var feature string
+	if p.measures.Banding {
+		feature = ":feature=" + bandingFeature
+	}
+	return fmt.Sprintf("libvmaf=model=%s%s:log_fmt=json:log_path=%s:n_threads=%d",
+		models, feature, adaptVMAFPath(reportPath), threads)
 }
 
 /*
  * Probe
  */
 
-// ErrVMAFModelUnavailable is returned by VMAFProbe when the libvmaf of ffmpeg does not know
-// the model (the v1 models are built into libvmaf 3.2.0 and newer).
+// ErrVMAFModelUnavailable is returned by VMAFProbe and VMAFCAMBIProbe when the libvmaf of ffmpeg
+// does not know the model (the v1 models are built into libvmaf 3.2.0 and newer).
 var ErrVMAFModelUnavailable = errors.New("libvmaf does not know this model")
 
 // Probe pictures: 1080p unless told otherwise, the resolution the models are made for (smaller
@@ -204,36 +361,136 @@ const (
 // version name.
 const vmafModelUnavailableMarker = "could not load libvmaf model with version"
 
+// vmafProbePictures returns the lavfi source of the pictures of a probe: ffmpeg's testsrc2.
+func vmafProbePictures(width, height int) string {
+	return fmt.Sprintf("testsrc2=size=%dx%d:rate=%d:duration=1", width, height, vmafProbeFrames)
+}
+
+// vmafProbeBandedPictures is the lavfi source of banded probe pictures: the dark gradient of
+// BENCHMARKS.md, one 10-bit code every 12 pixels from 64, in 1080p. The CAMBI of the v1.0.16
+// models rates it 6.65, where testsrc2 rates 0.03 to 0.05: a clip to 0 is seen to take on it (see
+// VMAFCAMBIProbe).
+var vmafProbeBandedPictures = fmt.Sprintf(
+	"color=black:size=%dx%d:rate=%d:duration=1,format=yuv420p10le,geq=lum='64+floor(X/12)':cb=512:cr=512",
+	vmafProbeWidth, vmafProbeHeight, vmafProbeFrames)
+
 // VMAFProbeConfig holds the parameters of a libvmaf probe.
 type VMAFProbeConfig struct {
-	Model VMAFModel // Model to load.
+	Model      VMAFModel    // Model to load.
+	ModelCAMBI bool         // Whether the model feeds on CAMBI (see VMAFCAMBIProbe).
+	Measures   VMAFMeasures // What the pass measures: the probe runs the very pass a run uses.
 	// Size of the probe pictures, 1920x1080 when zero. Below a minimum size libvmaf crashes, or
-	// writes no report, and that minimum depends on the model and on the aspect ratio, which a
-	// fixed floor can not follow. Measured with libvmaf f85a8536 (a September 2026 build): the
-	// 1080p and 4K models of VMAFModels score 216x160 but not 1920x160 nor 3840x180, the phone
-	// models need 480x270 and the 4K at 3 picture heights ones 568x320 at 16:9. Probing with the size
-	// of the source tells for sure, whatever the model and the libvmaf version.
+	// writes no report, or a report without some of the metrics asked for, ffmpeg exiting
+	// successfully, and that minimum depends on the model, on the aspect ratio and on the pass,
+	// which a fixed floor can not follow. Measured with libvmaf f85a8536 (a September 2026 build):
+	// the 1080p and 4K models of VMAFModels score 216x160 but not 1920x160 nor 3840x180, the phone
+	// models need 480x270 and the 4K at 3 picture heights ones 568x320 at 16:9. CAMBI, in the
+	// models and in the banding feature alike, measures nothing when the width and the height are
+	// both under 216 pixels (libvmaf's src/feature/cambi.c): a v0 model scores 215x160, but the
+	// banding feature beside it reports nothing. Probing with the size of the source and the
+	// passes of the run tells for sure, whatever the model and the libvmaf version.
 	Width, Height int
 	ReportDir     string           // Directory the JSON report of the probe is written to (and removed from).
 	Debug         func(msg string) // Optional debug logger.
 }
 
-// VMAFProbe checks that the libvmaf of ffmpeg can score pictures of a given size with a model,
-// and returns the libvmaf version. It runs libvmaf for real on two synthetic frames generated
-// by ffmpeg itself (no file needed), scored against themselves. Success is a report on disk:
-// the exit code of ffmpeg is not to be trusted, libvmaf errors have been seen leaving it at
-// zero with no report written. A model libvmaf does not know is reported with
-// ErrVMAFModelUnavailable.
+// VMAFProbe checks that the libvmaf of ffmpeg can run a pass on pictures of a given size, and
+// returns the libvmaf version. It runs libvmaf for real on two synthetic frames generated by
+// ffmpeg itself (no file needed), scored against themselves. Success is a report on disk holding
+// every metric of the pass for every frame: the exit code of ffmpeg is not to be trusted,
+// libvmaf errors have been seen leaving it at zero with no report written, or an incomplete one.
+// A model libvmaf does not know is reported with ErrVMAFModelUnavailable.
 func VMAFProbe(ctx context.Context, config VMAFProbeConfig) (libvmafVersion string, err error) {
-	if !config.Model.Valid() {
-		err = fmt.Errorf("invalid VMAF model name %q", config.Model)
+	pass := vmafPass{model: config.Model, modelCAMBI: config.ModelCAMBI, measures: config.Measures}
+	if err = pass.validate(); err != nil {
 		return
 	}
 	if config.Width == 0 || config.Height == 0 {
 		config.Width, config.Height = vmafProbeWidth, vmafProbeHeight
 	}
+	report, err := runVMAFProbe(ctx, vmafProbePictures(config.Width, config.Height), pass, config.ReportDir, config.Debug)
+	if err != nil {
+		return
+	}
+	if libvmafVersion = report.Version; libvmafVersion == "" {
+		libvmafVersion = "unknown"
+	}
+	return
+}
+
+// ErrVMAFCAMBIClip is returned by VMAFCAMBIProbe when libvmaf does not clip the CAMBI of a model
+// feeding on it: its fidelity score can not be computed.
+var ErrVMAFCAMBIClip = errors.New("libvmaf does not clip the CAMBI of this model")
+
+// VMAFCAMBIProbeConfig holds the parameters of VMAFCAMBIProbe.
+type VMAFCAMBIProbeConfig struct {
+	Model     VMAFModel        // Model to load.
+	ReportDir string           // Directory the JSON reports of the probe are written to (and removed from).
+	Debug     func(msg string) // Optional debug logger.
+}
+
+// VMAFCAMBIProbe tells whether a model feeds on CAMBI, and checks that libvmaf clips it for the
+// fidelity score (see VMAFScore). Everything that depends on the model having CAMBI follows this
+// answer: the pass of each score, whether the CAMBI gate is on by default, what is printed,
+// tagged and cached.
+//
+// # WHY THE REPORT, NOT FFMPEG'S SUCCESS
+//
+// A model without CAMBI (the v0 ones) takes the clip without a word (see cambiClipParam): ffmpeg
+// succeeds either way. What tells is the report: a model feeding on CAMBI reports its CAMBI
+// feature, one without reports none.
+//
+// # WHY TWO PASSES ON A BANDED PICTURE
+//
+// The model is run as is, then clipped. As is, its CAMBI feature is in the report or not, which
+// is the answer. Clipped, the feature is still reported, all zeros: that proves the clip took
+// only if the same picture rates above zero as is, hence the banded gradient of
+// vmafProbeBandedPictures (6.65 for the v1.0.16 models, where testsrc2 rates 0.03 to 0.05, too
+// close to 0 to count on for another model). The first pass fails on a model libvmaf does not know
+// (ErrVMAFModelUnavailable), the second on a clip that does not take (ErrVMAFCAMBIClip).
+func VMAFCAMBIProbe(ctx context.Context, config VMAFCAMBIProbeConfig) (modelCAMBI bool, err error) {
+	asIs := vmafPass{model: config.Model, measures: VMAFMeasures{Original: true}}
+	if err = asIs.validate(); err != nil {
+		return
+	}
+	report, err := runVMAFProbe(ctx, vmafProbeBandedPictures, asIs, config.ReportDir, config.Debug)
+	if err != nil {
+		return
+	}
+	if len(report.modelCAMBIKeys) == 0 {
+		return false, nil
+	}
+	for _, key := range report.modelCAMBIKeys {
+		if report.pooledCAMBIMax[key] <= 0 {
+			err = fmt.Errorf("can not tell whether libvmaf clips the CAMBI of %s: its %s rates the banded probe pictures %v",
+				config.Model, key, report.pooledCAMBIMax[key])
+			return
+		}
+	}
+	clipped := vmafPass{model: config.Model, modelCAMBI: true, measures: VMAFMeasures{Fidelity: true}}
+	if report, err = runVMAFProbe(ctx, vmafProbeBandedPictures, clipped, config.ReportDir, config.Debug); err != nil {
+		return
+	}
+	if len(report.modelCAMBIKeys) == 0 {
+		err = fmt.Errorf("%w %s: no CAMBI feature reported once clipped", ErrVMAFCAMBIClip, config.Model)
+		return
+	}
+	for _, key := range report.modelCAMBIKeys {
+		if report.pooledCAMBIMax[key] != 0 {
+			err = fmt.Errorf("%w %s: its %s still rates the banded probe pictures %v",
+				ErrVMAFCAMBIClip, config.Model, key, report.pooledCAMBIMax[key])
+			return
+		}
+	}
+	return true, nil
+}
+
+// runVMAFProbe runs a pass on two frames of a lavfi source scored against themselves, and returns
+// its report: see VMAFProbe.
+func runVMAFProbe(ctx context.Context, pictures string, pass vmafPass, reportDir string, debug func(string)) (
+	report VMAFReport, err error) {
 	// Report file, unique in case of concurrent probes
-	reportFd, err := os.CreateTemp(config.ReportDir, vmafProbeFileMask)
+	reportFd, err := os.CreateTemp(reportDir, vmafProbeFileMask)
 	if err != nil {
 		err = fmt.Errorf("failed to create the probe report file: %w", err)
 		return
@@ -244,13 +501,12 @@ func VMAFProbe(ctx context.Context, config VMAFProbeConfig) (libvmafVersion stri
 	// One generated stream split in two: the distorted side is the reference itself
 	args := []string{
 		"-loglevel", "error", "-nostats", "-nostdin", "-y",
-		"-f", "lavfi", "-i", fmt.Sprintf("testsrc2=size=%dx%d:rate=%d:duration=1", config.Width, config.Height, vmafProbeFrames),
-		"-filter_complex", fmt.Sprintf("[0:v]format=yuv420p10le,split[distorted][reference];[distorted][reference]%s",
-			vmafFilter(config.Model, reportPath, 1)),
+		"-f", "lavfi", "-i", pictures,
+		"-filter_complex", "[0:v]format=yuv420p10le,split[distorted][reference];[distorted][reference]" + pass.filter(reportPath, 1),
 		"-f", "null", "-",
 	}
-	if config.Debug != nil {
-		config.Debug(fmt.Sprintf("Probe libvmaf with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
+	if debug != nil {
+		debug(fmt.Sprintf("Probe libvmaf with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
 	var stderr bytes.Buffer
@@ -266,17 +522,13 @@ func VMAFProbe(ctx context.Context, config VMAFProbeConfig) (libvmafVersion stri
 		return
 	}
 	// Parse the report
-	report, err := readVMAFReport(reportPath)
-	if err != nil {
-		err = fmt.Errorf("libvmaf did not produce a usable report with model %s: %w\n%s", config.Model, err, output)
+	if report, err = readVMAFReport(reportPath, pass); err != nil {
+		err = fmt.Errorf("libvmaf did not produce a usable report with model %s: %w\n%s", pass.model, err, output)
 		return
 	}
 	if len(report.Frames) != vmafProbeFrames {
-		err = fmt.Errorf("libvmaf scored %d frames out of %d with model %s\n%s", len(report.Frames), vmafProbeFrames, config.Model, output)
+		err = fmt.Errorf("libvmaf scored %d frames out of %d with model %s\n%s", len(report.Frames), vmafProbeFrames, pass.model, output)
 		return
-	}
-	if libvmafVersion = report.Version; libvmafVersion == "" {
-		libvmafVersion = "unknown"
 	}
 	return
 }
@@ -292,8 +544,10 @@ type VMAFComputeConfig struct {
 	DistortedPath  string // Path to the distorted (encoded) video.
 	InputFrameRate string // Frame rate of the input videos (e.g. "24" or "24000/1001").
 	// VMAF generation
-	ReportPath string    // Path where the JSON VMAF report will be written.
-	Model      VMAFModel // Model to score with (see SelectVMAFModel).
+	ReportPath string       // Path where the JSON VMAF report will be written.
+	Model      VMAFModel    // Model to score with (see SelectVMAFModel).
+	ModelCAMBI bool         // Whether the model feeds on CAMBI (see VMAFCAMBIProbe).
+	Measures   VMAFMeasures // What the pass measures.
 	// Hardware decode
 	HWDecoderConfig
 	// Reporting
@@ -323,8 +577,8 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		err = errors.New("input frame rate must be set")
 		return
 	}
-	if !config.Model.Valid() {
-		err = fmt.Errorf("invalid VMAF model name %q", config.Model)
+	pass := vmafPass{model: config.Model, modelCAMBI: config.ModelCAMBI, measures: config.Measures}
+	if err = pass.validate(); err != nil {
 		return
 	}
 	// Apply defaults
@@ -371,7 +625,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	args = append(args,
 		"-filter_complex",
 		"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]setpts=PTS-STARTPTS[reference];[distorted][reference]"+
-			vmafFilter(config.Model, config.ReportPath, NbThreadsToUse),
+			pass.filter(config.ReportPath, NbThreadsToUse),
 	)
 	//// no ffmpeg output
 	args = append(args, "-f", "null", "-")
@@ -417,7 +671,7 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		return
 	}
 	// Parse report
-	return readVMAFReport(config.ReportPath)
+	return readVMAFReport(config.ReportPath, pass)
 }
 
 // appendHWAccelArgs appends the appropriate -hwaccel flags for the given decoder config.
@@ -443,32 +697,286 @@ func appendHWAccelArgs(args []string, dec HWDecoderConfig) []string {
 	return args
 }
 
-// readVMAFReport reads and parses the JSON report written by libvmaf.
-func readVMAFReport(path string) (report VMAFReport, err error) {
+/*
+ * Report
+ */
+
+// VMAFReport holds what sptenc reads from the report of a libvmaf pass (see readVMAFReport): per
+// frame and pooled over the frames, the scores the pass computed, the CAMBI the model was fed
+// with, and the banding measured in full-reference mode. What the report does not hold is zero,
+// the Has fields tell.
+type VMAFReport struct {
+	Version       string
+	FPS           float64
+	Frames        []VMAFFrameMetrics // in the order of the report, the order of the frames
+	Pooled        VMAFPooledMetrics
+	HasFidelity   bool
+	HasOriginal   bool
+	HasModelCAMBI bool // see VMAFFrameMetrics.ModelCAMBI
+	HasBanding    bool
+	// modelCAMBIKeys are the keys of the model's CAMBI features in the pooled metrics (see
+	// modelCAMBIKeys), and pooledCAMBIMax their pooled maximums: VMAFCAMBIProbe decides on them.
+	modelCAMBIKeys []string
+	pooledCAMBIMax map[string]float64
+}
+
+// VMAFFrameMetrics holds the metrics of one frame sptenc reads out of the ones libvmaf reports.
+type VMAFFrameMetrics struct {
+	Fidelity float64 // See VMAFScoreFidelity.
+	Original float64 // See VMAFScoreOriginal.
+	// ModelCAMBI is the CAMBI the model was fed with: capped at 17 by the v1.0.16 models, at 0 for
+	// fidelity. Read when the report holds a single one (see modelCAMBIKeys).
+	ModelCAMBI float64
+	Banding    VMAFBanding
+}
+
+// VMAFBanding is the banding CAMBI rates in full-reference mode (see bandingFeature), from 0
+// (none) up: "a CAMBI score around 5 is where banding starts to become slightly annoying"
+// (libvmaf's CAMBI documentation).
+type VMAFBanding struct {
+	Encode float64 // CAMBI of the distorted picture.
+	Source float64 // CAMBI of the reference.
+	Added  float64 // What the distorted picture adds: max(0, Encode - Source), frame by frame.
+}
+
+// VMAFPooledMetrics holds the metrics of VMAFFrameMetrics pooled over the frames by libvmaf.
+type VMAFPooledMetrics struct {
+	Fidelity   VMAFPooledMetric
+	Original   VMAFPooledMetric
+	ModelCAMBI VMAFPooledMetric
+	Banding    VMAFPooledBanding
+}
+
+// VMAFPooledBanding holds the metrics of VMAFBanding pooled over the frames by libvmaf.
+type VMAFPooledBanding struct {
+	Encode VMAFPooledMetric
+	Source VMAFPooledMetric
+	Added  VMAFPooledMetric
+}
+
+// VMAFPooledMetric holds aggregate values (min, max, mean, harmonic mean) for a single metric.
+type VMAFPooledMetric struct {
+	Min          float64 `json:"min"`
+	Max          float64 `json:"max"`
+	Mean         float64 `json:"mean"`
+	HarmonicMean float64 `json:"harmonic_mean"`
+}
+
+// readVMAFReport reads the report of a pass, on explicit keys: the scores under the keys the pass
+// gives them (see vmafPass.scoreKeys), and the three keys of the banding feature (see
+// bandingFeature). A key the pass asks for and the report does not hold, in any frame or in the
+// pooled metrics, is an error, and so is a report without any frame.
+//
+// # WHY EXPLICIT KEYS
+//
+// libvmaf keys a feature by a name built from its options. A pass with the banding feature holds
+// up to five CAMBI keys (the model's, twice when it is loaded clipped and as is, and the distorted
+// picture's, the reference's and the added banding of the feature): a key picked by its "cambi"
+// prefix is whichever sorts first. And libvmaf can leave out what was asked for while ffmpeg
+// succeeds: the source's CAMBI and the added banding when the feature is taken for the model's
+// (see bandingFeature), the whole feature when both sides of the pictures are under 216 pixels
+// (see VMAFProbeConfig). A missing key must stop the run, not read as zero.
+//
+// # THE MODEL'S CAMBI
+//
+// Its key is built from the options of the model (cambi_hrs_1080_cmxv_17_vlt_0.06 for the v1.0.16
+// models, cmxv_0 under the fidelity clip), which a retrained model changes: sptenc does not choose
+// it, and can only find it among the CAMBI keys as the one that is not the banding feature's (see
+// modelCAMBIKeys). A pass loading the model twice, clipped and as is, holds two, which nothing
+// sptenc controls tells apart: the model's CAMBI is read when there is a single one.
+func readVMAFReport(path string, pass vmafPass) (report VMAFReport, err error) {
 	reportFd, err := os.Open(path)
 	if err != nil {
 		err = fmt.Errorf("failed to open VMAF report file: %w", err)
 		return
 	}
 	defer reportFd.Close()
-	if err = json.NewDecoder(reportFd).Decode(&report); err != nil {
+	if report, err = decodeVMAFReport(bufio.NewReader(reportFd), pass); err != nil {
 		err = fmt.Errorf("error parsing VMAF JSON output: %w", err)
-		return
 	}
 	return
 }
 
-/*
- * Report
- */
+// decodeVMAFReport decodes a libvmaf JSON report for a pass (see readVMAFReport), frame by frame:
+// only the metrics sptenc reads are kept.
+func decodeVMAFReport(r io.Reader, pass vmafPass) (report VMAFReport, err error) {
+	var keys vmafReportKeys
+	keys.fidelity, keys.original = pass.scoreKeys()
+	keys.banding = pass.measures.Banding
+	report.HasFidelity = keys.fidelity != ""
+	report.HasOriginal = keys.original != ""
+	report.HasBanding = keys.banding
+	dec := json.NewDecoder(r)
+	if err = expectJSONDelim(dec, '{'); err != nil {
+		return
+	}
+	var pooled map[string]VMAFPooledMetric
+	for dec.More() {
+		var key string
+		if key, err = readJSONKey(dec); err != nil {
+			return
+		}
+		switch key {
+		case "version":
+			err = dec.Decode(&report.Version)
+		case "fps":
+			err = dec.Decode(&report.FPS)
+		case "frames":
+			err = report.decodeFrames(dec, keys)
+		case "pooled_metrics":
+			err = dec.Decode(&pooled)
+		default:
+			err = dec.Decode(new(json.RawMessage)) // not read
+		}
+		if err != nil {
+			err = fmt.Errorf("%s: %w", key, err)
+			return
+		}
+	}
+	if err = expectJSONDelim(dec, '}'); err != nil {
+		return
+	}
+	switch {
+	case len(report.Frames) == 0:
+		err = errors.New("no frame in the report")
+	case pooled == nil:
+		err = errors.New("no pooled metrics in the report")
+	default:
+		if err = report.readPooled(pooled, keys); err != nil {
+			err = fmt.Errorf("pooled_metrics: %w", err)
+		}
+	}
+	return
+}
 
-// VMAFReport is the top-level structure of the JSON report produced by libvmaf.
-type VMAFReport struct {
-	Version          string            `json:"version"`
-	FPS              float64           `json:"fps"`
-	Frames           VMAFFrames        `json:"frames"`
-	PooledMetrics    VMAFPooledMetrics `json:"pooled_metrics"`
-	AggregateMetrics struct{}          `json:"aggregate_metrics"`
+// vmafReportKeys are the keys a report is read on (see readVMAFReport): the report keys of the
+// scores, empty when not computed, and whether the banding feature is in the pass.
+type vmafReportKeys struct {
+	fidelity, original string
+	banding            bool
+}
+
+// decodeFrames decodes the frames of a report one by one, keeping the metrics sptenc reads.
+func (vr *VMAFReport) decodeFrames(dec *json.Decoder, keys vmafReportKeys) (err error) {
+	if err = expectJSONDelim(dec, '['); err != nil {
+		return
+	}
+	for dec.More() {
+		var frame struct {
+			FrameNum int                `json:"frameNum"`
+			Metrics  map[string]float64 `json:"metrics"`
+		}
+		if err = dec.Decode(&frame); err != nil {
+			return
+		}
+		var metrics VMAFFrameMetrics
+		if metrics.Fidelity, err = reportMetric(frame.Metrics, keys.fidelity); err != nil {
+			return fmt.Errorf("frame %d: %w", frame.FrameNum, err)
+		}
+		if metrics.Original, err = reportMetric(frame.Metrics, keys.original); err != nil {
+			return fmt.Errorf("frame %d: %w", frame.FrameNum, err)
+		}
+		if keys.banding {
+			if metrics.Banding.Encode, err = reportMetric(frame.Metrics, bandingEncodeKey); err != nil {
+				return fmt.Errorf("frame %d: %w", frame.FrameNum, err)
+			}
+			if metrics.Banding.Source, err = reportMetric(frame.Metrics, bandingSourceKey); err != nil {
+				return fmt.Errorf("frame %d: %w", frame.FrameNum, err)
+			}
+			if metrics.Banding.Added, err = reportMetric(frame.Metrics, bandingAddedKey); err != nil {
+				return fmt.Errorf("frame %d: %w", frame.FrameNum, err)
+			}
+		}
+		if cambiKeys := modelCAMBIKeys(frame.Metrics); len(cambiKeys) == 1 {
+			metrics.ModelCAMBI = frame.Metrics[cambiKeys[0]]
+		}
+		vr.Frames = append(vr.Frames, metrics)
+	}
+	return expectJSONDelim(dec, ']')
+}
+
+// readPooled reads the pooled metrics of a report.
+func (vr *VMAFReport) readPooled(pooled map[string]VMAFPooledMetric, keys vmafReportKeys) (err error) {
+	if vr.Pooled.Fidelity, err = reportMetric(pooled, keys.fidelity); err != nil {
+		return
+	}
+	if vr.Pooled.Original, err = reportMetric(pooled, keys.original); err != nil {
+		return
+	}
+	if keys.banding {
+		if vr.Pooled.Banding.Encode, err = reportMetric(pooled, bandingEncodeKey); err != nil {
+			return
+		}
+		if vr.Pooled.Banding.Source, err = reportMetric(pooled, bandingSourceKey); err != nil {
+			return
+		}
+		if vr.Pooled.Banding.Added, err = reportMetric(pooled, bandingAddedKey); err != nil {
+			return
+		}
+	}
+	vr.modelCAMBIKeys = modelCAMBIKeys(pooled)
+	vr.pooledCAMBIMax = make(map[string]float64, len(vr.modelCAMBIKeys))
+	for _, key := range vr.modelCAMBIKeys {
+		vr.pooledCAMBIMax[key] = pooled[key].Max
+	}
+	if vr.HasModelCAMBI = len(vr.modelCAMBIKeys) == 1; vr.HasModelCAMBI {
+		vr.Pooled.ModelCAMBI = pooled[vr.modelCAMBIKeys[0]]
+	}
+	return
+}
+
+// reportMetric returns the metric of a report under key, the zero value for an empty key (not
+// asked for), an error when the report does not hold it.
+func reportMetric[V any](metrics map[string]V, key string) (value V, err error) {
+	if key == "" {
+		return
+	}
+	value, found := metrics[key]
+	if !found {
+		err = fmt.Errorf("no %q metric", key)
+	}
+	return
+}
+
+// modelCAMBIKeys returns, sorted, the keys of the CAMBI features of a model among the metrics of a
+// report: the keys starting with "cambi" that are not the banding feature's (see readVMAFReport).
+func modelCAMBIKeys[V any](metrics map[string]V) (keys []string) {
+	for key := range metrics {
+		switch key {
+		case bandingEncodeKey, bandingSourceKey, bandingAddedKey:
+		default:
+			if strings.HasPrefix(key, cambiMetricPrefix) {
+				keys = append(keys, key)
+			}
+		}
+	}
+	sort.Strings(keys)
+	return
+}
+
+// expectJSONDelim reads the next token of a JSON stream, which must be the delimiter delim.
+func expectJSONDelim(dec *json.Decoder, delim json.Delim) error {
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if token != delim {
+		return fmt.Errorf("expected %q, got %v", delim, token)
+	}
+	return nil
+}
+
+// readJSONKey reads the next key of a JSON object from a stream.
+func readJSONKey(dec *json.Decoder) (string, error) {
+	token, err := dec.Token()
+	if err != nil {
+		return "", err
+	}
+	key, ok := token.(string)
+	if !ok {
+		return "", fmt.Errorf("expected an object key, got %v", token)
+	}
+	return key, nil
 }
 
 // VMAF percentile constants for statistics calculation.
@@ -480,159 +988,56 @@ const (
 	vmafPercentile50 = 50 // Median
 )
 
-// GetStats extracts summary statistics from the VMAF report, including
-// percentiles that are not present in the raw pooled metrics.
-func (vr VMAFReport) GetStats() (vs VMAFStats) {
+// Stats returns the statistics of a score over the frames: the pooled ones of libvmaf, and the
+// percentiles libvmaf does not compute. The model's CAMBI goes with them when the report holds it.
+// A score the report does not hold is an error.
+func (vr VMAFReport) Stats(score VMAFScore) (vs VMAFStats, err error) {
+	var (
+		pooled VMAFPooledMetric
+		value  func(VMAFFrameMetrics) float64
+	)
+	switch {
+	case score == VMAFScoreFidelity && vr.HasFidelity:
+		pooled, value = vr.Pooled.Fidelity, func(m VMAFFrameMetrics) float64 { return m.Fidelity }
+	case score == VMAFScoreOriginal && vr.HasOriginal:
+		pooled, value = vr.Pooled.Original, func(m VMAFFrameMetrics) float64 { return m.Original }
+	default:
+		err = fmt.Errorf("the VMAF report holds no %s score", score)
+		return
+	}
 	vs.Version = vr.Version
 	// Copy existing metrics
-	vs.Minimum = vr.PooledMetrics.VMAF.Min
-	vs.HarmonicMean = vr.PooledMetrics.VMAF.HarmonicMean
-	vs.Mean = vr.PooledMetrics.VMAF.Mean
-	vs.Maximum = vr.PooledMetrics.VMAF.Max
-	vs.CAMBIMean = vr.PooledMetrics.CAMBI.Mean
-	vs.CAMBIMax = vr.PooledMetrics.CAMBI.Max
-	vs.HasCAMBI = vr.PooledMetrics.HasCAMBI
+	vs.Minimum = pooled.Min
+	vs.HarmonicMean = pooled.HarmonicMean
+	vs.Mean = pooled.Mean
+	vs.Maximum = pooled.Max
+	vs.CAMBIMean = vr.Pooled.ModelCAMBI.Mean
+	vs.CAMBIMax = vr.Pooled.ModelCAMBI.Max
+	vs.HasCAMBI = vr.HasModelCAMBI
 	// Compute the missing ones
-	sort.Sort(vr.Frames)
-	vs.Percentile1 = vr.Frames.VMAFPercentile(vmafPercentile1)
-	vs.Percentile5 = vr.Frames.VMAFPercentile(vmafPercentile5)
-	vs.Percentile10 = vr.Frames.VMAFPercentile(vmafPercentile10)
-	vs.Percentile25 = vr.Frames.VMAFPercentile(vmafPercentile25)
-	vs.Median = vr.Frames.VMAFPercentile(vmafPercentile50)
+	scores := make([]float64, len(vr.Frames))
+	for i, frame := range vr.Frames {
+		scores[i] = value(frame)
+	}
+	sort.Float64s(scores)
+	vs.Percentile1 = scorePercentile(scores, vmafPercentile1)
+	vs.Percentile5 = scorePercentile(scores, vmafPercentile5)
+	vs.Percentile10 = scorePercentile(scores, vmafPercentile10)
+	vs.Percentile25 = scorePercentile(scores, vmafPercentile25)
+	vs.Median = scorePercentile(scores, vmafPercentile50)
 	return
 }
 
-// VMAFFrames is a slice of per-frame VMAF measurements.
-type VMAFFrames []*VMAFFrame
-
-// Len returns the number of frames. It implements sort.Interface.
-func (vf VMAFFrames) Len() int {
-	return len(vf)
-}
-
-// Less reports whether frame i should sort before frame j based on VMAF score.
-// It implements sort.Interface.
-func (vf VMAFFrames) Less(i, j int) bool {
-	if vf[i] == nil {
-		return true
-	}
-	if vf[j] == nil {
-		return false
-	}
-	return vf[i].Metrics.VMAF < vf[j].Metrics.VMAF
-}
-
-// Swap exchanges frames i and j. It implements sort.Interface.
-func (vf VMAFFrames) Swap(i, j int) {
-	vf[i], vf[j] = vf[j], vf[i]
-}
-
-// VMAFPercentile returns the VMAF value at the given percentile.
-// The receiver must be sorted by VMAF score before calling this method.
-func (vf VMAFFrames) VMAFPercentile(p float64) float64 {
-	// vf must have been sorted !
-	index := int(math.Round(float64(len(vf))/100*p)) - 1
+// scorePercentile returns the score at the given percentile of sorted scores.
+func scorePercentile(sorted []float64, p float64) float64 {
+	index := int(math.Round(float64(len(sorted))/100*p)) - 1
 	if index == -1 {
 		index = 0
 	}
-	if index < 0 || index >= len(vf) {
+	if index < 0 || index >= len(sorted) {
 		return 0
 	}
-	return vf[index].Metrics.VMAF
-}
-
-// VMAFFrame represents the VMAF metrics for a single frame.
-type VMAFFrame struct {
-	FrameNum int              `json:"frameNum"`
-	Metrics  VMAFFrameMetrics `json:"metrics"`
-}
-
-// Metric keys of a libvmaf report. The score is always "vmaf". The features are keyed by a
-// name templated from their options (cambi_hrs_1080_cmxv_17_vlt_0.06 for the CAMBI of the
-// v1.0.16 models): a model retrained with other options changes the key, hence a prefix match.
-const (
-	vmafMetricKey     = "vmaf"
-	cambiMetricPrefix = "cambi"
-)
-
-// findMetricKeys returns the keys of the score and of the CAMBI feature among the metrics
-// of a report, empty when absent. Keys are scanned in order for a deterministic pick.
-func findMetricKeys(keys []string) (vmafKey, cambiKey string) {
-	sort.Strings(keys)
-	for _, key := range keys {
-		switch {
-		case key == vmafMetricKey:
-			vmafKey = key
-		case cambiKey == "" && strings.HasPrefix(key, cambiMetricPrefix):
-			cambiKey = key
-		}
-	}
-	return
-}
-
-// VMAFFrameMetrics holds the metrics of one frame sptenc reads out of the ones libvmaf reports:
-// the score, and the CAMBI banding feature the v1 models are fed with (0 is no banding, around
-// 5 is where it starts to be slightly annoying, the v1 models cap it at 17).
-type VMAFFrameMetrics struct {
-	VMAF  float64
-	CAMBI float64
-}
-
-// UnmarshalJSON picks the score and the CAMBI feature among the metrics of a frame.
-func (m *VMAFFrameMetrics) UnmarshalJSON(data []byte) error {
-	var raw map[string]float64
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	keys := make([]string, 0, len(raw))
-	for key := range raw {
-		keys = append(keys, key)
-	}
-	vmafKey, cambiKey := findMetricKeys(keys)
-	if vmafKey == "" {
-		return fmt.Errorf("no %q metric in frame metrics", vmafMetricKey)
-	}
-	m.VMAF = raw[vmafKey]
-	m.CAMBI = raw[cambiKey] // zero when absent
-	return nil
-}
-
-// VMAFPooledMetrics aggregates over the entire sequence the metrics sptenc reads (see
-// VMAFFrameMetrics).
-type VMAFPooledMetrics struct {
-	VMAF  VMAFPooledMetric
-	CAMBI VMAFPooledMetric
-	// HasCAMBI reports whether the model has CAMBI among its features: the v1 models do, a v0
-	// one forced with the model flag does not, and its zero would read as "no banding".
-	HasCAMBI bool
-}
-
-// UnmarshalJSON picks the score and the CAMBI feature among the pooled metrics of a report.
-func (m *VMAFPooledMetrics) UnmarshalJSON(data []byte) error {
-	var raw map[string]VMAFPooledMetric
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	keys := make([]string, 0, len(raw))
-	for key := range raw {
-		keys = append(keys, key)
-	}
-	vmafKey, cambiKey := findMetricKeys(keys)
-	if vmafKey == "" {
-		return fmt.Errorf("no %q metric in pooled metrics", vmafMetricKey)
-	}
-	m.VMAF = raw[vmafKey]
-	m.CAMBI = raw[cambiKey] // zero when absent
-	m.HasCAMBI = cambiKey != ""
-	return nil
-}
-
-// VMAFPooledMetric holds aggregate values (min, max, mean, harmonic mean) for a single metric.
-type VMAFPooledMetric struct {
-	Min          float64 `json:"min"`
-	Max          float64 `json:"max"`
-	Mean         float64 `json:"mean"`
-	HarmonicMean float64 `json:"harmonic_mean"`
+	return sorted[index]
 }
 
 // VMAFStats is a user-friendly summary of VMAF results, including computed percentiles and
@@ -650,7 +1055,7 @@ type VMAFStats struct {
 	Maximum      float64 `json:"max"`
 	CAMBIMean    float64 `json:"cambi_mean"`
 	CAMBIMax     float64 `json:"cambi_max"`
-	HasCAMBI     bool    `json:"-"` // see VMAFPooledMetrics
+	HasCAMBI     bool    `json:"-"` // the model feeds on CAMBI, see VMAFReport.HasModelCAMBI
 }
 
 // String renders the VMAF statistics as an aligned plain-text table, followed by the banding

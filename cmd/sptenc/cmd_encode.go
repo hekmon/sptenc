@@ -535,7 +535,11 @@ var encodeCommand = &cli.Command{
 			return
 		}
 		duration = time.Since(start)
-		finalVMAFStats := finalVMAFreport.GetStats()
+		finalVMAFStats, err := finalVMAFreport.Stats(ffmpeg.VMAFScoreOriginal)
+		if err != nil {
+			err = fmt.Errorf("failed to read the final vmaf: %w", err)
+			return
+		}
 		fmt.Fprintf(bypass, "\tFinal VMAF computed in %s:\n\n%s\n", duration.Round(time.Second), finalVMAFStats)
 
 		// Step 5 - remux final file

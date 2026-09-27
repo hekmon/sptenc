@@ -118,6 +118,7 @@ func checkLibVMAF(ctx context.Context, cmd *cli.Command) error {
 	}
 	if _, err = ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
 		Model:     model,
+		Measures:  ffmpeg.VMAFMeasures{Original: true},
 		ReportDir: cmd.String(tmpDirFlagName),
 	}); err != nil {
 		switch {
@@ -142,6 +143,7 @@ func checkLibVMAF(ctx context.Context, cmd *cli.Command) error {
 func checkVMAFPictures(ctx context.Context, cmd *cli.Command, model ffmpeg.VMAFModel, stream *ffmpeg.FFProbeBinaryStream) error {
 	if _, err := ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
 		Model:     model,
+		Measures:  ffmpeg.VMAFMeasures{Original: true},
 		Width:     stream.Width,
 		Height:    stream.Height,
 		ReportDir: cmd.String(tmpDirFlagName),

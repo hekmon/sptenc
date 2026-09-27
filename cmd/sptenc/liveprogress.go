@@ -761,6 +761,7 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		InputFrameRate:  videoStream.RFrameRate,
 		ReportPath:      distorted + "_vmaf.json",
 		Model:           model,
+		Measures:        ffmpeg.VMAFMeasures{Original: true},
 		HWDecoderConfig: dec,
 	}, totalFrames, debug)
 }

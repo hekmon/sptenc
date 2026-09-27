@@ -70,6 +70,7 @@ var checkCommand = &cli.Command{
 				for _, model := range ffmpeg.VMAFModels {
 					libvmafVersion, probeErr := ffmpeg.VMAFProbe(ctx, ffmpeg.VMAFProbeConfig{
 						Model:     model,
+						Measures:  ffmpeg.VMAFMeasures{Original: true},
 						ReportDir: os.TempDir(),
 					})
 					if probeErr != nil {

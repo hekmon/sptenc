@@ -148,6 +148,7 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		InputFrameRate:    stream.RFrameRate,
 		ReportPath:        distorted + "_vmaf.json",
 		Model:             e.VMAFModel,
+		Measures:          ffmpeg.VMAFMeasures{Original: true},
 		HWDecoderConfig:   e.HWDecoder,
 		Debug:             debug,
 		RuntimeError:      runtimeError,
@@ -156,7 +157,10 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 	if err != nil {
 		return core.VMAFStats{}, err
 	}
-	stats := report.GetStats()
+	stats, err := report.Stats(ffmpeg.VMAFScoreOriginal)
+	if err != nil {
+		return core.VMAFStats{}, err
+	}
 	return core.VMAFStats{
 		Version:      stats.Version,
 		Minimum:      stats.Minimum,

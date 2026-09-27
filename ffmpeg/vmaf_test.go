@@ -2,10 +2,12 @@ package ffmpeg
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -121,50 +123,99 @@ func TestSelectVMAFModel(t *testing.T) {
 	}
 }
 
-// TestVMAFProbeSize runs the real thing: the smallest picture libvmaf scores depends on the
-// model, which is why the probe takes the size of the source (see VMAFProbeConfig). The
-// failing cases were measured with libvmaf f85a8536: a libvmaf scoring smaller pictures makes
-// them pass, and the MANUAL figures need the same update.
-func TestVMAFProbeSize(t *testing.T) {
-	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
-		t.Skipf("%s not found: %s", FFMPEGBinary, err)
-	}
-	ctx := context.Background()
-	dir := t.TempDir()
+// TestVMAFPassFilter checks the filter and the report keys of every kind of pass.
+func TestVMAFPassFilter(t *testing.T) {
+	const (
+		report  = `C:\tmp\seg_000001.mkv_vmaf.json`
+		tail    = `:log_fmt=json:log_path=C\\:\\\\tmp\\\\seg_000001.mkv_vmaf.json:n_threads=8`
+		banding = `:feature=name=cambi\\:full_ref=true\\:cambi_high_res_speedup=1080\\:cambi_vis_lum_threshold=0.06`
+	)
 	for _, tc := range []struct {
-		model         VMAFModel
-		width, height int
-		ok            bool
+		name               string
+		pass               vmafPass
+		filter             string
+		fidelity, original string
 	}{
-		{VMAFModelFHD, 320, 180, true},
-		{VMAFModelFHD, 16, 16, false},
-		{VMAFModelFHD, 1920, 160, false}, // wide enough to matter at this height
-		{VMAFModelPhone, 640, 360, true},
-		{VMAFModelPhone, 320, 180, false}, // scored by VMAFModelFHD above
-		{VMAFModelUHDFar, 640, 360, true},
-		{VMAFModelUHDFar, 512, 288, false},
+		{
+			// the filter of sptenc v0.1.0, whether the model feeds on CAMBI or not
+			name:     "original",
+			pass:     vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Original: true}},
+			filter:   `libvmaf=model=version=vmaf_v1.0.16_3d0h` + tail,
+			original: "vmaf",
+		},
+		{
+			name:     "original, model without CAMBI",
+			pass:     vmafPass{model: VMAFModelV0FHD, measures: VMAFMeasures{Original: true}},
+			filter:   `libvmaf=model=version=vmaf_v0.6.1` + tail,
+			fidelity: "vmaf", original: "vmaf",
+		},
+		{
+			name:     "fidelity",
+			pass:     vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Fidelity: true}},
+			filter:   `libvmaf=model=version=vmaf_v1.0.16_3d0h\\:cambi.cambi_max_val=0` + tail,
+			fidelity: "vmaf",
+		},
+		{
+			// no clip handed to a model without CAMBI: its score is both
+			name:     "fidelity, model without CAMBI",
+			pass:     vmafPass{model: VMAFModelV0FHD, measures: VMAFMeasures{Fidelity: true}},
+			filter:   `libvmaf=model=version=vmaf_v0.6.1` + tail,
+			fidelity: "vmaf", original: "vmaf",
+		},
+		{
+			name: "both scores",
+			pass: vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Fidelity: true, Original: true}},
+			filter: `libvmaf=model=version=vmaf_v1.0.16_3d0h\\:cambi.cambi_max_val=0\\:name=fidelity|version=vmaf_v1.0.16_3d0h\\:name=original` +
+				tail,
+			fidelity: "fidelity", original: "original",
+		},
+		{
+			name:     "both scores, model without CAMBI",
+			pass:     vmafPass{model: VMAFModelV0FHD, measures: VMAFMeasures{Fidelity: true, Original: true}},
+			filter:   `libvmaf=model=version=vmaf_v0.6.1` + tail,
+			fidelity: "vmaf", original: "vmaf",
+		},
+		{
+			name:   "banding only",
+			pass:   vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Banding: true}},
+			filter: `libvmaf=model=` + banding + tail,
+		},
+		{
+			name:     "fidelity and banding",
+			pass:     vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Fidelity: true, Banding: true}},
+			filter:   `libvmaf=model=version=vmaf_v1.0.16_3d0h\\:cambi.cambi_max_val=0` + banding + tail,
+			fidelity: "vmaf",
+		},
+		{
+			name: "both scores and banding",
+			pass: vmafPass{model: VMAFModelUHD, modelCAMBI: true, measures: VMAFMeasures{Fidelity: true, Original: true, Banding: true}},
+			filter: `libvmaf=model=version=vmaf_v1.0.16_1d5h_2160\\:cambi.cambi_max_val=0\\:name=fidelity|version=vmaf_v1.0.16_1d5h_2160\\:name=original` +
+				banding + tail,
+			fidelity: "fidelity", original: "original",
+		},
 	} {
-		_, err := VMAFProbe(ctx, VMAFProbeConfig{Model: tc.model, Width: tc.width, Height: tc.height, ReportDir: dir})
-		if errors.Is(err, ErrVMAFModelUnavailable) {
-			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, tc.model, err)
+		if err := tc.pass.validate(); err != nil {
+			t.Errorf("%s: %s", tc.name, err)
 		}
-		if (err == nil) != tc.ok {
-			t.Errorf("%s at %dx%d: expected success %t, got %v", tc.model, tc.width, tc.height, tc.ok, err)
+		if got := tc.pass.filter(report, 8); got != tc.filter {
+			t.Errorf("%s: want filter\n%s\ngot\n%s", tc.name, tc.filter, got)
+		}
+		if fidelity, original := tc.pass.scoreKeys(); fidelity != tc.fidelity || original != tc.original {
+			t.Errorf("%s: want score keys %q and %q, got %q and %q", tc.name, tc.fidelity, tc.original, fidelity, original)
 		}
 	}
-	// no probe report left behind, crashes included
-	if entries, err := os.ReadDir(dir); err != nil {
-		t.Fatal(err)
-	} else if len(entries) != 0 {
-		t.Errorf("probe reports left behind: %v", entries)
+	// a pass measuring nothing, or loading a model that is not one, is refused; a banding pass
+	// loads no model, whatever its name
+	for _, pass := range []vmafPass{
+		{model: VMAFModelFHD, modelCAMBI: true},
+		{model: "a:b", measures: VMAFMeasures{Fidelity: true}},
+	} {
+		if err := pass.validate(); err == nil {
+			t.Errorf("%+v should be refused", pass)
+		}
 	}
-}
-
-func TestVMAFFilter(t *testing.T) {
-	got := vmafFilter(VMAFModelFHD, `C:\tmp\seg_000001.mkv_vmaf.json`, 8)
-	want := `libvmaf=model=version=vmaf_v1.0.16_3d0h:log_fmt=json:log_path=C\\:\\\\tmp\\\\seg_000001.mkv_vmaf.json:n_threads=8`
-	if got != want {
-		t.Errorf("want %q, got %q", want, got)
+	if err := (vmafPass{model: "a:b", measures: VMAFMeasures{Banding: true}}).validate(); err != nil {
+		t.Errorf("a banding pass loads no model: %s", err)
 	}
 }
 
@@ -187,36 +238,48 @@ const v1ReportSample = `{
   "aggregate_metrics": {}
 }`
 
-func TestVMAFReport_Unmarshal(t *testing.T) {
-	var report VMAFReport
-	if err := json.Unmarshal([]byte(v1ReportSample), &report); err != nil {
-		t.Fatalf("failed to parse the v1 report: %s", err)
+func decodeSample(t *testing.T, sample string, pass vmafPass) VMAFReport {
+	t.Helper()
+	report, err := decodeVMAFReport(strings.NewReader(sample), pass)
+	if err != nil {
+		t.Fatalf("failed to decode the report: %s", err)
 	}
-	if report.Version != "3.2.0" {
-		t.Errorf("version: want 3.2.0, got %q", report.Version)
+	return report
+}
+
+func TestVMAFReport_Original(t *testing.T) {
+	report := decodeSample(t, v1ReportSample, vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Original: true}})
+	if report.Version != "3.2.0" || report.FPS != 10.65 {
+		t.Errorf("version and fps: want 3.2.0 and 10.65, got %q and %v", report.Version, report.FPS)
 	}
 	if len(report.Frames) != 3 {
 		t.Fatalf("frames: want 3, got %d", len(report.Frames))
 	}
-	if got := report.Frames[0].Metrics.VMAF; got != 91.829956 {
-		t.Errorf("frame 0 vmaf: want 91.829956, got %v", got)
+	if !report.HasOriginal || report.HasFidelity || report.HasBanding || !report.HasModelCAMBI {
+		t.Errorf("unexpected content: %+v", report)
 	}
-	if got := report.Frames[0].Metrics.CAMBI; got != 5.187107 {
+	if got := report.Frames[0].Original; got != 91.829956 {
+		t.Errorf("frame 0 score: want 91.829956, got %v", got)
+	}
+	if got := report.Frames[0].ModelCAMBI; got != 5.187107 {
 		t.Errorf("frame 0 cambi: want 5.187107, got %v", got)
 	}
-	if got := report.PooledMetrics.VMAF.HarmonicMean; got != 92.169343 {
+	if got := report.Pooled.Original.HarmonicMean; got != 92.169343 {
 		t.Errorf("pooled vmaf hmean: want 92.169343, got %v", got)
 	}
-	if got := report.PooledMetrics.CAMBI.Max; got != 5.187107 {
+	if got := report.Pooled.ModelCAMBI.Max; got != 5.187107 {
 		t.Errorf("pooled cambi max: want 5.187107, got %v", got)
 	}
-	stats := report.GetStats()
+	stats, err := report.Stats(VMAFScoreOriginal)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.Version != "3.2.0" || stats.Minimum != 91.829956 || stats.Maximum != 92.58156 ||
 		stats.Mean != 92.170311 || stats.HarmonicMean != 92.169343 {
 		t.Errorf("unexpected pooled stats: %+v", stats)
 	}
-	if stats.Median != 92.099416 {
-		t.Errorf("median: want 92.099416, got %v", stats.Median)
+	if stats.Median != 92.099416 || stats.Percentile1 != 91.829956 {
+		t.Errorf("median and p1: want 92.099416 and 91.829956, got %v and %v", stats.Median, stats.Percentile1)
 	}
 	if stats.CAMBIMean != 4.254301 || stats.CAMBIMax != 5.187107 {
 		t.Errorf("cambi stats: want mean 4.254301 max 5.187107, got mean %v max %v", stats.CAMBIMean, stats.CAMBIMax)
@@ -224,35 +287,289 @@ func TestVMAFReport_Unmarshal(t *testing.T) {
 	if rendered := stats.String(); !strings.Contains(rendered, "92.169343") || !strings.Contains(rendered, "CAMBI") {
 		t.Errorf("rendered stats miss the score or the banding line:\n%s", rendered)
 	}
-}
-
-func TestVMAFReport_UnmarshalNoScore(t *testing.T) {
-	var frame VMAFFrame
-	if err := json.Unmarshal([]byte(`{"frameNum": 0, "metrics": {"cambi_hrs_1080": 1.0}}`), &frame); err == nil {
-		t.Error("a frame without a vmaf metric should be an error")
+	// the frames keep their order: the percentiles are computed on a copy
+	if report.Frames[0].Original != 91.829956 || report.Frames[2].Original != 92.58156 {
+		t.Errorf("frames reordered: %+v", report.Frames)
 	}
-	// A report without CAMBI is a report of another model: the score is still read
-	var pooled VMAFPooledMetrics
-	if err := json.Unmarshal([]byte(`{"vmaf": {"min": 1, "max": 2, "mean": 1.5, "harmonic_mean": 1.4}}`), &pooled); err != nil {
-		t.Fatalf("pooled metrics without cambi should parse: %s", err)
-	}
-	if pooled.VMAF.Mean != 1.5 || pooled.CAMBI.Max != 0 || pooled.HasCAMBI {
-		t.Errorf("unexpected pooled metrics: %+v", pooled)
-	}
-	// and the zero CAMBI of a model without it (a v0 one forced) is not printed as "no banding"
-	if table := (VMAFReport{PooledMetrics: pooled}).GetStats().String(); strings.Contains(table, "Banding") {
-		t.Errorf("no banding line expected without CAMBI:\n%s", table)
+	// a score the pass did not compute is not read as zero
+	if _, err := report.Stats(VMAFScoreFidelity); err == nil {
+		t.Error("the report holds no fidelity score")
 	}
 }
 
-func TestFindMetricKeys(t *testing.T) {
-	vmafKey, cambiKey := findMetricKeys([]string{"integer_motion3_mmxv_18", "cambi_hrs_1080_cmxv_17_vlt_0.06", "vmaf"})
-	if vmafKey != "vmaf" || cambiKey != "cambi_hrs_1080_cmxv_17_vlt_0.06" {
-		t.Errorf("got vmaf %q cambi %q", vmafKey, cambiKey)
+// bothBandingReportSample is the report of a pass with both scores and the banding feature
+// (vmaf_v1.0.16_3d0h clipped and as is, libvmaf f85a8536), 8-bit-like steps against the dark
+// gradient of BENCHMARKS.md, trimmed to 2 frames and a few other metrics. cambi_full_reference
+// sorts first among the CAMBI keys: a pick by prefix takes it for the model's CAMBI.
+const bothBandingReportSample = `{
+  "version": "f85a8536",
+  "fps": 3.2,
+  "frames": [
+    {"frameNum": 0, "metrics": {"cambi_hrs_1080_cmxv_0_vlt_0.06": 0.000000, "integer_adm3_csf_2_dlmw_0.7_egl_1_min_0.5_nw_0.02": 0.986517, "cambi_hrs_1080_cmxv_17_vlt_0.06": 17.000000, "cambi_hrs_1080_vlt_0.06": 22.484294, "cambi_source": 6.653077, "cambi_full_reference": 15.831217, "integer_motion3_mmxv_18": 0.000000, "fidelity": 95.187485, "original": 84.518463}},
+    {"frameNum": 1, "metrics": {"cambi_hrs_1080_cmxv_0_vlt_0.06": 0.000000, "integer_adm3_csf_2_dlmw_0.7_egl_1_min_0.5_nw_0.02": 0.986517, "cambi_hrs_1080_cmxv_17_vlt_0.06": 17.000000, "cambi_hrs_1080_vlt_0.06": 22.484294, "cambi_source": 6.653077, "cambi_full_reference": 15.831217, "integer_motion3_mmxv_18": 0.000000, "fidelity": 95.187485, "original": 84.518463}}
+  ],
+  "pooled_metrics": {
+    "cambi_hrs_1080_cmxv_0_vlt_0.06": {"min": 0.000000, "max": 0.000000, "mean": 0.000000, "harmonic_mean": 0.000000},
+    "cambi_hrs_1080_cmxv_17_vlt_0.06": {"min": 17.000000, "max": 17.000000, "mean": 17.000000, "harmonic_mean": 17.000000},
+    "cambi_hrs_1080_vlt_0.06": {"min": 22.484294, "max": 22.484294, "mean": 22.484294, "harmonic_mean": 22.484294},
+    "cambi_source": {"min": 6.653077, "max": 6.653077, "mean": 6.653077, "harmonic_mean": 6.653077},
+    "cambi_full_reference": {"min": 15.831217, "max": 15.831217, "mean": 15.831217, "harmonic_mean": 15.831217},
+    "fidelity": {"min": 95.187485, "max": 95.187485, "mean": 95.187485, "harmonic_mean": 95.187485},
+    "original": {"min": 84.518463, "max": 84.518463, "mean": 84.518463, "harmonic_mean": 84.518463}
+  },
+  "aggregate_metrics": {}
+}`
+
+func TestVMAFReport_BothScoresAndBanding(t *testing.T) {
+	report := decodeSample(t, bothBandingReportSample, vmafPass{model: VMAFModelFHD, modelCAMBI: true,
+		measures: VMAFMeasures{Fidelity: true, Original: true, Banding: true}})
+	if !report.HasFidelity || !report.HasOriginal || !report.HasBanding {
+		t.Errorf("unexpected content: %+v", report)
 	}
-	vmafKey, cambiKey = findMetricKeys([]string{"psnr_y"})
-	if vmafKey != "" || cambiKey != "" {
-		t.Errorf("nothing should match, got vmaf %q cambi %q", vmafKey, cambiKey)
+	frame := report.Frames[1]
+	if frame.Fidelity != 95.187485 || frame.Original != 84.518463 {
+		t.Errorf("frame 1 scores: want 95.187485 and 84.518463, got %v and %v", frame.Fidelity, frame.Original)
+	}
+	if want := (VMAFBanding{Encode: 22.484294, Source: 6.653077, Added: 15.831217}); frame.Banding != want {
+		t.Errorf("frame 1 banding: want %+v, got %+v", want, frame.Banding)
+	}
+	if report.Pooled.Banding.Added.Mean != 15.831217 || report.Pooled.Banding.Source.Mean != 6.653077 ||
+		report.Pooled.Banding.Encode.Max != 22.484294 {
+		t.Errorf("unexpected pooled banding: %+v", report.Pooled.Banding)
+	}
+	// two models, two CAMBI keys of theirs: none is read as the model's, the banding feature's
+	// keys are never taken for one
+	if report.HasModelCAMBI || frame.ModelCAMBI != 0 {
+		t.Errorf("the model's CAMBI is ambiguous with two models, got %v", frame.ModelCAMBI)
+	}
+	if want := []string{"cambi_hrs_1080_cmxv_0_vlt_0.06", "cambi_hrs_1080_cmxv_17_vlt_0.06"}; !slices.Equal(report.modelCAMBIKeys, want) {
+		t.Errorf("model CAMBI keys: want %v, got %v", want, report.modelCAMBIKeys)
+	}
+	fidelity, err := report.Stats(VMAFScoreFidelity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := report.Stats(VMAFScoreOriginal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fidelity.HarmonicMean != 95.187485 || original.HarmonicMean != 84.518463 || fidelity.Median != 95.187485 {
+		t.Errorf("unexpected stats: fidelity %+v, original %+v", fidelity, original)
+	}
+	// the same report read for the fidelity and banding pass would miss its "vmaf" key
+	if _, err := decodeVMAFReport(strings.NewReader(bothBandingReportSample), vmafPass{model: VMAFModelFHD, modelCAMBI: true,
+		measures: VMAFMeasures{Fidelity: true, Banding: true}}); err == nil || !strings.Contains(err.Error(), `"vmaf"`) {
+		t.Errorf("a missing score key should be an error naming it, got %v", err)
+	}
+}
+
+// fidelityBandingReportSample is the report of a fidelity and banding pass: the model's clipped
+// CAMBI is the only CAMBI key that is not the banding feature's.
+const fidelityBandingReportSample = `{
+  "version": "f85a8536",
+  "frames": [
+    {"frameNum": 0, "metrics": {"cambi_full_reference": 15.831217, "cambi_hrs_1080_cmxv_0_vlt_0.06": 0.0, "cambi_hrs_1080_vlt_0.06": 22.484294, "cambi_source": 6.653077, "vmaf": 95.187485}}
+  ],
+  "pooled_metrics": {
+    "cambi_full_reference": {"min": 15.831217, "max": 15.831217, "mean": 15.831217, "harmonic_mean": 15.831217},
+    "cambi_hrs_1080_cmxv_0_vlt_0.06": {"min": 0, "max": 0, "mean": 0, "harmonic_mean": 0},
+    "cambi_hrs_1080_vlt_0.06": {"min": 22.484294, "max": 22.484294, "mean": 22.484294, "harmonic_mean": 22.484294},
+    "cambi_source": {"min": 6.653077, "max": 6.653077, "mean": 6.653077, "harmonic_mean": 6.653077},
+    "vmaf": {"min": 95.187485, "max": 95.187485, "mean": 95.187485, "harmonic_mean": 95.187485}
+  }
+}`
+
+func TestVMAFReport_FidelityAndBanding(t *testing.T) {
+	report := decodeSample(t, fidelityBandingReportSample, vmafPass{model: VMAFModelFHD, modelCAMBI: true,
+		measures: VMAFMeasures{Fidelity: true, Banding: true}})
+	frame := report.Frames[0]
+	if frame.Fidelity != 95.187485 || frame.Banding.Added != 15.831217 {
+		t.Errorf("unexpected frame: %+v", frame)
+	}
+	// the model's CAMBI is its own key, not the first "cambi" one
+	if !report.HasModelCAMBI || frame.ModelCAMBI != 0 || report.Pooled.ModelCAMBI.Max != 0 {
+		t.Errorf("the model's clipped CAMBI should be read as 0: %+v", report)
+	}
+}
+
+// bandingReportSample is the report of a banding pass: no model, no score.
+const bandingReportSample = `{
+  "version": "f85a8536",
+  "frames": [
+    {"frameNum": 0, "metrics": {"cambi_hrs_1080_vlt_0.06": 22.484294, "cambi_source": 6.653077, "cambi_full_reference": 15.831217}},
+    {"frameNum": 1, "metrics": {"cambi_hrs_1080_vlt_0.06": 2.5, "cambi_source": 3.0, "cambi_full_reference": 0.0}}
+  ],
+  "pooled_metrics": {
+    "cambi_hrs_1080_vlt_0.06": {"min": 2.5, "max": 22.484294, "mean": 12.492147, "harmonic_mean": 5.0},
+    "cambi_source": {"min": 3.0, "max": 6.653077, "mean": 4.8265385, "harmonic_mean": 4.5},
+    "cambi_full_reference": {"min": 0.0, "max": 15.831217, "mean": 7.9156085, "harmonic_mean": 1.9}
+  }
+}`
+
+func TestVMAFReport_Banding(t *testing.T) {
+	report := decodeSample(t, bandingReportSample, vmafPass{measures: VMAFMeasures{Banding: true}})
+	if report.HasFidelity || report.HasOriginal || !report.HasBanding || report.HasModelCAMBI {
+		t.Errorf("unexpected content: %+v", report)
+	}
+	// the distorted picture adds nothing where it is less banded than the reference
+	if want := (VMAFBanding{Encode: 2.5, Source: 3, Added: 0}); report.Frames[1].Banding != want {
+		t.Errorf("frame 1: want %+v, got %+v", want, report.Frames[1].Banding)
+	}
+	if report.Pooled.Banding.Added.Mean != 7.9156085 || report.Pooled.Banding.Added.Max != 15.831217 {
+		t.Errorf("unexpected pooled added banding: %+v", report.Pooled.Banding.Added)
+	}
+	if _, err := report.Stats(VMAFScoreFidelity); err == nil {
+		t.Error("a banding pass holds no score")
+	}
+}
+
+// v0BandingReportSample is the report of a v0 model with the banding feature: the model has no
+// CAMBI of its own, and its single score is both scores.
+const v0BandingReportSample = `{
+  "version": "f85a8536",
+  "frames": [
+    {"frameNum": 0, "metrics": {"integer_adm2": 1.008422, "integer_vif_scale0": 0.999998, "cambi_hrs_1080_vlt_0.06": 22.484294, "cambi_source": 6.653077, "cambi_full_reference": 15.831217, "integer_motion2": 0.0, "vmaf": 99.264425}}
+  ],
+  "pooled_metrics": {
+    "cambi_hrs_1080_vlt_0.06": {"min": 22.484294, "max": 22.484294, "mean": 22.484294, "harmonic_mean": 22.484294},
+    "cambi_source": {"min": 6.653077, "max": 6.653077, "mean": 6.653077, "harmonic_mean": 6.653077},
+    "cambi_full_reference": {"min": 15.831217, "max": 15.831217, "mean": 15.831217, "harmonic_mean": 15.831217},
+    "vmaf": {"min": 99.264425, "max": 99.264425, "mean": 99.264425, "harmonic_mean": 99.264425}
+  }
+}`
+
+func TestVMAFReport_ModelWithoutCAMBI(t *testing.T) {
+	report := decodeSample(t, v0BandingReportSample, vmafPass{model: VMAFModelV0FHD,
+		measures: VMAFMeasures{Fidelity: true, Banding: true}})
+	if !report.HasFidelity || !report.HasOriginal || report.HasModelCAMBI || len(report.modelCAMBIKeys) != 0 {
+		t.Errorf("unexpected content: %+v", report)
+	}
+	fidelity, err := report.Stats(VMAFScoreFidelity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := report.Stats(VMAFScoreOriginal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fidelity != original || fidelity.Mean != 99.264425 {
+		t.Errorf("both scores are the model's single one: fidelity %+v, original %+v", fidelity, original)
+	}
+	// and the zero CAMBI of a model without it is not printed as "no banding"
+	if strings.Contains(fidelity.String(), "Banding") {
+		t.Errorf("no banding line expected without CAMBI:\n%s", fidelity)
+	}
+}
+
+// TestVMAFReport_Incomplete checks that what a pass asks for and a report lacks stops the read:
+// libvmaf leaves it out while ffmpeg succeeds.
+func TestVMAFReport_Incomplete(t *testing.T) {
+	for _, tc := range []struct {
+		name, sample, missing string
+		pass                  vmafPass
+	}{
+		{
+			// the banding feature taken for the model's CAMBI (see bandingFeature)
+			name:    "banding feature merged",
+			sample:  v1ReportSample,
+			pass:    vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Original: true, Banding: true}},
+			missing: bandingEncodeKey,
+		},
+		{
+			// the pooled metrics lack the key, the frames have it
+			name: "pooled banding missing",
+			sample: `{"frames": [{"frameNum": 0, "metrics": {"cambi_hrs_1080_vlt_0.06": 1, "cambi_source": 1, "cambi_full_reference": 0}}],
+				"pooled_metrics": {"cambi_hrs_1080_vlt_0.06": {"min": 1}, "cambi_source": {"min": 1}}}`,
+			pass:    vmafPass{measures: VMAFMeasures{Banding: true}},
+			missing: bandingAddedKey,
+		},
+		{
+			// what libvmaf wrote for a banding pass on pictures CAMBI does not measure
+			name:    "no frame",
+			sample:  `{"version": "f85a8536", "frames": [], "pooled_metrics": {}, "aggregate_metrics": {}}`,
+			pass:    vmafPass{measures: VMAFMeasures{Banding: true}},
+			missing: "no frame",
+		},
+		{
+			name:    "no pooled metrics",
+			sample:  `{"frames": [{"frameNum": 0, "metrics": {"vmaf": 90}}]}`,
+			pass:    vmafPass{model: VMAFModelV0FHD, measures: VMAFMeasures{Original: true}},
+			missing: "no pooled metrics",
+		},
+		{
+			name:    "no score",
+			sample:  `{"frames": [{"frameNum": 0, "metrics": {"cambi_hrs_1080": 1.0}}], "pooled_metrics": {}}`,
+			pass:    vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Original: true}},
+			missing: `"vmaf"`,
+		},
+		{
+			name:    "not a report",
+			sample:  `[]`,
+			pass:    vmafPass{model: VMAFModelFHD, modelCAMBI: true, measures: VMAFMeasures{Original: true}},
+			missing: "expected",
+		},
+	} {
+		_, err := decodeVMAFReport(strings.NewReader(tc.sample), tc.pass)
+		if err == nil || !strings.Contains(err.Error(), tc.missing) {
+			t.Errorf("%s: want an error about %s, got %v", tc.name, tc.missing, err)
+		}
+	}
+}
+
+// TestVMAFProbeSize runs the real thing: the smallest picture libvmaf scores depends on the
+// model and on the pass, which is why the probe takes the size of the source and the passes of
+// the run (see VMAFProbeConfig). The failing cases were measured with libvmaf f85a8536: a
+// libvmaf scoring smaller pictures makes them pass, and the MANUAL figures need the same update.
+func TestVMAFProbeSize(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	var (
+		original = VMAFMeasures{Original: true}
+		fidelity = VMAFMeasures{Fidelity: true}
+		banding  = VMAFMeasures{Banding: true}
+	)
+	for _, tc := range []struct {
+		model         VMAFModel
+		modelCAMBI    bool
+		measures      VMAFMeasures
+		width, height int
+		ok            bool
+	}{
+		{VMAFModelFHD, true, original, 320, 180, true},
+		{VMAFModelFHD, true, original, 16, 16, false},
+		{VMAFModelFHD, true, original, 1920, 160, false}, // wide enough to matter at this height
+		{VMAFModelPhone, true, original, 640, 360, true},
+		{VMAFModelPhone, true, original, 320, 180, false}, // scored by VMAFModelFHD above
+		{VMAFModelUHDFar, true, original, 640, 360, true},
+		{VMAFModelUHDFar, true, original, 512, 288, false},
+		// CAMBI measures nothing when both sides are under 216 pixels: the fidelity pass writes
+		// no report, the banding pass reports nothing
+		{VMAFModelFHD, true, fidelity, 216, 160, true},
+		{VMAFModelFHD, true, fidelity, 215, 160, false},
+		{VMAFModelFHD, true, banding, 160, 216, true},
+		{VMAFModelFHD, true, banding, 160, 215, false},
+		// a v0 model scores such pictures, the banding feature beside it does not
+		{VMAFModelV0FHD, false, original, 215, 160, true},
+		{VMAFModelV0FHD, false, VMAFMeasures{Original: true, Banding: true}, 215, 160, false},
+		{VMAFModelV0FHD, false, VMAFMeasures{Original: true, Banding: true}, 216, 160, true},
+	} {
+		_, err := VMAFProbe(ctx, VMAFProbeConfig{Model: tc.model, ModelCAMBI: tc.modelCAMBI, Measures: tc.measures,
+			Width: tc.width, Height: tc.height, ReportDir: dir})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, tc.model, err)
+		}
+		if (err == nil) != tc.ok {
+			t.Errorf("%s %+v at %dx%d: expected success %t, got %v", tc.model, tc.measures, tc.width, tc.height, tc.ok, err)
+		}
+	}
+	// no probe report left behind, crashes included
+	if entries, err := os.ReadDir(dir); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Errorf("probe reports left behind: %v", entries)
 	}
 }
 
@@ -265,7 +582,7 @@ func TestVMAFProbe(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	for _, model := range append(append(append([]VMAFModel{}, VMAFModels...), VMAFForcedModels...), VMAFV0Models...) {
-		version, err := VMAFProbe(ctx, VMAFProbeConfig{Model: model, ReportDir: dir})
+		version, err := VMAFProbe(ctx, VMAFProbeConfig{Model: model, Measures: VMAFMeasures{Original: true}, ReportDir: dir})
 		if errors.Is(err, ErrVMAFModelUnavailable) {
 			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, model, err)
 		}
@@ -276,17 +593,154 @@ func TestVMAFProbe(t *testing.T) {
 			t.Errorf("probe with %s returned no libvmaf version", model)
 		}
 	}
+	// every pass a run can use, on a model feeding on CAMBI and on one without
+	for _, tc := range []struct {
+		model      VMAFModel
+		modelCAMBI bool
+	}{
+		{VMAFModelFHD, true},
+		{VMAFModelV0FHD, false},
+	} {
+		for _, measures := range []VMAFMeasures{
+			{Fidelity: true},
+			{Fidelity: true, Original: true},
+			{Banding: true},
+			{Fidelity: true, Banding: true},
+			{Original: true, Banding: true},
+			{Fidelity: true, Original: true, Banding: true},
+		} {
+			if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: tc.model, ModelCAMBI: tc.modelCAMBI, Measures: measures, ReportDir: dir}); err != nil {
+				t.Errorf("probe of %s %+v failed: %s", tc.model, measures, err)
+			}
+		}
+	}
 	// a name libvmaf does not know is told apart from any other failure
-	if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: "vmaf_v9.9.9_unknown", ReportDir: dir}); !errors.Is(err, ErrVMAFModelUnavailable) {
+	if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: "vmaf_v9.9.9_unknown", Measures: VMAFMeasures{Original: true}, ReportDir: dir}); !errors.Is(err, ErrVMAFModelUnavailable) {
 		t.Errorf("an unknown model should be reported unavailable, got %v", err)
 	}
-	// and a name that is not one never reaches ffmpeg
-	if _, err := VMAFProbe(ctx, VMAFProbeConfig{Model: "a:b", ReportDir: dir}); err == nil {
+	// and a name that is not one never reaches ffmpeg, nor a pass measuring nothing
+	for _, config := range []VMAFProbeConfig{
+		{Model: "a:b", Measures: VMAFMeasures{Original: true}, ReportDir: dir},
+		{Model: VMAFModelFHD, ReportDir: dir},
+	} {
+		if _, err := VMAFProbe(ctx, config); err == nil {
+			t.Errorf("%+v should be refused", config)
+		}
+	}
+	if entries, err := os.ReadDir(dir); err != nil {
+		t.Fatal(err)
+	} else if len(entries) != 0 {
+		t.Errorf("probe reports left behind: %v", entries)
+	}
+}
+
+// TestVMAFCAMBIProbe runs the real thing: every v1 model feeds on CAMBI and takes the clip, no v0
+// model feeds on it (libvmaf ignores the clip on them, see cambiClipParam).
+func TestVMAFCAMBIProbe(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		models     []VMAFModel
+		modelCAMBI bool
+	}{
+		{append(append([]VMAFModel{}, VMAFModels...), VMAFForcedModels...), true},
+		{VMAFV0Models, false},
+	} {
+		for _, model := range tc.models {
+			modelCAMBI, err := VMAFCAMBIProbe(ctx, VMAFCAMBIProbeConfig{Model: model, ReportDir: dir})
+			if errors.Is(err, ErrVMAFModelUnavailable) {
+				t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, model, err)
+			}
+			if err != nil {
+				t.Fatalf("CAMBI probe of %s failed: %s", model, err)
+			}
+			if modelCAMBI != tc.modelCAMBI {
+				t.Errorf("%s: expected to feed on CAMBI %t, got %t", model, tc.modelCAMBI, modelCAMBI)
+			}
+		}
+	}
+	if _, err := VMAFCAMBIProbe(ctx, VMAFCAMBIProbeConfig{Model: "vmaf_v9.9.9_unknown", ReportDir: dir}); !errors.Is(err, ErrVMAFModelUnavailable) {
+		t.Errorf("an unknown model should be reported unavailable, got %v", err)
+	}
+	if _, err := VMAFCAMBIProbe(ctx, VMAFCAMBIProbeConfig{Model: "a:b", ReportDir: dir}); err == nil {
 		t.Error("an invalid model name should be refused")
 	}
 	if entries, err := os.ReadDir(dir); err != nil {
 		t.Fatal(err)
 	} else if len(entries) != 0 {
 		t.Errorf("probe reports left behind: %v", entries)
+	}
+}
+
+// TestVMAFCompute runs the real thing on the 8-bit-like steps of the dark gradient of
+// BENCHMARKS.md (Synthetic clips): the figures of its table, which a libvmaf scoring otherwise
+// changes along with that table.
+func TestVMAFCompute(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	clip := func(name, luma string) string {
+		path := filepath.Join(dir, name)
+		out, err := exec.Command(FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y", "-f", "lavfi", "-i",
+			"color=black:s=1920x1080:r=24:d=0.5,format=yuv420p10le,geq=lum='"+luma+"':cb=512:cr=512",
+			"-c:v", "ffv1", path).CombinedOutput()
+		if err != nil {
+			t.Fatalf("failed to generate %s: %s\n%s", name, err, out)
+		}
+		return path
+	}
+	gradient := clip("gradient.mkv", "64+floor(X/12)")
+	steps := clip("steps.mkv", "64+4*floor(X/48)")
+	compute := func(model VMAFModel, modelCAMBI bool, measures VMAFMeasures) VMAFReport {
+		report, err := VMAFCompute(ctx, VMAFComputeConfig{
+			ReferencePath:  gradient,
+			DistortedPath:  steps,
+			InputFrameRate: "24",
+			ReportPath:     filepath.Join(dir, "report.json"),
+			Model:          model,
+			ModelCAMBI:     modelCAMBI,
+			Measures:       measures,
+		})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, model, err)
+		}
+		if err != nil {
+			t.Fatalf("VMAF of %s %+v failed: %s", model, measures, err)
+		}
+		if len(report.Frames) != 12 {
+			t.Fatalf("expected 12 frames, got %d", len(report.Frames))
+		}
+		return report
+	}
+	round := func(v float64) float64 { return math.Round(v*100) / 100 }
+	// v1: fidelity passes at 95 where the original score falls to 84.52, CAMBI rating the steps
+	// 22.48 against 6.65 for the gradient
+	report := compute(VMAFModelFHD, true, VMAFMeasures{Fidelity: true, Original: true, Banding: true})
+	if got := round(report.Pooled.Fidelity.HarmonicMean); got != 95.19 {
+		t.Errorf("fidelity: want 95.19, got %v", got)
+	}
+	if got := round(report.Pooled.Original.HarmonicMean); got != 84.52 {
+		t.Errorf("original score: want 84.52, got %v", got)
+	}
+	if got := (VMAFBanding{Encode: round(report.Pooled.Banding.Encode.Mean), Source: round(report.Pooled.Banding.Source.Mean),
+		Added: round(report.Pooled.Banding.Added.Mean)}); got != (VMAFBanding{Encode: 22.48, Source: 6.65, Added: 15.83}) {
+		t.Errorf("banding: want 22.48, 6.65 and 15.83 added, got %+v", got)
+	}
+	// the same scores in passes of their own
+	if fidelity := compute(VMAFModelFHD, true, VMAFMeasures{Fidelity: true}); fidelity.Pooled.Fidelity != report.Pooled.Fidelity {
+		t.Errorf("fidelity alone: want %+v, got %+v", report.Pooled.Fidelity, fidelity.Pooled.Fidelity)
+	}
+	if banding := compute(VMAFModelFHD, true, VMAFMeasures{Banding: true}); banding.Pooled.Banding != report.Pooled.Banding {
+		t.Errorf("banding alone: want %+v, got %+v", report.Pooled.Banding, banding.Pooled.Banding)
+	}
+	// v0 sees the steps as an enhancement: 99.26, one score for both
+	v0 := compute(VMAFModelV0FHD, false, VMAFMeasures{Fidelity: true, Original: true})
+	if got := round(v0.Pooled.Fidelity.HarmonicMean); got != 99.26 || v0.Pooled.Original != v0.Pooled.Fidelity {
+		t.Errorf("v0: want 99.26 for both scores, got %+v and %+v", v0.Pooled.Fidelity, v0.Pooled.Original)
 	}
 }
