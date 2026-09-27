@@ -13,6 +13,17 @@ const CAMBIOffValue = -1
 // BandingStats). They are ceilings where the VMAF thresholds are floors: the added banding must
 // be at most the mean threshold on average over the frames, and at most the max threshold on the
 // worst frame. The zero value is off: no banding is measured (see searchSegmentCAMBI).
+//
+// # WHY THE MEAN, NOT THE HARMONIC MEAN
+//
+// The harmonic mean libvmaf pools, n / Σ 1/(x+1) − 1, leans toward the lowest values. For a VMAF
+// score they are the worst frames, which makes it stricter than the mean, and the default VMAF
+// gate. For the added banding they are the frames with nothing added, most of them on real
+// content: the harmonic mean hides the banded ones. 90 frames at 0 and 10 at 5 average 0.5, their
+// harmonic mean is 0.09; 99 frames at 0 and one at 24, the highest CAMBI libvmaf's documentation
+// reports ("unwatchable"), average 0.24 against 0.01. The mean sets the level and the worst frame
+// bounds the tail: a pooling stricter than the mean would have to weigh the high values, as a
+// percentile does.
 type CAMBIChecker struct {
 	mean float64
 	max  float64
