@@ -238,23 +238,23 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 | | CPU encoders (`libx265`, `libsvtav1`) | Hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) |
 |---|---|---|
-| Output file size | ✅ Smallest | ❌ Larger: 1.44× on the episode measured below |
-| Speed | Hours for a film | ✅ Several times faster: 26 min of 1080p searched in 18 minutes below, with several segments searched in parallel (`-C`, see below) |
-| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size (the CPU encode was 31% smaller below) |
+| Output file size | ✅ Smallest | ❌ Larger: 1.18× on the episode measured below |
+| Speed | The 26 min episode below searched in 62 minutes, 2.4 times its duration | ✅ 3.3 times faster: the same episode searched in 18 to 19 minutes, with several segments searched in parallel (`-C`, see below) |
+| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size (the CPU encode was 15% smaller below) |
 
-Same 26 min 1080p Blu-ray remux episode, same threshold (163 segments), cold cache, on an RTX 5090 with a 16 cores / 32 threads CPU, gated on the model's original score at harmonic mean 93 (these runs predate fidelity: with it, `hevc_nvenc` gave 200.9 MiB, `libx265` was not run again):
+Same 26 min 1080p Blu-ray remux episode, same threshold (163 segments), cold cache, on an RTX 5090 with a 16 cores / 32 threads CPU, at the default (fidelity at harmonic mean 93, the CAMBI gate at a mean of 1):
 
 | | `hevc_nvenc`, `-C 6` | `libx265` preset slow, `-C 3`, decoding on NVDEC |
 |---|---|---|
-| QP search | 17m46s | 1h1m14s |
-| Video stream | 283.4 MiB | 196.5 MiB |
-| Attempts per segment | 3.99 | 3.96 |
+| QP search | 18m20s, 18m51s (two runs) | 1h2m6s |
+| Video stream | 200.9 MiB | 170.5 MiB |
+| Attempts per segment | 3.72 | 3.88 |
 
-One episode is one data point: the size ratio depends on the content, and the times on the machine. On this one, the GPU search was limited by the CPU (busy 81% of the time), which decodes the lossless FFV1 intermediate twice per attempt (once for the encode, once as the VMAF reference) and computes VMAF, not by the GPU (NVENC busy 24% of the time): a smaller CPU would have made it slower, smaller GPUs were not measured.
+One episode is one data point: the size ratio depends on the content and on the score gated (on the model's original score, the same encoders gave 283.4 and 196.5 MiB, the CPU encode 31% smaller, see [BENCHMARKS](BENCHMARKS.md#encoders)), and the times on the machine. On this one, the GPU search was limited by the CPU (busy 83% of the time), which decodes the lossless FFV1 intermediate twice per attempt (once for the encode, once as the VMAF reference) and computes VMAF, not by the GPU (NVENC busy 22 to 23% of the time): a smaller CPU would have made it slower, smaller GPUs were not measured.
 
 > **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes.
 >
-> **With a GPU encoder**, the number of encoding engines on the card is not the limit: a worker only feeds the encoder while it encodes and waits for VMAF the rest of the time, and the frames come from the CPU decoding the FFV1 intermediate, as measured above. On the RTX 5090 (three NVENC engines), `-C 6` kept the encoders busy 24% of the time and the CPU 81%: raise it until the CPU is saturated, the driver's encode session limit being the hard stop (an encode then fails to open its session).
+> **With a GPU encoder**, the number of encoding engines on the card is not the limit: a worker only feeds the encoder while it encodes and waits for VMAF the rest of the time, and the frames come from the CPU decoding the FFV1 intermediate, as measured above. On the RTX 5090 (three NVENC engines), `-C 6` kept the encoders busy 22 to 23% of the time and the CPU 83%: raise it until the CPU is saturated, the driver's encode session limit being the hard stop (an encode then fails to open its session).
 >
 > **With a CPU encoder**, a single encode already uses every thread of the machine, but does not keep a many-core CPU fully busy: on a 16 cores / 32 threads CPU, `libx265` at 1080p encoded 26% more frames per second with 2 concurrent segments (measured with VMAF v0 on the CPU). Expect less with fewer cores or bigger pictures (+21% with 2 encodes at 2160p), mind the memory with 4K content, and measure on your machine.
 >
@@ -329,7 +329,7 @@ sptenc's per-segment QP search converges on the highest valid QP (smallest file)
 3. **Interpolation** — Once bracketed, **Fritsch-Butland monotone cubic interpolation** forecasts the VMAF of the untested QPs within the range and picks the next one to encode, walking toward the highest valid QP without blind probing. A forecast only chooses the next encode: every QP kept was encoded and measured, and the next higher one encoded and found failing.
 4. **Banding check** — At the QP found, the banding the encoder added is measured once. When a [CAMBI threshold](#fidelity-and-banding) fails, the QPs below are tried one at a time until one passes both.
 
-This typically takes 3 to 5 encodes per segment (with `hevc_nvenc`, 3.7 on average on the [episode measured](#encoder-selection-vs-file-size) and 3.5 on the [film](#fidelity-against-v0-on-real-content); gated on the original score, `libx265` needed as many as `hevc_nvenc` on the episode), where a plain bisection of libx265's 0–51 range takes about 6 whatever the content.
+This typically takes 3 to 5 encodes per segment (with `hevc_nvenc`, 3.7 on average on the [episode measured](#encoder-selection-vs-file-size) and 3.5 on the [film](#fidelity-against-v0-on-real-content), with `libx265` 3.9 on the episode), where a plain bisection of libx265's 0–51 range takes about 6 whatever the content.
 
 ### Persistent stats from previous runs
 
@@ -337,7 +337,7 @@ After each encode job finishes, sptenc stores QP statistics **per encoder, VMAF 
 
 These statistics only seed a search. In the run's own statistics they weigh a single segment, however many files they aggregate, so the file being encoded takes over within a handful of segments: a cache built on other content sets the starting point, it does not hold the search to its mean.
 
-What is at stake is the number of encodes per segment. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, a cold cache cost 3.7 attempts per segment with `hevc_nvenc` (4.0 gated on the original score, with `libx265` as with `hevc_nvenc`), the run's own ephemeral statistics doing the learning from the first segments on. A segment can not take fewer than two, the QP kept and the next one failing, so what a warm cache can save is bounded by that: it has not been measured on that content yet.
+What is at stake is the number of encodes per segment. On the episode of the [Encoders](#encoder-selection-vs-file-size) section, a cold cache cost 3.7 attempts per segment with `hevc_nvenc` and 3.9 with `libx265` (4.0 with both, gated on the original score), the run's own ephemeral statistics doing the learning from the first segments on. A segment can not take fewer than two, the QP kept and the next one failing, so what a warm cache can save is bounded by that: it has not been measured on that content yet.
 
 The cache provides:
 - **Mean QP** — a better-informed starting point than the encoder midpoint
