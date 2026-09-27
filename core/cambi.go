@@ -90,6 +90,7 @@ const (
 type cambiOutcome struct {
 	qp         int             // the QP kept
 	walked     bool            // the QP of the VMAF search failed the CAMBI thresholds: the QPs below it were tried
+	walk       []int           // the QPs the walk measured, in order (the ones skipped for failing VMAF left out)
 	encodes    int             // the QPs the walk encoded, the others were encoded by the VMAF search
 	bestEffort CAMBIBestEffort // the threshold given up, when no QP passed them all
 }
@@ -158,6 +159,7 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 		return
 	}
 	// The QP of the VMAF search
+	scb.OnSegmentCAMBIStart(workerID, vmafQP)
 	banding := make(map[int]BandingStats)
 	if banding[vmafQP], err = segmentBanding(ctx, scb, config, segmentPath, workerID, segment, vmafQP, videoTrack); err != nil {
 		err = fmt.Errorf("failed to measure the banding of QP %d: %w", vmafQP, err)
@@ -178,12 +180,15 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 				scb.Debug(workerID, "Segment %d: CAMBI walk: QP %d failed the VMAF thresholds, skipped", segment, qp)
 				continue
 			}
+			scb.OnSegmentCAMBICandidate(workerID, qp)
+			outcome.walk = append(outcome.walk, qp)
 			if banding[qp], err = segmentBanding(ctx, scb, config, segmentPath, workerID, segment, qp, videoTrack); err != nil {
 				err = fmt.Errorf("failed to measure the banding of QP %d: %w", qp, err)
 				return
 			}
 		} else {
-			scb.OnSegmentNewCandidate(workerID, qp)
+			scb.OnSegmentCAMBICandidate(workerID, qp)
+			outcome.walk = append(outcome.walk, qp)
 			var qpBanding BandingStats
 			if vmafStats, qpBanding, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, qp, videoTrack,
 				VMAFMeasures{Score: true, Banding: true}); err != nil {
@@ -195,11 +200,14 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 			*testedQPs = append(*testedQPs, qp)
 			if !config.Auditor.Validate(vmafStats) {
 				scb.Debug(workerID, "Segment %d: CAMBI walk: QP %d failed the VMAF thresholds", segment, qp)
+				scb.OnSegmentCAMBICandidateDone(workerID, qp, false)
 				continue
 			}
 			banding[qp] = qpBanding
 		}
-		if config.CAMBIAuditor.Validate(banding[qp]) {
+		passed := config.CAMBIAuditor.Validate(banding[qp])
+		scb.OnSegmentCAMBICandidateDone(workerID, qp, passed)
+		if passed {
 			outcome.qp = qp
 			return
 		}

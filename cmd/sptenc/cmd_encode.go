@@ -676,6 +676,20 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 			)
 		}
 	}
+	if cambiAuditor.Enabled() {
+		fmt.Fprintf(bypass, "\tCAMBI gate: %d %s walked below the QP of the VMAF search (%d more %s), %d lowered.\n",
+			results.NbCAMBIWalks, pluralize(results.NbCAMBIWalks, "segment", "segments"),
+			results.CAMBIWalkAttempts, pluralize(results.CAMBIWalkAttempts, "encode", "encodes"), results.NbCAMBILowered(),
+		)
+		switch results.NbCAMBIBestEfforts {
+		case 0:
+		case 1:
+			fmt.Fprintln(bypass, "WARNING: 1 segment was kept as a CAMBI best effort, no QP validating the CAMBI thresholds. Please check the logs.")
+		default:
+			fmt.Fprintf(bypass, "WARNING: %d segments were kept as CAMBI best efforts, no QP validating the CAMBI thresholds. Please check the logs.\n",
+				results.NbCAMBIBestEfforts)
+		}
+	}
 	segmentQPmean, segmentQPstddev := results.GetMeanStdDev()
 	fmt.Fprintf(bypass, "\tSegment QP mean is %s with a standard deviation of %s.\n",
 		strconv.FormatFloat(segmentQPmean, 'f', -1, 64), strconv.FormatFloat(segmentQPstddev, 'f', -1, 64),

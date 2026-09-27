@@ -593,6 +593,8 @@ func TestSearchSegmentCAMBI_VMAFFailures(t *testing.T) {
 		kept     int
 		measured []int // banding passes
 		encoded  []int // walk encodes
+		walk     []int
+		events   []string
 	}{
 		{
 			name:     "encoded by the VMAF search",
@@ -601,6 +603,8 @@ func TestSearchSegmentCAMBI_VMAFFailures(t *testing.T) {
 			banding:  map[int]BandingStats{13: addedBanding(1.5, 4), 12: addedBanding(0, 0), 11: addedBanding(0.5, 2)},
 			kept:     11,
 			measured: []int{13, 11},
+			walk:     []int{11},
+			events:   []string{"cambi 13", "walk 11", "walk done 11 true"},
 		},
 		{
 			name:     "encoded by the walk",
@@ -611,6 +615,8 @@ func TestSearchSegmentCAMBI_VMAFFailures(t *testing.T) {
 			kept:     11,
 			measured: []int{13},
 			encoded:  []int{12, 11},
+			walk:     []int{12, 11},
+			events:   []string{"cambi 13", "walk 12", "walk done 12 false", "walk 11", "walk done 11 true"},
 		},
 		{
 			// the best effort can not keep it either: 11 fails the max threshold, and passes the
@@ -626,6 +632,12 @@ func TestSearchSegmentCAMBI_VMAFFailures(t *testing.T) {
 			kept:     11,
 			measured: []int{13},
 			encoded:  []int{12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0},
+			walk:     []int{12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0},
+			events: []string{"cambi 13", "walk 12", "walk done 12 false", "walk 11", "walk done 11 false",
+				"walk 10", "walk done 10 false", "walk 9", "walk done 9 false", "walk 8", "walk done 8 false",
+				"walk 7", "walk done 7 false", "walk 6", "walk done 6 false", "walk 5", "walk done 5 false",
+				"walk 4", "walk done 4 false", "walk 3", "walk done 3 false", "walk 2", "walk done 2 false",
+				"walk 1", "walk done 1 false", "walk 0", "walk done 0 false"},
 		},
 	} {
 		cambiAuditor, err := NewCAMBIChecker(1, tc.cambiMax)
@@ -651,7 +663,8 @@ func TestSearchSegmentCAMBI_VMAFFailures(t *testing.T) {
 			}
 		}
 		config := QPSearchConfig{Auditor: auditor, CAMBIAuditor: cambiAuditor, WorkingDir: workingDir, Encoder: encoder}
-		outcome, err := searchSegmentCAMBI(context.Background(), &mockCallbacks{}, config, 0, 0, "source.mkv",
+		callbacks := &recordingCallbacks{}
+		outcome, err := searchSegmentCAMBI(context.Background(), callbacks, config, 0, 0, "source.mkv",
 			VideoStream{NbReadFrames: 1000}, 13, results, &testedQPs)
 		if err != nil {
 			t.Fatalf("%s: %s", tc.name, err)
@@ -669,5 +682,46 @@ func TestSearchSegmentCAMBI_VMAFFailures(t *testing.T) {
 		if len(testedQPs) != len(tc.searched)+len(tc.encoded) {
 			t.Errorf("%s: expected %d tested QPs, got %v", tc.name, len(tc.searched)+len(tc.encoded), testedQPs)
 		}
+		// the walk lists what it measured, a QP failing VMAF included when the walk encoded it
+		if !slices.Equal(callbacks.events, tc.events) || !slices.Equal(outcome.walk, tc.walk) {
+			t.Errorf("%s: expected the events %q and the walk %v, got %q and %v", tc.name, tc.events, tc.walk, callbacks.events, outcome.walk)
+		}
+	}
+}
+
+// TestFindAllSegmentsQP_CAMBIEvents checks what the search reports of a segment walked by the CAMBI
+// stage: the VMAF candidates with their result, the start of the stage at the QP of the VMAF
+// search, the walk, and the segment's result.
+func TestFindAllSegmentsQP_CAMBIEvents(t *testing.T) {
+	encoder := &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(),
+		bandingResults: bandingCurve(map[int]BandingStats{13: addedBanding(1.5, 4), 12: addedBanding(0.5, 2)})}
+	auditor, _ := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	cambiAuditor, _ := NewCAMBIChecker(1, CAMBIOffValue)
+	workingDir := t.TempDir()
+	source := filepath.Join(workingDir, "source.mkv")
+	if err := os.WriteFile(source, []byte("source"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	callbacks := &recordingCallbacks{}
+	// from 16 ± 4, the VMAF search encodes 12 on its way to 13: the walk reuses it
+	if _, err := FindAllSegmentsQP(context.Background(), callbacks, QPSearchConfig{
+		SegmentsPaths: []string{source},
+		Auditor:       auditor,
+		CAMBIAuditor:  cambiAuditor,
+		WorkingDir:    workingDir,
+		StatsCache:    &mockStatsCache{mean: 16, stddev: 4},
+		Encoder:       encoder,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new 16", "done 16 false", "new 12", "done 12 true", "new 13", "done 13 true", "new 14", "done 14 false",
+		"cambi 13", "walk 12", "walk done 12 true"}
+	if !slices.Equal(callbacks.events, want) {
+		t.Errorf("expected the events\n%q\ngot\n%q", want, callbacks.events)
+	}
+	if len(callbacks.results) != 1 || callbacks.results[0].QP != 12 || callbacks.results[0].VMAFQP != 13 ||
+		callbacks.results[0].Attempts != 4 || callbacks.results[0].Frames != 1000 || !slices.Equal(callbacks.results[0].CAMBIWalk, []int{12}) {
+		t.Errorf("unexpected segment result: %+v", callbacks.results)
 	}
 }

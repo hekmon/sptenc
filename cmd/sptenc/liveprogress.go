@@ -16,6 +16,7 @@ import (
 
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
+	"github.com/muesli/termenv"
 )
 
 /*
@@ -358,11 +359,13 @@ type LiveQPSearch struct {
 	/*
 	 * Per worker
 	 */
-	// Segment progress (title + qp candidates listing)
+	// Segment progress (title + qp candidates listing, see segmentCandidates)
 	segmentsCurrent          []int
 	segmentsStatusLine       []*liveprogress.CustomLine
-	segmentsCandidates       [][]string
+	segmentsCandidates       []segmentCandidates
 	segmentsCandidatesAccess []sync.Mutex
+	failedCandidateStyle     termenv.Style
+	vmafQPCandidateStyle     termenv.Style
 	// File analysis (the bar is in time, the frames counted so far are shown next to it)
 	analysisProgressBars []*liveprogress.Bar
 	analysisFrames       []atomic.Int64
@@ -375,8 +378,11 @@ type LiveQPSearch struct {
 func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 	to.segmentsCurrent = make([]int, to.Concurrency)
 	to.segmentsStatusLine = make([]*liveprogress.CustomLine, to.Concurrency)
-	to.segmentsCandidates = make([][]string, to.Concurrency)
+	to.segmentsCandidates = make([]segmentCandidates, to.Concurrency)
 	to.segmentsCandidatesAccess = make([]sync.Mutex, to.Concurrency)
+	termenvProfile := liveprogress.GetTermProfile()
+	to.failedCandidateStyle = termenvProfile.String().CrossOut()
+	to.vmafQPCandidateStyle = termenvProfile.String().Bold()
 	to.analysisProgressBars = make([]*liveprogress.Bar, to.Concurrency)
 	to.analysisFrames = make([]atomic.Int64, to.Concurrency)
 	to.encodeProgressBars = make([]*liveprogress.Bar, to.Concurrency)
@@ -469,22 +475,18 @@ func (to *LiveQPSearch) Error(workerID int, err error) {
 
 func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {
 	to.segmentsCurrent[workerID] = segmentIndex
-	if to.segmentsCandidates[workerID] != nil {
-		to.segmentsCandidatesAccess[workerID].Lock()
-		for i := range to.segmentsCandidates[workerID] {
-			to.segmentsCandidates[workerID][i] = "" // drop references
-		}
-		to.segmentsCandidates[workerID] = to.segmentsCandidates[workerID][:0] // reset while keeping cap
-		to.segmentsCandidatesAccess[workerID].Unlock()
-	}
+	to.segmentsCandidatesAccess[workerID].Lock()
+	to.segmentsCandidates[workerID].reset()
+	to.segmentsCandidatesAccess[workerID].Unlock()
 	if to.segmentsStatusLine[workerID] != nil {
 		liveprogress.RemoveCustomLine(to.segmentsStatusLine[workerID])
 		// no need to nullify we are about to reset it
 	}
 	to.segmentsStatusLine[workerID] = liveprogress.AddCustomLine(func() string {
 		to.segmentsCandidatesAccess[workerID].Lock()
-		defer to.segmentsCandidatesAccess[workerID].Unlock()
-		if len(to.segmentsCandidates[workerID]) == 0 {
+		candidates := to.segmentsCandidates[workerID].render(to.failedCandidateStyle.Styled, to.vmafQPCandidateStyle.Styled)
+		to.segmentsCandidatesAccess[workerID].Unlock()
+		if candidates == "" {
 			// first step is to analyse source files for total number of frames, no candidate yet
 			if to.Concurrency > 1 {
 				return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP...", workerID, segmentIndex+1)
@@ -492,18 +494,117 @@ func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath s
 			return fmt.Sprintf("    Segment | %d - Searching for best QP...", segmentIndex+1)
 		}
 		if to.Concurrency > 1 {
-			return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP: %s", workerID, segmentIndex+1,
-				strings.Join(to.segmentsCandidates[workerID], " "))
+			return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP: %s", workerID, segmentIndex+1, candidates)
 		}
-		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1,
-			strings.Join(to.segmentsCandidates[workerID], " "))
+		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1, candidates)
 	})
 }
 
 func (to *LiveQPSearch) OnSegmentNewCandidate(workerID, qpCandidate int) {
 	to.segmentsCandidatesAccess[workerID].Lock()
-	to.segmentsCandidates[workerID] = append(to.segmentsCandidates[workerID], strconv.Itoa(qpCandidate))
+	to.segmentsCandidates[workerID].search = append(to.segmentsCandidates[workerID].search, liveCandidate{qp: qpCandidate})
 	to.segmentsCandidatesAccess[workerID].Unlock()
+}
+
+func (to *LiveQPSearch) OnSegmentCandidateDone(workerID, qpCandidate int, passed bool) {
+	to.segmentsCandidatesAccess[workerID].Lock()
+	markCandidate(to.segmentsCandidates[workerID].search, qpCandidate, passed)
+	to.segmentsCandidatesAccess[workerID].Unlock()
+}
+
+func (to *LiveQPSearch) OnSegmentCAMBIStart(workerID, vmafQP int) {
+	to.segmentsCandidatesAccess[workerID].Lock()
+	to.segmentsCandidates[workerID].vmafQP = vmafQP
+	to.segmentsCandidatesAccess[workerID].Unlock()
+}
+
+func (to *LiveQPSearch) OnSegmentCAMBICandidate(workerID, qpCandidate int) {
+	to.segmentsCandidatesAccess[workerID].Lock()
+	to.segmentsCandidates[workerID].walk = append(to.segmentsCandidates[workerID].walk, liveCandidate{qp: qpCandidate})
+	to.segmentsCandidatesAccess[workerID].Unlock()
+}
+
+func (to *LiveQPSearch) OnSegmentCAMBICandidateDone(workerID, qpCandidate int, passed bool) {
+	to.segmentsCandidatesAccess[workerID].Lock()
+	markCandidate(to.segmentsCandidates[workerID].walk, qpCandidate, passed)
+	to.segmentsCandidatesAccess[workerID].Unlock()
+}
+
+// segmentDoneLine returns the line logged for a finished segment: the QP kept, and when the CAMBI
+// stage lowered it, the QP of the VMAF search and the QPs its walk tried.
+func segmentDoneLine(segmentIndex int, segment core.SegmentResult, workerID, concurrency int) string {
+	line := fmt.Sprintf("\tSegment %d: QP %d selected for this segment of %d frames (%d attempts)",
+		segmentIndex+1, segment.QP, segment.Frames, segment.Attempts)
+	if segment.QP < segment.VMAFQP {
+		walk := make([]string, len(segment.CAMBIWalk))
+		for i, qp := range segment.CAMBIWalk {
+			walk[i] = strconv.Itoa(qp)
+		}
+		line += fmt.Sprintf(", lowered from QP %d by the CAMBI gate (walk: %s)", segment.VMAFQP, strings.Join(walk, " "))
+	}
+	if concurrency > 1 {
+		line += fmt.Sprintf(" [worker #%d]", workerID)
+	}
+	return line
+}
+
+// segmentCandidates is what the live line of a worker shows of the search of its segment: the QPs
+// the VMAF search encoded, the one it found once the CAMBI stage starts, and the QPs of the walk.
+type segmentCandidates struct {
+	search []liveCandidate
+	vmafQP int // the QP the VMAF search found, -1 until the CAMBI stage starts
+	walk   []liveCandidate
+}
+
+// liveCandidate is a QP of the live line, measured or being measured.
+type liveCandidate struct {
+	qp     int
+	done   bool
+	passed bool
+}
+
+// reset empties the candidates for a new segment, keeping their capacity.
+func (sc *segmentCandidates) reset() {
+	sc.search, sc.vmafQP, sc.walk = sc.search[:0], -1, sc.walk[:0]
+}
+
+// markCandidate records the result of the last candidate of qp.
+func markCandidate(candidates []liveCandidate, qp int, passed bool) {
+	for i := len(candidates) - 1; i >= 0; i-- {
+		if candidates[i].qp == qp {
+			candidates[i].done, candidates[i].passed = true, passed
+			return
+		}
+	}
+}
+
+// render returns the candidates as the live line shows them: the QPs that failed struck, the ones
+// that passed or are being measured plain, the QP the VMAF search found in bold, and the walk of
+// the CAMBI stage after a "· CAMBI" label, alone while the banding of that QP is being measured.
+func (sc segmentCandidates) render(failed, vmafQP func(string) string) string {
+	parts := make([]string, 0, len(sc.search)+1+len(sc.walk))
+	for _, candidate := range sc.search {
+		text := candidate.text(failed)
+		if candidate.qp == sc.vmafQP {
+			text = vmafQP(text)
+		}
+		parts = append(parts, text)
+	}
+	if sc.vmafQP >= 0 {
+		parts = append(parts, "· CAMBI")
+		for _, candidate := range sc.walk {
+			parts = append(parts, candidate.text(failed))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// text returns the QP of the candidate, struck when it failed.
+func (lc liveCandidate) text(failed func(string) string) string {
+	if lc.done && !lc.passed {
+		return failed(strconv.Itoa(lc.qp))
+	}
+	return strconv.Itoa(lc.qp)
 }
 
 func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, duration time.Duration) {
@@ -616,7 +717,7 @@ func (to *LiveQPSearch) OnSegmentVMAFStop(workerID int) {
 	}
 }
 
-func (to *LiveQPSearch) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int,
+func (to *LiveQPSearch) OnSegmentDone(workerID int, segment core.SegmentResult,
 	currentTotalDuration time.Duration, currentTotalSize int64) {
 	// Clean up this worker's child UI elements
 	if to.segmentsStatusLine[workerID] != nil {
@@ -636,13 +737,7 @@ func (to *LiveQPSearch) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, s
 		to.vmafProgressBars[workerID] = nil
 	}
 	// Finished segment data
-	var workerTail string
-	if to.Concurrency > 1 {
-		workerTail = fmt.Sprintf(" [worker #%d]", workerID)
-	}
-	fmt.Fprintf(liveprogress.Bypass(), "\tSegment %d: QP %d selected for this segment of %d frames (%d attempts)%s\n",
-		to.segmentsCurrent[workerID]+1, segmentFinalQP, segmentFrames, segmentNbAttempts, workerTail,
-	)
+	fmt.Fprintln(liveprogress.Bypass(), segmentDoneLine(to.segmentsCurrent[workerID], segment, workerID, to.Concurrency))
 	// Global progress
 	newSize := cunits.ImportInBytes(float64(currentTotalSize))
 	to.globalAccess.Lock()

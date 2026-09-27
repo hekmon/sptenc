@@ -244,18 +244,22 @@ func (m *mockCallbacks) Debug(workerID int, format string, a ...any)            
 func (m *mockCallbacks) Warning(workerID int, format string, a ...any)                 {}
 func (m *mockCallbacks) Error(workerID int, err error)                                 {}
 func (m *mockCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {}
-func (m *mockCallbacks) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64) {
+func (m *mockCallbacks) OnSegmentDone(workerID int, segment SegmentResult, currentTotalDuration time.Duration, currentTotalSize int64) {
 }
-func (m *mockCallbacks) OnSegmentNewCandidate(workerID, qpCandidate int)             {}
-func (m *mockCallbacks) OnSegmentAnalysisStart(workerID int, duration time.Duration) {}
-func (m *mockCallbacks) OnSegmentAnalysisProgress(workerID int, stats ProgressStats) {}
-func (m *mockCallbacks) OnSegmentAnalysisStop(workerID int)                          {}
-func (m *mockCallbacks) OnSegmentEncodeStart(workerID int, totalFrames int)          {}
-func (m *mockCallbacks) OnSegmentEncodeProgress(workerID int, stats ProgressStats)   {}
-func (m *mockCallbacks) OnSegmentEncodeStop(workerID int)                            {}
-func (m *mockCallbacks) OnSegmentVMAFStart(workerID int, totalFrames int)            {}
-func (m *mockCallbacks) OnSegmentVMAFProgress(workerID int, stats ProgressStats)     {}
-func (m *mockCallbacks) OnSegmentVMAFStop(workerID int)                              {}
+func (m *mockCallbacks) OnSegmentNewCandidate(workerID, qpCandidate int)                    {}
+func (m *mockCallbacks) OnSegmentCandidateDone(workerID, qpCandidate int, passed bool)      {}
+func (m *mockCallbacks) OnSegmentCAMBIStart(workerID, vmafQP int)                           {}
+func (m *mockCallbacks) OnSegmentCAMBICandidate(workerID, qpCandidate int)                  {}
+func (m *mockCallbacks) OnSegmentCAMBICandidateDone(workerID, qpCandidate int, passed bool) {}
+func (m *mockCallbacks) OnSegmentAnalysisStart(workerID int, duration time.Duration)        {}
+func (m *mockCallbacks) OnSegmentAnalysisProgress(workerID int, stats ProgressStats)        {}
+func (m *mockCallbacks) OnSegmentAnalysisStop(workerID int)                                 {}
+func (m *mockCallbacks) OnSegmentEncodeStart(workerID int, totalFrames int)                 {}
+func (m *mockCallbacks) OnSegmentEncodeProgress(workerID int, stats ProgressStats)          {}
+func (m *mockCallbacks) OnSegmentEncodeStop(workerID int)                                   {}
+func (m *mockCallbacks) OnSegmentVMAFStart(workerID int, totalFrames int)                   {}
+func (m *mockCallbacks) OnSegmentVMAFProgress(workerID int, stats ProgressStats)            {}
+func (m *mockCallbacks) OnSegmentVMAFStop(workerID int)                                     {}
 
 func TestFindAllSegmentsQP_Convergence(t *testing.T) {
 	ctx := context.Background()
@@ -1771,6 +1775,10 @@ type recordingCallbacks struct {
 	doneCalls     int
 	lastDuration  time.Duration // highest total duration reported
 	lastTotalSize int64         // highest total size reported
+	// events are the candidate events of the search, in order, as "new 26", "done 26 false",
+	// "cambi 13", "walk 12", "walk done 12 true"; results the segments as reported done
+	events  []string
+	results []SegmentResult
 }
 
 func (r *recordingCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentPath string) {
@@ -1782,13 +1790,40 @@ func (r *recordingCallbacks) OnSegmentStart(workerID, segmentIndex int, segmentP
 	r.workerIDs[workerID] = true
 }
 
-func (r *recordingCallbacks) OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int,
+func (r *recordingCallbacks) OnSegmentDone(workerID int, segment SegmentResult,
 	currentTotalDuration time.Duration, currentTotalSize int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.doneCalls++
+	r.results = append(r.results, segment)
 	r.lastDuration = max(r.lastDuration, currentTotalDuration)
 	r.lastTotalSize = max(r.lastTotalSize, currentTotalSize)
+}
+
+func (r *recordingCallbacks) event(format string, a ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, fmt.Sprintf(format, a...))
+}
+
+func (r *recordingCallbacks) OnSegmentNewCandidate(workerID, qpCandidate int) {
+	r.event("new %d", qpCandidate)
+}
+
+func (r *recordingCallbacks) OnSegmentCandidateDone(workerID, qpCandidate int, passed bool) {
+	r.event("done %d %t", qpCandidate, passed)
+}
+
+func (r *recordingCallbacks) OnSegmentCAMBIStart(workerID, vmafQP int) {
+	r.event("cambi %d", vmafQP)
+}
+
+func (r *recordingCallbacks) OnSegmentCAMBICandidate(workerID, qpCandidate int) {
+	r.event("walk %d", qpCandidate)
+}
+
+func (r *recordingCallbacks) OnSegmentCAMBICandidateDone(workerID, qpCandidate int, passed bool) {
+	r.event("walk done %d %t", qpCandidate, passed)
 }
 
 // TestFindAllSegmentsQP_Concurrent runs the search with several workers. Along with the race

@@ -34,14 +34,33 @@ type Logger interface {
 // within a call but a call can carry lower totals than the previous one. Keep the highest.
 type SegmentLifecycle interface {
 	OnSegmentStart(workerID, segmentIndex int, segmentPath string)
-	OnSegmentDone(workerID, segmentFinalQP, segmentFrames, segmentNbAttempts int, currentTotalDuration time.Duration, currentTotalSize int64)
+	OnSegmentDone(workerID int, segment SegmentResult, currentTotalDuration time.Duration, currentTotalSize int64)
+}
+
+// SegmentResult is what the search of a segment ended with (see SegmentLifecycle.OnSegmentDone).
+type SegmentResult struct {
+	QP       int // The QP kept.
+	VMAFQP   int // The QP the VMAF search found, which the CAMBI stage can only lower.
+	Frames   int // The frames of the segment.
+	Attempts int // The encodes, the CAMBI walk's included.
+	// CAMBIWalk holds the QPs the CAMBI stage tried below VMAFQP, in order (see
+	// searchSegmentCAMBI): none when VMAFQP passed its thresholds, or when it is off.
+	CAMBIWalk []int
 }
 
 // ProgressReporter receives fine-grained progress for UI and diagnostics.
 // workerID is guaranteed to be within [0, QPSearchConfig.NbConcurrentSegments-1],
 // so callers may index fixed-size slices rather than maintain maps or RWMutexes.
 type ProgressReporter interface {
+	// The VMAF search: an encode of qpCandidate starts, then its VMAF passes the thresholds or not.
 	OnSegmentNewCandidate(workerID, qpCandidate int)
+	OnSegmentCandidateDone(workerID, qpCandidate int, passed bool)
+	// The CAMBI stage (see searchSegmentCAMBI): it starts measuring the banding at the QP the VMAF
+	// search found, then each QP of the walk below it is measured, passing the VMAF and the CAMBI
+	// thresholds or not.
+	OnSegmentCAMBIStart(workerID, vmafQP int)
+	OnSegmentCAMBICandidate(workerID, qpCandidate int)
+	OnSegmentCAMBICandidateDone(workerID, qpCandidate int, passed bool)
 	OnSegmentAnalysisStart(workerID int, duration time.Duration) // the frames are counted: progress is expressed in time
 	OnSegmentAnalysisProgress(workerID int, stats ProgressStats)
 	OnSegmentAnalysisStop(workerID int)
@@ -424,7 +443,13 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 					currentTotalDuration, currentTotalSize := doneDuration, allSegmentSize
 					resultsAccess.Unlock()
 					// Done
-					scb.OnSegmentDone(wID, segment.qp, segment.frames, segment.attempts, currentTotalDuration, currentTotalSize)
+					scb.OnSegmentDone(wID, SegmentResult{
+						QP:        segment.qp,
+						VMAFQP:    segment.vmafQP,
+						Frames:    segment.frames,
+						Attempts:  segment.attempts,
+						CAMBIWalk: segment.cambi.walk,
+					}, currentTotalDuration, currentTotalSize)
 				}
 				return
 			}
@@ -765,6 +790,7 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		nbAttempts++
 		results[candidateQP] = vmafStats
 		testedQPs = append(testedQPs, candidateQP)
+		scb.OnSegmentCandidateDone(workerID, candidateQP, config.Auditor.Validate(vmafStats))
 		if config.Auditor.Validate(vmafStats) {
 			bestValid = candidateQP
 			if candidateQP == qpMax {
