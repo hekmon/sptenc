@@ -228,20 +228,20 @@ var vmafCommand = &cli.Command{
 			ReportPath:      filepath.Join(workingDir, "vmaf.json"),
 			Model:           setup.model,
 			ModelCAMBI:      setup.modelCAMBI,
-			Measures:        setup.scoreMeasures(false),
+			Measures:        setup.finalMeasures(),
 			HWDecoderConfig: decoderCfg,
 		}, totalFrames, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to compute VMAF: %w", err)
 		}
 
-		stats, err := report.Stats(setup.score)
+		summary, err := report.Summary(setup.score, setup.modelCAMBI)
 		if err != nil {
 			return fmt.Errorf("failed to read the VMAF report: %w", err)
 		}
 		fmt.Fprintf(bypass, "\tVMAF computed in %s:\n\n%s\n",
 			time.Since(start).Round(time.Second),
-			stats,
+			summary,
 		)
 		fmt.Fprintf(bypass, "Complete VMAF computation took %s\n", time.Since(globalStart).Round(time.Second))
 		return nil

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,6 +142,21 @@ type vmafSetup struct {
 	modelCAMBI bool              // the model feeds on CAMBI (see ffmpeg.VMAFCAMBIProbe)
 	score      ffmpeg.VMAFScore  // the score the VMAF thresholds gate
 	cambi      core.CAMBIChecker // the CAMBI gate, off (its zero value) for a command that gates nothing
+	// reportBanding tells whether the final pass measures the banding (see finalMeasures): when
+	// the CAMBI gate is on, or for the vmaf command, which gates nothing, when the model feeds on
+	// CAMBI. A model without CAMBI and no gate reports as sptenc v0.1.0 did: nothing about banding.
+	reportBanding bool
+}
+
+// finalMeasures returns the measures of the final pass, over the whole video (the final VMAF of an
+// encode, the vmaf command): the gated score, the other score of a model fed with CAMBI, and the
+// banding when the run reports it.
+func (vs vmafSetup) finalMeasures() ffmpeg.VMAFMeasures {
+	measures := vs.scoreMeasures(vs.reportBanding)
+	if vs.modelCAMBI {
+		measures.Fidelity, measures.Original = true, true
+	}
+	return measures
 }
 
 // scoreMeasures returns the measures of a pass computing the gated score, and the banding the
@@ -161,12 +177,16 @@ func (vs vmafSetup) cachesOriginalScore() bool {
 }
 
 // passes returns every kind of libvmaf pass the run makes (see checkVMAFPictures): the gated score
-// (the VMAF search, the final score), and with the CAMBI gate on, the banding alone (at the QP of
-// the VMAF search) and both at once (the walk below it, see core.QPSearchConfig.CAMBIAuditor).
+// (the VMAF search), with the CAMBI gate on the banding alone (at the QP of the VMAF search) and
+// both at once (the walk below it, see core.QPSearchConfig.CAMBIAuditor), and the final pass (see
+// finalMeasures).
 func (vs vmafSetup) passes() []ffmpeg.VMAFMeasures {
 	passes := []ffmpeg.VMAFMeasures{vs.scoreMeasures(false)}
 	if vs.cambi.Enabled() {
 		passes = append(passes, ffmpeg.VMAFMeasures{Banding: true}, vs.scoreMeasures(true))
+	}
+	if final := vs.finalMeasures(); !slices.Contains(passes, final) {
+		passes = append(passes, final)
 	}
 	return passes
 }
@@ -228,6 +248,9 @@ func setupVMAF(ctx context.Context, cmd *cli.Command, out io.Writer, model ffmpe
 			fmt.Fprintf(out, "The banding the encoder adds is gated too (CAMBI, 0 = none, ~5 = slightly annoying): %s\n",
 				describeCAMBIGate(setup.cambi))
 		}
+		setup.reportBanding = setup.cambi.Enabled()
+	} else {
+		setup.reportBanding = setup.modelCAMBI
 	}
 	err = checkVMAFPictures(ctx, cmd, setup, stream)
 	return

@@ -702,18 +702,16 @@ func appendHWAccelArgs(args []string, dec HWDecoderConfig) []string {
  */
 
 // VMAFReport holds what sptenc reads from the report of a libvmaf pass (see readVMAFReport): per
-// frame and pooled over the frames, the scores the pass computed, the CAMBI the model was fed
-// with, and the banding measured in full-reference mode. What the report does not hold is zero,
-// the Has fields tell.
+// frame and pooled over the frames, the scores the pass computed and the banding measured in
+// full-reference mode. What the report does not hold is zero, the Has fields tell.
 type VMAFReport struct {
-	Version       string
-	FPS           float64
-	Frames        []VMAFFrameMetrics // in the order of the report, the order of the frames
-	Pooled        VMAFPooledMetrics
-	HasFidelity   bool
-	HasOriginal   bool
-	HasModelCAMBI bool // see VMAFFrameMetrics.ModelCAMBI
-	HasBanding    bool
+	Version     string
+	FPS         float64
+	Frames      []VMAFFrameMetrics // in the order of the report, the order of the frames
+	Pooled      VMAFPooledMetrics
+	HasFidelity bool
+	HasOriginal bool
+	HasBanding  bool
 	// modelCAMBIKeys are the keys of the model's CAMBI features in the pooled metrics (see
 	// modelCAMBIKeys), and pooledCAMBIMax their pooled maximums: VMAFCAMBIProbe decides on them.
 	modelCAMBIKeys []string
@@ -724,10 +722,7 @@ type VMAFReport struct {
 type VMAFFrameMetrics struct {
 	Fidelity float64 // See VMAFScoreFidelity.
 	Original float64 // See VMAFScoreOriginal.
-	// ModelCAMBI is the CAMBI the model was fed with: capped at 17 by the v1.0.16 models, at 0 for
-	// fidelity. Read when the report holds a single one (see modelCAMBIKeys).
-	ModelCAMBI float64
-	Banding    VMAFBanding
+	Banding  VMAFBanding
 }
 
 // VMAFBanding is the banding CAMBI rates in full-reference mode (see bandingFeature), from 0
@@ -741,10 +736,9 @@ type VMAFBanding struct {
 
 // VMAFPooledMetrics holds the metrics of VMAFFrameMetrics pooled over the frames by libvmaf.
 type VMAFPooledMetrics struct {
-	Fidelity   VMAFPooledMetric
-	Original   VMAFPooledMetric
-	ModelCAMBI VMAFPooledMetric
-	Banding    VMAFPooledBanding
+	Fidelity VMAFPooledMetric
+	Original VMAFPooledMetric
+	Banding  VMAFPooledBanding
 }
 
 // VMAFPooledBanding holds the metrics of VMAFBanding pooled over the frames by libvmaf.
@@ -779,11 +773,13 @@ type VMAFPooledMetric struct {
 //
 // # THE MODEL'S CAMBI
 //
-// Its key is built from the options of the model (cambi_hrs_1080_cmxv_17_vlt_0.06 for the v1.0.16
+// It is not a metric sptenc reports: it rates the banding of the distorted picture, the source's
+// included, and the banding feature measures what the distorted picture adds. Its keys are only
+// looked for, in the pooled metrics, for VMAFCAMBIProbe to tell whether the model feeds on CAMBI.
+// They are built from the options of the model (cambi_hrs_1080_cmxv_17_vlt_0.06 for the v1.0.16
 // models, cmxv_0 under the fidelity clip), which a retrained model changes: sptenc does not choose
-// it, and can only find it among the CAMBI keys as the one that is not the banding feature's (see
-// modelCAMBIKeys). A pass loading the model twice, clipped and as is, holds two, which nothing
-// sptenc controls tells apart: the model's CAMBI is read when there is a single one.
+// them, and can only find them among the CAMBI keys as the ones that are not the banding feature's
+// (see modelCAMBIKeys).
 func readVMAFReport(path string, pass vmafPass) (report VMAFReport, err error) {
 	reportFd, err := os.Open(path)
 	if err != nil {
@@ -887,9 +883,6 @@ func (vr *VMAFReport) decodeFrames(dec *json.Decoder, keys vmafReportKeys) (err 
 				return fmt.Errorf("frame %d: %w", frame.FrameNum, err)
 			}
 		}
-		if cambiKeys := modelCAMBIKeys(frame.Metrics); len(cambiKeys) == 1 {
-			metrics.ModelCAMBI = frame.Metrics[cambiKeys[0]]
-		}
 		vr.Frames = append(vr.Frames, metrics)
 	}
 	return expectJSONDelim(dec, ']')
@@ -918,9 +911,6 @@ func (vr *VMAFReport) readPooled(pooled map[string]VMAFPooledMetric, keys vmafRe
 	vr.pooledCAMBIMax = make(map[string]float64, len(vr.modelCAMBIKeys))
 	for _, key := range vr.modelCAMBIKeys {
 		vr.pooledCAMBIMax[key] = pooled[key].Max
-	}
-	if vr.HasModelCAMBI = len(vr.modelCAMBIKeys) == 1; vr.HasModelCAMBI {
-		vr.Pooled.ModelCAMBI = pooled[vr.modelCAMBIKeys[0]]
 	}
 	return
 }
@@ -989,9 +979,7 @@ const (
 )
 
 // Stats returns the statistics of a score over the frames: the pooled ones of libvmaf, and the
-// percentiles libvmaf does not compute. The model's CAMBI goes with the original score when the
-// report holds it: the fidelity clip sets it to 0 whatever the picture, a "no banding" that
-// would say nothing. A score the report does not hold is an error.
+// percentiles libvmaf does not compute. A score the report does not hold is an error.
 func (vr VMAFReport) Stats(score VMAFScore) (vs VMAFStats, err error) {
 	var (
 		pooled VMAFPooledMetric
@@ -1012,10 +1000,6 @@ func (vr VMAFReport) Stats(score VMAFScore) (vs VMAFStats, err error) {
 	vs.HarmonicMean = pooled.HarmonicMean
 	vs.Mean = pooled.Mean
 	vs.Maximum = pooled.Max
-	if vs.HasCAMBI = vr.HasModelCAMBI && score == VMAFScoreOriginal; vs.HasCAMBI {
-		vs.CAMBIMean = vr.Pooled.ModelCAMBI.Mean
-		vs.CAMBIMax = vr.Pooled.ModelCAMBI.Max
-	}
 	// Compute the missing ones
 	scores := make([]float64, len(vr.Frames))
 	for i, frame := range vr.Frames {
@@ -1042,8 +1026,8 @@ func scorePercentile(sorted []float64, p float64) float64 {
 	return sorted[index]
 }
 
-// VMAFStats is a user-friendly summary of VMAF results, including computed percentiles and
-// the banding diagnostic (see VMAFFrameMetrics).
+// VMAFStats is a user-friendly summary of the statistics of a VMAF score over the frames,
+// including computed percentiles.
 type VMAFStats struct {
 	Version      string
 	Minimum      float64 `json:"min"`
@@ -1055,15 +1039,9 @@ type VMAFStats struct {
 	HarmonicMean float64 `json:"harmonic_mean"`
 	Mean         float64 `json:"mean"`
 	Maximum      float64 `json:"max"`
-	CAMBIMean    float64 `json:"cambi_mean"`
-	CAMBIMax     float64 `json:"cambi_max"`
-	HasCAMBI     bool    `json:"-"` // the model feeds on CAMBI, see VMAFReport.HasModelCAMBI
 }
 
-// String renders the VMAF statistics as an aligned plain-text table, followed by the banding
-// diagnostic when the model has one. CAMBI is already part of the score: it is shown for
-// diagnosis, never gated. It rates the banding of the encoded picture, the source's included
-// (see core.VMAFStats).
+// String renders the VMAF statistics as an aligned plain-text table.
 func (vs VMAFStats) String() string {
 	var tableBuffer strings.Builder
 	table := tablewriter.NewTable(&tableBuffer,
@@ -1108,13 +1086,89 @@ func (vs VMAFStats) String() string {
 		strconv.FormatFloat(vs.Maximum, 'f', -1, float64Precision),
 	})
 	table.Render()
-	if vs.HasCAMBI {
-		fmt.Fprintf(&tableBuffer, "\nBanding (CAMBI, 0 = none, ~5 = slightly annoying, 17 = ceiling): mean %s, max %s\n",
-			strconv.FormatFloat(vs.CAMBIMean, 'f', -1, float64Precision),
-			strconv.FormatFloat(vs.CAMBIMax, 'f', -1, float64Precision),
+	return tableBuffer.String()
+}
+
+// VMAFSummary is what sptenc reports of a pass over a whole video, the final VMAF of an encode or
+// the vmaf command: the statistics of the score gated, the harmonic mean of the model's other
+// score, and the banding the distorted video adds to its reference, as far as the pass measured
+// them (see VMAFReport.Summary).
+type VMAFSummary struct {
+	// Score is the score of Stats, empty for a model without CAMBI: its single score is both, and
+	// is not named (see VMAFScore).
+	Score VMAFScore
+	Stats VMAFStats
+	// OtherScore is the other score of a model fed with CAMBI, empty when the pass did not compute
+	// it, and OtherHarmonicMean its harmonic mean over the frames.
+	OtherScore        VMAFScore
+	OtherHarmonicMean float64
+	HasBanding        bool
+	Banding           VMAFBandingSummary
+}
+
+// VMAFBandingSummary is the banding a distorted video adds to its reference, as CAMBI rates it in
+// full-reference mode (see VMAFBanding), pooled over the frames.
+type VMAFBandingSummary struct {
+	AddedMean  float64 // The banding added, averaged over the frames.
+	AddedMax   float64 // The banding added to the worst frame.
+	SourceMean float64 // The banding of the reference, averaged over the frames.
+	EncodeMean float64 // The banding of the distorted video, averaged over the frames.
+}
+
+// Summary returns the summary of the report for the score gated (see VMAFSummary). modelCAMBI tells
+// whether the model feeds on CAMBI (see VMAFCAMBIProbe): without it, its single score is both
+// scores of the report, and names neither.
+func (vr VMAFReport) Summary(score VMAFScore, modelCAMBI bool) (summary VMAFSummary, err error) {
+	if summary.Stats, err = vr.Stats(score); err != nil {
+		return
+	}
+	if modelCAMBI {
+		summary.Score = score
+		switch {
+		case score == VMAFScoreFidelity && vr.HasOriginal:
+			summary.OtherScore, summary.OtherHarmonicMean = VMAFScoreOriginal, vr.Pooled.Original.HarmonicMean
+		case score == VMAFScoreOriginal && vr.HasFidelity:
+			summary.OtherScore, summary.OtherHarmonicMean = VMAFScoreFidelity, vr.Pooled.Fidelity.HarmonicMean
+		}
+	}
+	if summary.HasBanding = vr.HasBanding; summary.HasBanding {
+		summary.Banding = VMAFBandingSummary{
+			AddedMean:  vr.Pooled.Banding.Added.Mean,
+			AddedMax:   vr.Pooled.Banding.Added.Max,
+			SourceMean: vr.Pooled.Banding.Source.Mean,
+			EncodeMean: vr.Pooled.Banding.Encode.Mean,
+		}
+	}
+	return
+}
+
+// vmafScoreTitles are the names the scores are printed under.
+var vmafScoreTitles = map[VMAFScore]string{
+	VMAFScoreFidelity: "Fidelity",
+	VMAFScoreOriginal: "Original score",
+}
+
+// String renders the summary: the table of the statistics of the score, under its name when the
+// model has two, the harmonic mean of the other one, and the banding.
+func (vs VMAFSummary) String() string {
+	var buffer strings.Builder
+	if vs.Score != "" {
+		fmt.Fprintf(&buffer, "%s:\n", vmafScoreTitles[vs.Score])
+	}
+	buffer.WriteString(vs.Stats.String())
+	if vs.OtherScore != "" {
+		fmt.Fprintf(&buffer, "%s: harmonic mean %s\n", vmafScoreTitles[vs.OtherScore],
+			strconv.FormatFloat(vs.OtherHarmonicMean, 'f', -1, float64Precision))
+	}
+	if vs.HasBanding {
+		fmt.Fprintf(&buffer, "Banding added (CAMBI, 0 = none, ~5 = slightly annoying): %s on average over the frames, %s on the worst frame. The reference rates %s on average, the distorted video %s.\n",
+			strconv.FormatFloat(vs.Banding.AddedMean, 'f', -1, float64Precision),
+			strconv.FormatFloat(vs.Banding.AddedMax, 'f', -1, float64Precision),
+			strconv.FormatFloat(vs.Banding.SourceMean, 'f', -1, float64Precision),
+			strconv.FormatFloat(vs.Banding.EncodeMean, 'f', -1, float64Precision),
 		)
 	}
-	return tableBuffer.String()
+	return buffer.String()
 }
 
 // vmafPathEscaper applies the two levels of escaping needed by a filter option value

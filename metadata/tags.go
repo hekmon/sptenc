@@ -21,6 +21,7 @@ const (
 	sptencStatsWeightedQP = "sptenc_stats_weighted_qp"
 	// VMAF Infos
 	sptencVMAFModelTagKey = "sptenc_vmaf_model"
+	sptencVMAFScoreTagKey = "sptenc_vmaf_score"
 	// VMAF Conf
 	sptencVMAFConfMinAltTagKey = "sptenc_vmaf_conf_min_alt"
 	sptencVMAFConfMinTagKey    = "sptenc_vmaf_conf_min"
@@ -41,14 +42,33 @@ const (
 	sptencVMAFResultHMeanTagKey  = "sptenc_vmaf_result_hmean"
 	sptencVMAFResultMeanTagKey   = "sptenc_vmaf_result_mean"
 	sptencVMAFResultMaxTagKey    = "sptenc_vmaf_result_max"
-	sptencBestEffortTagKey       = "sptenc_best_effort_segments"
+	// the harmonic mean of the score not gated: sptenc_vmaf_original_result_hmean when fidelity was,
+	// sptenc_vmaf_fidelity_result_hmean when the original score was
+	sptencVMAFOtherResultHMeanTagKeyFormat = "sptenc_vmaf_%s_result_hmean"
+	sptencBestEffortTagKey                 = "sptenc_best_effort_segments"
+	// CAMBI Conf
+	sptencCAMBIConfMeanTagKey = "sptenc_cambi_conf_mean"
+	sptencCAMBIConfMaxTagKey  = "sptenc_cambi_conf_max"
+	// CAMBI Results
+	sptencCAMBIResultAddedMeanTagKey  = "sptenc_cambi_result_added_mean"
+	sptencCAMBIResultAddedMaxTagKey   = "sptenc_cambi_result_added_max"
+	sptencCAMBIResultSourceMeanTagKey = "sptenc_cambi_result_source_mean"
+	sptencCAMBIResultEncodeMeanTagKey = "sptenc_cambi_result_encode_mean"
+	sptencCAMBILoweredTagKey          = "sptenc_cambi_lowered_segments"
+	sptencCAMBIBestEffortTagKey       = "sptenc_cambi_best_effort_segments"
 )
 
 // GenerateTags builds the ffmpeg metadata flags documenting an encode. They are all set on the
 // video stream: container level metadata (the title in particular) belongs to the user and is
 // passed through from the source untouched.
-func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults, vmaf ffmpeg.VMAFStats, model ffmpeg.VMAFModel, segmentsCount int) (flags ffmpeg.FFMEGTags) {
-	flags = make(ffmpeg.FFMEGTags, 0, 58)
+//
+// The VMAF results are the ones of the score the thresholds gated, named in sptenc_vmaf_score, and
+// the harmonic mean of the other one, when the model feeds on CAMBI: a model without it has a
+// single score, which names neither. The CAMBI tags are written when the CAMBI gate is on. A model
+// without CAMBI and the gate off gets the tags of sptenc v0.1.0 (see MANUAL.md, Metadata tags).
+func GenerateTags(vc core.VMAFChecker, cambi core.CAMBIChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults,
+	vmaf ffmpeg.VMAFSummary, model ffmpeg.VMAFModel, segmentsCount int) (flags ffmpeg.FFMEGTags) {
+	flags = make(ffmpeg.FFMEGTags, 0, 76)
 	// Global
 	module, version := signature()
 	flags = append(flags,
@@ -79,6 +99,9 @@ func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSe
 	)
 	// VMAF
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFModelTagKey, model))
+	if vmaf.Score != "" {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFScoreTagKey, vmaf.Score))
+	}
 	//// VMAF conf
 	thresholdTags := map[string]string{
 		"min":    sptencVMAFConfMinTagKey,
@@ -101,16 +124,47 @@ func GenerateTags(vc core.VMAFChecker, encoder ffmpeg.Encoder, statsQP core.QPSe
 	}
 	//// VMAF results
 	flags = append(flags,
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Minimum, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP1TagKey, strconv.FormatFloat(vmaf.Percentile1, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP5TagKey, strconv.FormatFloat(vmaf.Percentile5, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP10TagKey, strconv.FormatFloat(vmaf.Percentile10, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP25TagKey, strconv.FormatFloat(vmaf.Percentile25, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMedianTagKey, strconv.FormatFloat(vmaf.Median, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultHMeanTagKey, strconv.FormatFloat(vmaf.HarmonicMean, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Mean, 'f', -1, 64)),
-		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Maximum, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMinTagKey, strconv.FormatFloat(vmaf.Stats.Minimum, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP1TagKey, strconv.FormatFloat(vmaf.Stats.Percentile1, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP5TagKey, strconv.FormatFloat(vmaf.Stats.Percentile5, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP10TagKey, strconv.FormatFloat(vmaf.Stats.Percentile10, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultP25TagKey, strconv.FormatFloat(vmaf.Stats.Percentile25, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMedianTagKey, strconv.FormatFloat(vmaf.Stats.Median, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultHMeanTagKey, strconv.FormatFloat(vmaf.Stats.HarmonicMean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMeanTagKey, strconv.FormatFloat(vmaf.Stats.Mean, 'f', -1, 64)),
+		"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencVMAFResultMaxTagKey, strconv.FormatFloat(vmaf.Stats.Maximum, 'f', -1, 64)),
 	)
+	if vmaf.OtherScore != "" {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", fmt.Sprintf(sptencVMAFOtherResultHMeanTagKeyFormat, vmaf.OtherScore),
+			strconv.FormatFloat(vmaf.OtherHarmonicMean, 'f', -1, 64)))
+	}
+	// CAMBI
+	if !cambi.Enabled() {
+		return
+	}
+	//// CAMBI conf
+	cambiThresholds := cambi.Thresholds()
+	if mean, ok := cambiThresholds["mean"]; ok {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencCAMBIConfMeanTagKey, strconv.FormatFloat(mean, 'f', -1, 64)))
+	}
+	if max, ok := cambiThresholds["max"]; ok {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencCAMBIConfMaxTagKey, strconv.FormatFloat(max, 'f', -1, 64)))
+	}
+	//// CAMBI results: the final pass measures the banding with the gate on (see vmaf.HasBanding)
+	if vmaf.HasBanding {
+		flags = append(flags,
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencCAMBIResultAddedMeanTagKey, strconv.FormatFloat(vmaf.Banding.AddedMean, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencCAMBIResultAddedMaxTagKey, strconv.FormatFloat(vmaf.Banding.AddedMax, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencCAMBIResultSourceMeanTagKey, strconv.FormatFloat(vmaf.Banding.SourceMean, 'f', -1, 64)),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencCAMBIResultEncodeMeanTagKey, strconv.FormatFloat(vmaf.Banding.EncodeMean, 'f', -1, 64)),
+		)
+	}
+	if lowered := statsQP.NbCAMBILowered(); lowered > 0 {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencCAMBILoweredTagKey, lowered))
+	}
+	if statsQP.NbCAMBIBestEfforts > 0 {
+		flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencCAMBIBestEffortTagKey, statsQP.NbCAMBIBestEfforts))
+	}
 	return
 }
 

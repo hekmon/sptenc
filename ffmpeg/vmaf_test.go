@@ -255,20 +255,19 @@ func TestVMAFReport_Original(t *testing.T) {
 	if len(report.Frames) != 3 {
 		t.Fatalf("frames: want 3, got %d", len(report.Frames))
 	}
-	if !report.HasOriginal || report.HasFidelity || report.HasBanding || !report.HasModelCAMBI {
+	if !report.HasOriginal || report.HasFidelity || report.HasBanding {
 		t.Errorf("unexpected content: %+v", report)
 	}
 	if got := report.Frames[0].Original; got != 91.829956 {
 		t.Errorf("frame 0 score: want 91.829956, got %v", got)
 	}
-	if got := report.Frames[0].ModelCAMBI; got != 5.187107 {
-		t.Errorf("frame 0 cambi: want 5.187107, got %v", got)
-	}
 	if got := report.Pooled.Original.HarmonicMean; got != 92.169343 {
 		t.Errorf("pooled vmaf hmean: want 92.169343, got %v", got)
 	}
-	if got := report.Pooled.ModelCAMBI.Max; got != 5.187107 {
-		t.Errorf("pooled cambi max: want 5.187107, got %v", got)
+	// the model's CAMBI, for VMAFCAMBIProbe
+	const key = "cambi_hrs_1080_cmxv_17_vlt_0.06"
+	if !slices.Equal(report.modelCAMBIKeys, []string{key}) || report.pooledCAMBIMax[key] != 5.187107 {
+		t.Errorf("expected the model's CAMBI key %s at 5.187107, got %v and %v", key, report.modelCAMBIKeys, report.pooledCAMBIMax)
 	}
 	stats, err := report.Stats(VMAFScoreOriginal)
 	if err != nil {
@@ -281,11 +280,9 @@ func TestVMAFReport_Original(t *testing.T) {
 	if stats.Median != 92.099416 || stats.Percentile1 != 91.829956 {
 		t.Errorf("median and p1: want 92.099416 and 91.829956, got %v and %v", stats.Median, stats.Percentile1)
 	}
-	if stats.CAMBIMean != 4.254301 || stats.CAMBIMax != 5.187107 {
-		t.Errorf("cambi stats: want mean 4.254301 max 5.187107, got mean %v max %v", stats.CAMBIMean, stats.CAMBIMax)
-	}
-	if rendered := stats.String(); !strings.Contains(rendered, "92.169343") || !strings.Contains(rendered, "CAMBI") {
-		t.Errorf("rendered stats miss the score or the banding line:\n%s", rendered)
+	// the statistics of a score, and nothing else: the model's CAMBI is no banding measure
+	if rendered := stats.String(); !strings.Contains(rendered, "92.169343") || strings.Contains(rendered, "CAMBI") {
+		t.Errorf("rendered stats should hold the score alone:\n%s", rendered)
 	}
 	// the frames keep their order: the percentiles are computed on a copy
 	if report.Frames[0].Original != 91.829956 || report.Frames[2].Original != 92.58156 {
@@ -337,11 +334,7 @@ func TestVMAFReport_BothScoresAndBanding(t *testing.T) {
 		report.Pooled.Banding.Encode.Max != 22.484294 {
 		t.Errorf("unexpected pooled banding: %+v", report.Pooled.Banding)
 	}
-	// two models, two CAMBI keys of theirs: none is read as the model's, the banding feature's
-	// keys are never taken for one
-	if report.HasModelCAMBI || frame.ModelCAMBI != 0 {
-		t.Errorf("the model's CAMBI is ambiguous with two models, got %v", frame.ModelCAMBI)
-	}
+	// two models, two CAMBI keys of theirs: the banding feature's keys are never taken for one
 	if want := []string{"cambi_hrs_1080_cmxv_0_vlt_0.06", "cambi_hrs_1080_cmxv_17_vlt_0.06"}; !slices.Equal(report.modelCAMBIKeys, want) {
 		t.Errorf("model CAMBI keys: want %v, got %v", want, report.modelCAMBIKeys)
 	}
@@ -356,9 +349,28 @@ func TestVMAFReport_BothScoresAndBanding(t *testing.T) {
 	if fidelity.HarmonicMean != 95.187485 || original.HarmonicMean != 84.518463 || fidelity.Median != 95.187485 {
 		t.Errorf("unexpected stats: fidelity %+v, original %+v", fidelity, original)
 	}
-	// the clipped CAMBI of fidelity is not a banding measure: no banding line
-	if strings.Contains(fidelity.String(), "Banding") {
-		t.Errorf("no banding line expected with fidelity:\n%s", fidelity)
+	// the summary of the score gated: its statistics, the other score, the banding
+	for _, tc := range []struct {
+		gated, other VMAFScore
+		hmean        float64
+		title, line  string
+	}{
+		{VMAFScoreFidelity, VMAFScoreOriginal, 84.518463, "Fidelity:\n", "Original score: harmonic mean 84.518463\n"},
+		{VMAFScoreOriginal, VMAFScoreFidelity, 95.187485, "Original score:\n", "Fidelity: harmonic mean 95.187485\n"},
+	} {
+		summary, err := report.Summary(tc.gated, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary.Score != tc.gated || summary.OtherScore != tc.other || summary.OtherHarmonicMean != tc.hmean ||
+			!summary.HasBanding || summary.Banding != (VMAFBandingSummary{AddedMean: 15.831217, AddedMax: 15.831217, SourceMean: 6.653077, EncodeMean: 22.484294}) {
+			t.Errorf("unexpected summary of %s: %+v", tc.gated, summary)
+		}
+		rendered := summary.String()
+		if !strings.HasPrefix(rendered, tc.title) || !strings.Contains(rendered, tc.line) ||
+			!strings.Contains(rendered, "Banding added (CAMBI, 0 = none, ~5 = slightly annoying): 15.831217 on average over the frames, 15.831217 on the worst frame. The reference rates 6.653077 on average, the distorted video 22.484294.") {
+			t.Errorf("unexpected rendering of %s:\n%s", tc.gated, rendered)
+		}
 	}
 	// the same report read for the fidelity and banding pass would miss its "vmaf" key
 	if _, err := decodeVMAFReport(strings.NewReader(bothBandingReportSample), vmafPass{model: VMAFModelFHD, modelCAMBI: true,
@@ -391,12 +403,9 @@ func TestVMAFReport_FidelityAndBanding(t *testing.T) {
 		t.Errorf("unexpected frame: %+v", frame)
 	}
 	// the model's CAMBI is its own key, not the first "cambi" one
-	if !report.HasModelCAMBI || frame.ModelCAMBI != 0 || report.Pooled.ModelCAMBI.Max != 0 {
-		t.Errorf("the model's clipped CAMBI should be read as 0: %+v", report)
-	}
-	// and it is no banding measure: the statistics of fidelity do not carry it
-	if stats, err := report.Stats(VMAFScoreFidelity); err != nil || stats.HasCAMBI {
-		t.Errorf("fidelity should not carry the clipped CAMBI: %+v, %v", stats, err)
+	const key = "cambi_hrs_1080_cmxv_0_vlt_0.06"
+	if !slices.Equal(report.modelCAMBIKeys, []string{key}) || report.pooledCAMBIMax[key] != 0 {
+		t.Errorf("expected the model's clipped CAMBI key %s at 0, got %v and %v", key, report.modelCAMBIKeys, report.pooledCAMBIMax)
 	}
 }
 
@@ -416,7 +425,7 @@ const bandingReportSample = `{
 
 func TestVMAFReport_Banding(t *testing.T) {
 	report := decodeSample(t, bandingReportSample, vmafPass{measures: VMAFMeasures{Banding: true}})
-	if report.HasFidelity || report.HasOriginal || !report.HasBanding || report.HasModelCAMBI {
+	if report.HasFidelity || report.HasOriginal || !report.HasBanding || len(report.modelCAMBIKeys) != 0 {
 		t.Errorf("unexpected content: %+v", report)
 	}
 	// the distorted picture adds nothing where it is less banded than the reference
@@ -449,7 +458,7 @@ const v0BandingReportSample = `{
 func TestVMAFReport_ModelWithoutCAMBI(t *testing.T) {
 	report := decodeSample(t, v0BandingReportSample, vmafPass{model: VMAFModelV0FHD,
 		measures: VMAFMeasures{Fidelity: true, Banding: true}})
-	if !report.HasFidelity || !report.HasOriginal || report.HasModelCAMBI || len(report.modelCAMBIKeys) != 0 {
+	if !report.HasFidelity || !report.HasOriginal || len(report.modelCAMBIKeys) != 0 {
 		t.Errorf("unexpected content: %+v", report)
 	}
 	fidelity, err := report.Stats(VMAFScoreFidelity)
@@ -463,9 +472,24 @@ func TestVMAFReport_ModelWithoutCAMBI(t *testing.T) {
 	if fidelity != original || fidelity.Mean != 99.264425 {
 		t.Errorf("both scores are the model's single one: fidelity %+v, original %+v", fidelity, original)
 	}
-	// and the zero CAMBI of a model without it is not printed as "no banding"
-	if strings.Contains(fidelity.String(), "Banding") {
-		t.Errorf("no banding line expected without CAMBI:\n%s", fidelity)
+	// its summary names no score, the banding of the banding feature is there
+	summary, err := report.Summary(VMAFScoreFidelity, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Score != "" || summary.OtherScore != "" || !summary.HasBanding || summary.Banding.AddedMean != 15.831217 {
+		t.Errorf("unexpected summary: %+v", summary)
+	}
+	if rendered := summary.String(); strings.Contains(rendered, "Fidelity") || strings.Contains(rendered, "Original") ||
+		!strings.Contains(rendered, "Banding added") {
+		t.Errorf("unexpected rendering:\n%s", rendered)
+	}
+	// without the banding feature, the summary of a model without CAMBI is its table alone, as
+	// sptenc v0.1.0 printed it
+	alone := decodeSample(t, `{"frames": [{"frameNum": 0, "metrics": {"vmaf": 99.264425}}], "pooled_metrics": {"vmaf": {"min": 99.264425, "max": 99.264425, "mean": 99.264425, "harmonic_mean": 99.264425}}}`,
+		vmafPass{model: VMAFModelV0FHD, measures: VMAFMeasures{Fidelity: true}})
+	if summary, err := alone.Summary(VMAFScoreFidelity, false); err != nil || summary.String() != summary.Stats.String() {
+		t.Errorf("expected the table alone, got %v:\n%s", err, summary)
 	}
 }
 
