@@ -49,6 +49,8 @@ Per segment, at 93:
 - **Fidelity against v0.1.0:** lower on 108 segments of the episode, equal on 33, higher on 22 (from 5 below to 7 above); lower on 195 of the film, equal on 25, higher on 5 (from 6 below to 2 above). v0 scores 93 or more the segments holding 83.5% of the episode's frames and 98.9% of the film's. Below it on the episode: the end credits, text on black, where v1 is more lenient than v0 (v0 88.0 to 91.2), and 17 segments within 0.9 of it.
 - **Best efforts:** the two segments per content that no QP could pass with the original score at 95 peak at 94.05 to 94.94, their lowest QP scoring below the peak (see [the banded sources](#sources-against-themselves)). Fidelity at 95 has none.
 
+At 95, v0 scores 95 or more the segments of fidelity holding 65.1% of the episode's frames (117 segments out of 163) and 93.8% of the film's (208 out of 225).
+
 ## Search time
 
 The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93:

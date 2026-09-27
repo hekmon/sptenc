@@ -136,14 +136,7 @@ Intermediate bands commonly cited elsewhere (e.g. "80–90 = good quality with m
 
 #### Fidelity against v0 on real content
 
-Two 8-bit Blu-ray remuxes, each cut in the same segments for every run and encoded with `hevc_nvenc` behind a harmonic mean gate: once scored with v0.6.1 (sptenc v0.1.0, at 93), then with fidelity (at 93 and 95), each result scored afterwards with v0:
-
-| Content | Video stream: v0 at 93 → fidelity at 93 → at 95 | Mean QP | v0 score of the fidelity encodes, at 93 → at 95 |
-|---|---|---|---|
-| 26 min anime episode, 1080p, dark gradients (163 segments) | 175.0 → 200.9 (+15%) → 299.8 MiB (+71%) | 26.6 → 25.8 → 22.7 | 94.1 → 95.5 |
-| 101 min live-action film, 1080p (225 segments) | 1687.7 → 2587.6 (+53%) → 4440.9 MiB (+163%) | 24.5 → 22.5 → 19.9 | 95.0 → 96.4 |
-
-Mean QP is weighted by the frame count of each segment, scores are harmonic means. No segment ended as best effort, and the CAMBI gate lowers none. Fidelity at 93 was the stricter of the two on most segments, not on all: v0 scores 93 or more the segments holding 83.5% of the episode's frames and 98.9% of the film's. Below it, on the episode: its end credits, text on black, where v1 is more lenient than v0, and 17 segments within 0.9 of it. The film lost more QP than the episode (2.0 against 0.9 on average). Gated on the model's original score, the same 93 made them 62% and 101% larger than v0: the extra over fidelity is its CAMBI term, the banding of the sources counted against their encodes (see [BENCHMARKS](BENCHMARKS.md#gates-on-the-two-contents)).
+On two 8-bit Blu-ray remuxes, a 26 min anime episode and a 101 min live-action film, fidelity was stricter than v0 on most segments, at 93 as at 95. At 93, the files came out 15% and 53% larger than those of sptenc v0.1.0 gated on v0 at 93, and v0 scores them 94.1 and 95.0. Not on every segment: on the episode, v0 scores its end credits (text on black, where v1 is more lenient than v0) below 93, and some segments just under it. Every run is in [BENCHMARKS](BENCHMARKS.md#gates-on-the-two-contents).
 
 The defaults and the values recommended below still come from the v0 anchors. sptenc promises a quality floor, and a stricter floor is the side to err on: if yours proves more demanding than you need, encode a few segments of your content at a lower value, look at them, and lower the gate.
 
@@ -191,7 +184,7 @@ How to compose a profile:
 
 ### Recommended Values
 
-These values come from the [v0 anchors](#for-reference-the-v0-anchors): on both contents measured, fidelity at these values was the stricter of the two on most segments (see [Fidelity against v0](#fidelity-against-v0-on-real-content)).
+These values come from the [v0 anchors](#for-reference-the-v0-anchors): on both contents measured, fidelity at 93 and 95 was the stricter of the two on most segments (see [Fidelity against v0](#fidelity-against-v0-on-real-content)).
 
 | Use Case | Gate | Target value |
 |---|---|---|
@@ -205,7 +198,7 @@ These values come from the [v0 anchors](#for-reference-the-v0-anchors): on both 
 
 ² fast-motion content needs no dedicated profile: motion-heavy segments fail the gate and converge to a lower QP automatically.
 
-> **93 vs 95?** The 93 target comes from Rassool (RealNetworks, [IEEE BMSB 2017](https://doi.org/10.1109/BMSB.2017.7986143), [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to about 93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (the two best ratings of the 5-level scale of his test, on 4K clips). The 95 target comes from Kah et al. ([Proc. SPIE 11842, Applications of Digital Image Processing XLIV, 2021](https://doi.org/10.1117/12.2593952)): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV viewed from twice its height), a deliberately higher bar. In Ozer's test on the *Meridian* clip, choosing 95 over 93 cost about 1400 kbps on the top rung (clip-specific, not universal). The default targets the first; the jump to 95 remains an explicit opt-in. Both studies used the v0 models: on the episode and the film [measured above](#fidelity-against-v0-on-real-content), fidelity at 93 gave encodes v0 scores at 94.1 and 95.0, at 95 at 95.5 and 96.4.
+> **93 vs 95?** The 93 target comes from Rassool (RealNetworks, [IEEE BMSB 2017](https://doi.org/10.1109/BMSB.2017.7986143), [PDF](https://realnetworks.com/sites/default/files/vmaf_reproducibility_ieee.pdf)), who found that encoding to about 93 would serve the vast majority of viewers with content *"either indistinguishable from original or with noticeable but not annoying distortion"* (the two best ratings of the 5-level scale of his test, on 4K clips). The 95 target comes from Kah et al. ([Proc. SPIE 11842, Applications of Digital Image Processing XLIV, 2021](https://doi.org/10.1117/12.2593952)): VMAF 95 is the lowest score *"at which a video signal is on average subjectively indistinguishable from the original video signal"* (ITU-R BT.500 subjective tests on a 4K OLED TV viewed from twice its height), a deliberately higher bar. In Ozer's test on the *Meridian* clip, choosing 95 over 93 cost about 1400 kbps on the top rung (clip-specific, not universal). The default targets the first; the jump to 95 remains an explicit opt-in. Both studies used the v0 models: on the episode and the film [measured above](#fidelity-against-v0-on-real-content), v0 scores the fidelity encodes above the gate, at 93 as at 95.
 
 ### VMAF runs on the CPU
 
