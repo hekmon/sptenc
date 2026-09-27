@@ -58,14 +58,15 @@ The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93:
 | v0.6.1 on the CPU (sptenc v0.1.0) | 16m35s | 1h2m53s | 87%, 86% |
 | v1 original | 17m46s | 1h3m19s | 81%, 79% |
 | Fidelity | 16m19s ² | 1h4m24s | 81%, 78% |
-| Fidelity and the CAMBI gate, the default | 18m20s | 1h12m2s | 83%, 79% |
-| Fidelity, CAMBI measured in every attempt ³ | 19m18s | 1h17m29s | 87%, 82% |
+| Fidelity and the CAMBI gate, the default | 18m20s, 18m51s ³ | 1h12m2s, 1h13m41s ³ | 83%, 79% |
+| Fidelity, CAMBI measured in every attempt ⁴ | 19m18s | 1h17m29s | 87%, 82% |
 
 ¹ Its log has no timestamps: sptenc printed 11m13s, corrected by the ratio of that run's printed total to its wall clock total (0.968).
-² Two runs: 16m22s and 16m16s, the same QPs on every segment and the same video.
-³ Not what sptenc does: the CAMBI gate measures the banding once per segment, at the QP the VMAF search found (see [Fidelity and banding](MANUAL.md#fidelity-and-banding)).
+² Two runs, in the evening then at night: 16m22s and 16m16s, the same QPs on every segment and the same video.
+³ Two runs, a development build at night, then the implementation in the evening: the same ffmpeg commands (compared with `--debug` on a synthetic clip), the same QPs on every segment and the same video.
+⁴ Not what sptenc does: the CAMBI gate measures the banding once per segment, at the QP the VMAF search found (see [Fidelity and banding](MANUAL.md#fidelity-and-banding)).
 
-Measured once per segment, the CAMBI gate added 12.4% (episode) and 11.9% (film) to the search time and 14.2% to the CPU time on both. Measured in every attempt, it added 18.3% and 20.3% (26.0% and 27.3% of CPU time). Both gave the same QP on every segment, packet-identical video streams and the same banding values at the QPs kept. NVENC was busy 21 to 26% of the time in every run: the CPU is what limits a GPU search, decoding the lossless intermediate twice per attempt (once for the encode, once as the VMAF reference) and computing VMAF.
+Measured once per segment, the CAMBI gate added 12 to 15% to the search time and 14 to 17% to the CPU time, depending on the runs compared. On the episode, 12.7% and 14.2% against the fidelity run of the same night, 15.2% and 17.2% for the evening run against the evening fidelity run of the day before. On the film, 14.4% and 16.3% evening against evening (11.9% and 14.2% for the night run against the evening fidelity run). The same work does not always take the same time on that machine: the evening runs of the default took 2.8% (episode) and 2.3% (film) longer than the night ones, and the evening fidelity run of the episode 0.6% longer than the night one (up to 2.7% along the way). Measured in every attempt, the banding added 18.6% to the search time and 26.0% to the CPU time of the episode, against the fidelity run of the same night, and 20.3% and 27.3% on the film (its morning run against the evening fidelity run). On each content, the fidelity runs above, with and without the CAMBI gate, gave the same QP on every segment and packet-identical video streams, and both ways of measuring the banding the same values at the QPs kept. NVENC was busy 21 to 26% of the time in every run: the CPU is what limits a GPU search, decoding the lossless intermediate twice per attempt (once for the encode, once as the VMAF reference) and computing VMAF.
 
 ## Encoders
 
