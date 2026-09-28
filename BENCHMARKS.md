@@ -189,6 +189,8 @@ sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, what
 
 A synthetic clip is enough to show it. The keyframes added cost little there, its temporal noise making every frame expensive, and much on segment 107, where they replace cheap predicted frames.
 
+In the `hevc_vaapi` run of the episode ([Encoders](#encoders)), 2 segments at a time, the encode kept for segment 107 is the one a lone encode gives at the same QP, 22: the same size and pictures.
+
 ## Banding
 
 CAMBI rates banding from 0 (none) up, and "a CAMBI score around 5 is where banding starts to become slightly annoying" ([CAMBI documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md)). The v1 models cap it at 17 in their score; the banding sptenc measures is not capped. Unless said otherwise, it is computed with the settings of the v1 models (`cambi_high_res_speedup=1080`, `cambi_vis_lum_threshold=0.06`).
