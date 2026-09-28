@@ -172,11 +172,12 @@ var batchsearchCommand = &cli.Command{
 		"FINAL ENCODE\n" +
 		"When --" + finalEncodeFlagName + " is set and the search encoder is GPU-based, the command automatically\n" +
 		"derives the equivalent CPU encoder of the same codec (e.g. hevc_nvenc -> libx265) and performs\n" +
-		"the final encode with the discovered threshold. CPU encoders produce smaller files for an equivalent\n" +
-		"quality compared to GPU encoders, which are optimized for speed rather than compression efficiency.\n" +
-		"The GPU-found threshold is usually close enough for the CPU pass to be worth the speedup,\n" +
-		"though it may not be exactly optimal. The GPU of the search keeps decoding for the CPU pass\n" +
-		"(see HARDWARE above).\n\n" +
+		"the final encode with the discovered threshold. The CPU encoder can make a smaller file at the\n" +
+		"same VMAF, by an amount that depends on the GPU encoder and on the content: on the one content\n" +
+		"and machine measured, " + string(ffmpeg.HEVCEncoderLibx265) + " made a video stream 3% smaller than " + string(ffmpeg.HEVCEncoderNVEnc) + ", for a search\n" +
+		"3.2 times as long (see MANUAL.md, Encoders). The threshold is the one that gave the GPU encoder\n" +
+		"its smallest file: the CPU encoder's own best threshold is not searched, and may differ. The GPU\n" +
+		"of the search keeps decoding for the CPU pass (see HARDWARE above).\n\n" +
 		"If the search encoder is already CPU-based, --" + finalEncodeFlagName + " is a no-op: the search\n" +
 		"result already comes from the encoder of the final file.\n\n" +
 		"The final encode searches one segment at a time by default. --" + finalConcurrentSegmentsFlagName + " raises\n" +

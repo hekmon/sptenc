@@ -59,8 +59,9 @@ type AV1LibaomEncodeQPConfig struct {
 }
 
 // AV1LibaomEncodeQP encodes a video file to AV1 using the libaom encoder via FFmpeg.
-// This is a CPU-based software encoder; it is slower than GPU encoding (e.g. NVENC or VA-API)
-// but produces significantly smaller files, making it recommended for final encoding.
+// This is a CPU-based software encoder, too slow for the iterative search of sptenc: the CLI does
+// not offer it (see AGENTS.md, libaom-av1 is excluded). Its files were not measured against the
+// other AV1 encoders.
 func AV1LibaomEncodeQP(ctx context.Context, config AV1LibaomEncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
