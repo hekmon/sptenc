@@ -184,6 +184,8 @@ sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, what
 | `hevc_videotoolbox` (M4 Max), synthetic, 50 | 10 identical, 1 keyframe | 15 of 20 different: 13 with one keyframe more, 2 with two, 0.3 to 0.8% larger |
 | `hevc_videotoolbox` (M4 Max), segment 107, 50 | 10 identical, 2 keyframes | 17 of 20 different: 10 with one keyframe more, 16 to 18% larger, 7 with two, 33 to 35% larger |
 | `hevc_nvenc` (RTX 5090), synthetic, 25, 3 runs | 3 identical | 6 of 6 identical |
+| `hevc_vaapi` (Core i7-14700T), synthetic, 26 | 10 identical, 2 keyframes | 20 of 20 identical |
+| `hevc_vaapi` (Core i7-14700T), segment 107, 26 | 10 identical, 3 keyframes | 20 of 20 identical |
 
 A synthetic clip is enough to show it. The keyframes added cost little there, its temporal noise making every frame expensive, and much on segment 107, where they replace cheap predicted frames.
 
