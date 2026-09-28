@@ -855,11 +855,12 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 // # WHY THIS EXISTS
 //
 // An encoder can exit without an error and a frame short: hevc_videotoolbox reported "Error
-// encoding frame: -12912" on one frame of a 270 frames segment, and ffmpeg still exited 0 with the
-// 269 others. VMAF scores such an encode all the same, pairing the frames of both videos by their
-// index: after the gap, every frame was compared with the next one of the segment, and the encode
-// scored a harmonic mean of 93.63 (93.98 complete), passing the gate. Its score would steer the
-// search like any other, and kept, it would leave the output a frame short.
+// encoding frame: -12912" (kVTVideoEncoderMalfunctionErr, in Apple's VTErrors.h) on one frame of
+// a 270 frames segment, and ffmpeg still exited 0 with the 269 others. VMAF scores such an encode
+// all the same, pairing the frames of both videos by their index: after the gap, every frame was
+// compared with the next one of the segment, and the encode scored a harmonic mean of 93.63
+// (93.98 complete), passing the gate. Its score would steer the search like any other, and kept,
+// it would leave the output a frame short.
 //
 // # WHY EVERY ENCODE, NOT ONLY THE ONE KEPT
 //
