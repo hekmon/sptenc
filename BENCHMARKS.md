@@ -178,6 +178,22 @@ Two `hevc_videotoolbox` encodes running at the same time change each other's out
 
 The different encodes repeat (the same size and pictures up to 5 times), as if the extra keyframes landed on a few frames, which ones depending on how the two encodes shared the engine. A first test, with the keyframe every 12 frames of ffmpeg's default, gave 7 lone encodes alike, one of them while two VMAF passes loaded the CPU, and 1 of 4 encodes run two at a time with a keyframe more (2.5% larger). In the episode runs above, all with 2 segments at a time, the encode kept for segment 107 differed from the lone one every time, from 5 to 14% larger: their sizes carry keyframes this added, the settings they compare having all run that way. The stream of a lone encode is not the same from one run to the next, only its pictures and its size are.
 
+When the keyframes come: segment 107 at `-q:v 62`, encoded alone in 1.56 s with its keyframes at frames 0 and 248, then two at a time, the second ffmpeg started from 0 to 1.5 s after the first:
+
+| Second encode started after the first | First encode's keyframes | Second encode's keyframes |
+|---|---|---|
+| Alone | 0, 248 | |
+| 0.01 s | 0, 248, 267 | 0, 3, 9, 257 |
+| 0.23 s | 0, 51 | 0, 231 |
+| 0.42 s | 0, 81, 82, 87 | 0, 212 |
+| 0.62 s | 0, 141, 145 | 0, 138 |
+| 0.82 s | 0, 201 | 0, 78 |
+| 1.02 s | 0, 225, 228 | 0, 63 |
+| 1.22 s | 0, 209, 219 | 0, 75 |
+| 1.52 s | 0, 248 | 0, 248 |
+
+Every pair that ran together got keyframes more, in both encodes. From 0.23 to 1.02 s apart, the ones added to the first encode come later the later the second one started (from frame 51 to 225), the ones added to the second earlier (from 231 to 63), as if an encode got a keyframe when the other one started or ended. A keyframe added restarts the count to the next one, 248 frames later (9 then 257). Started 1.52 s after the first, 0.22 s before it ended, the second encode got none, and neither did the first.
+
 sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, whatever `-C`: its hardware decoding and the rest of the work of a segment stay concurrent. The whole episode, at sptenc's settings, before and with it:
 
 | Encodes | Video stream | Keyframes | Attempts per segment | Search | CPU busy |
