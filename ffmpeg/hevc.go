@@ -793,6 +793,18 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	args = append(args,
 		"-g", "250",
 	)
+	//// frame reordering (B-frames)
+	// Without -bf, hevc_videotoolbox encodes I and P frames only: libavcodec's generic default is
+	// -bf 0, which the VideoToolbox wrapper turns into kVTCompressionPropertyKey_AllowFrameReordering
+	// set to false (FFmpeg n9.0.2, videotoolboxenc.c), against VideoToolbox's own default ("True by
+	// default", Apple's header). The wrapper reads -bf as allowed or not, not as a number of
+	// B-frames: -bf 1 and -bf 4 gave the same stream. On the episode of BENCHMARKS.md (M4 Max,
+	// ffmpeg 9.0.1, with -g 250), VideoToolbox made 74% of the frames B-frames and the video came
+	// out 17% smaller at the default gates, smaller on 155 of its 163 segments, the QP the search
+	// kept moving on 19 of them only (10 up, 9 down).
+	args = append(args,
+		"-bf", "1",
+	)
 	//// parameter sets in-band, before every keyframe: DO NOT REMOVE
 	// hevc_videotoolbox writes the quality into the PPS (init_qp_minus26) and emits the
 	// VPS/SPS/PPS only once, in the container extradata. When segments encoded at different
