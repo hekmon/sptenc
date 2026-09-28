@@ -395,7 +395,7 @@ Under the hood, here are the base options used by sptenc. `X` is the QP value be
 
 **libx265**
 ```bash
-ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -pix_fmt 'yuv420p10le' -preset 'slow' -qp 'X' [...]
+ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -preset 'slow' -qp 'X' [...]
 ```
 
 **hevc_nvenc**
@@ -424,7 +424,7 @@ VideoToolbox has no constant QP mode: sptenc drives its constant quality setting
 
 **libsvtav1**
 ```bash
-ffmpeg [...] -c:v 'libsvtav1' -pix_fmt 'yuv420p10le' -preset '3' -qp 'X' [...]
+ffmpeg [...] -c:v 'libsvtav1' -preset '3' -qp 'X' [...]
 ```
 
 **av1_nvenc**
