@@ -6,15 +6,16 @@ The measurements behind the quality, banding, search time, file size and disk sp
 2. [Gates on the two contents](#gates-on-the-two-contents)
 3. [Search time](#search-time)
 4. [Encoders](#encoders)
-5. [Banding](#banding)
-6. [Synthetic clips](#synthetic-clips)
-7. [Minimum picture sizes](#minimum-picture-sizes)
+5. [NVENC adaptive quantization](#nvenc-adaptive-quantization)
+6. [Banding](#banding)
+7. [Synthetic clips](#synthetic-clips)
+8. [Minimum picture sizes](#minimum-picture-sizes)
 
 ## Setup
 
 - **Machine:** AMD Ryzen 9 9950X3D (16 cores, 32 threads), NVIDIA RTX 5090, Linux under WSL2 on Windows. ffmpeg n9.0.2 with libvmaf f85a8536 (a September 2026 build).
 - **Contents:** two 8-bit 1080p Blu-ray remuxes at 23.976 fps. A 26 min anime episode with dark gradients (37,393 frames, cut in 163 segments at threshold 8.0055) and a 101 min live-action film (145,397 frames, 225 segments at threshold 10), both with the default 5 s minimum segment length. Every run of a content encoded the very same segments. Source files of 4.04 and 23.77 GiB, lossless FFV1 masters of 14.29 and 59.30 GiB (33.0 and 35.2 GiB per hour).
-- **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others.
+- **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others. NVENC ran with its adaptive quantization on, which sptenc has since turned off (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
 - **Scores of the outputs:** each output scored against its source (or its lossless master, the same pictures), the whole file at once, then split back into its segments.
 - **Durations** are wall clock times, read from the timestamps of the logs. The Linux kernel of that machine had its clock tick adjusted, running from 3% slow to 10% fast depending on the day, and every duration measured on it ran with it, the ones sptenc prints included: only the timestamps follow the host's clock.
 
@@ -88,6 +89,19 @@ The episode, `hevc_nvenc` with `-C 6` and `libx265` with `-C 3` (decoding on NVD
 | CPU busy | 83% | 88% | 81% | 90% |
 
 At the default, the `libx265` stream is 15% smaller than the `hevc_nvenc` one, against 31% gated on the original score: fidelity made the `hevc_nvenc` stream 29% smaller than the original score did, the `libx265` one 13% (it raised the QP of `libx265` on 120 segments out of 163 and lowered none). At the default, the CAMBI gate lowered no segment of either encoder; the banding `libx265` added is 0.0045 on average over the frames and 3.64 on its worst frame (`hevc_nvenc`: 0.0017 and 2.70).
+
+## NVENC adaptive quantization
+
+Under constant QP, NVENC honors its adaptive quantization: the QP asked for becomes a base, lowered where NVIDIA's model of the eye wants more bits. The 20 segments sampled for [the banding survey](#sources-against-themselves), encoded with sptenc's arguments and both AQ flags on or off, each encode scored for fidelity and the added banding. The size reaching fidelity 93 is interpolated on a log scale between the highest QP passing and the next one: `hevc_nvenc` encoded at every QP within 6 of that boundary, `av1_nvenc` bisected over its 0–255 range.
+
+| AQ off against on, size reaching fidelity 93 | `hevc_nvenc` | `av1_nvenc` |
+|---|---|---|
+| All 20 segments | −22% | −22% |
+| Film (10 segments) | −25% | −29% |
+| Episode (10 segments) | −14% | −7% |
+| Per segment | −4% to −37% | −4% to −49% |
+
+Every segment was smaller with AQ off, with both encoders. With `hevc_nvenc`, AQ on made 1.57 times the data at the same QP (median of 260 encodes, 1.07 to 3.13 times) for one more point of fidelity (median, −0.13 to +3.21): AQ off needed 0 to 3 QPs lower to reach 93 and still made smaller files. The CAMBI gate lowered no segment in either setting, and on the grain over black of the episode (segment 140), AQ off added less banding, 0.005 on average against 0.048. At normal levels the encodes of the darkest segments look the same; with their levels stretched, AQ on turns that grain into more flat blocks than AQ off. The runs of the other sections predate this measurement: NVENC ran with AQ on.
 
 ## Banding
 

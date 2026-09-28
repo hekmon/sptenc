@@ -383,7 +383,7 @@ The CAMBI tags are written when the gate is on.
 
 These are the options sptenc passes to ffmpeg. They are fixed, not defaults: the QP is the only dial, so that the search, its statistics and the [QP cache](#persistent-stats-from-previous-runs) work the same way on every run, and what you tune is the **VMAF thresholds** and the **scene detection**, not encoder minutiae. If you need full control over every ffmpeg flag, ffmpeg itself is the right tool.
 
-They aim at **a VMAF target met by every segment, at the smallest file size**, with one compromise: the search encodes every segment several times, so `libx265` runs at preset `slow` and `libsvtav1` at preset 3, not at their slowest settings. NVENC runs at its best preset, `p7`, the VA-API, D3D12VA and VideoToolbox encoders at their default settings. What the other options do has been checked, not always what they are worth at a VMAF target: NVENC's lookahead makes smaller files at the same QP, and its adaptive quantization stays active under constant QP (see [Why QP instead of CRF?](#why-qp-instead-of-crf)), but whether that adaptive quantization saves or costs size at a given VMAF has not been measured.
+They aim at **a VMAF target met by every segment, at the smallest file size**, with one compromise: the search encodes every segment several times, so `libx265` runs at preset `slow` and `libsvtav1` at preset 3, not at their slowest settings. NVENC runs at its best preset, `p7`, the VA-API, D3D12VA and VideoToolbox encoders at their default settings. NVENC's lookahead makes smaller files at the same QP. Its adaptive quantization is off: under constant QP it gives flat and static areas extra bits by NVIDIA's model of what the eye sees, which the VMAF gate does not reward, and turning it off made the files 22% smaller at the same fidelity, on every segment measured (see [BENCHMARKS](BENCHMARKS.md#nvenc-adaptive-quantization)).
 
 > **10-bit output is mandatory.** Every encoder gets 10-bit 4:2:0 frames (`main10` for HEVC, `main` for AV1 which includes 10-bit): `yuv420p10le` for the CPU encoders, and `p010` for the hardware ones, the layout their APIs require (the same samples, with the chroma planes interleaved and the values stored in the high bits). Repacking one into the other is lossless: checked frame by frame for the CUDA and software conversions sptenc uses (VA-API converts on the GPU, not checked). 10-bit greatly reduces banding and improves compression efficiency at low bitrates — it is the modern baseline for quality encoding.
 >
@@ -400,7 +400,7 @@ ffmpeg [...] -c:v 'libx265' -profile:v 'main10' -preset 'slow' -qp 'X' [...]
 
 **hevc_nvenc**
 ```bash
-ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 [...]
+ffmpeg [...] -c:v 'hevc_nvenc' -profile:v 'main10' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 0 -temporal-aq 0 [...]
 ```
 
 **hevc_vaapi**
@@ -429,7 +429,7 @@ ffmpeg [...] -c:v 'libsvtav1' -preset '3' -qp 'X' [...]
 
 **av1_nvenc**
 ```bash
-ffmpeg [...] -c:v 'av1_nvenc' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1 [...]
+ffmpeg [...] -c:v 'av1_nvenc' -preset 'p7' -tune 'hq' -rc 'constqp' -qp 'X' -rc-lookahead 32 -spatial-aq 0 -temporal-aq 0 [...]
 ```
 
 **av1_vaapi**
@@ -482,6 +482,6 @@ This is not because CRF could not be searched: for a given segment, both dials a
 - **One dial for every encoder.** CRF is a software encoder concept. Hardware encoders expose a constant quantizer, or their own flavor of quality target, not CRF. With QP, the same search, the same statistics and the same workflow (search on a GPU encoder, final encode on its CPU counterpart) apply to every supported encoder.
 - **No rate control competing with the search.** CRF is a rate control: the encoder moves bits between frames and blocks following its own perceptual model (adaptive quantization, cu-tree), which is not VMAF. sptenc already has something deciding where quality must vary, against the metric you chose: the scene splitter, then the search of each segment. A segment being cut on scene changes (with short scenes merged into a neighbor), its content is mostly homogeneous: there is not much left for a rate control to adapt to. Netflix's [Dynamic Optimizer](https://netflixtechblog.com/dynamic-optimizer-a-perceptual-video-encoding-optimization-framework-e19f1e3a277f) article makes the same point: *"Within a homogeneous set of frames, such as those that belong to the same shot, there is much less need to use rate-control, since very simple coding schemes, such as the fixed-quantization parameter ("fixed QP") mode, supported by virtually all existing video encoders, offers a very consistent video quality, with almost minimal bitrate variation."*
 
-What happens around that base QP depends on the encoder. `libx265` turns adaptive quantization and cu-tree off by itself in constant QP mode, whatever is asked: the QP requested is the QP applied, frame type offsets aside. `libsvtav1` has its adaptive quantization off as well: ffmpeg's `-qp` sets its `aq-mode` to 0. NVENC encoders keep their spatial and temporal adaptive quantization (and their lookahead) active under `constqp`: the QP requested is a base the driver modulates per block. VideoToolbox has no constant QP at all: sptenc drives its constant quality setting (see [its options](#hevc)). Either way these settings are **identical for every tested QP**, only the base QP moves, so the comparison between candidates remains stable.
+What happens around that base QP depends on the encoder. `libx265` turns adaptive quantization and cu-tree off by itself in constant QP mode, whatever is asked: the QP requested is the QP applied, frame type offsets aside. `libsvtav1` has its adaptive quantization off as well: ffmpeg's `-qp` sets its `aq-mode` to 0. NVENC encoders would honor their spatial and temporal adaptive quantization under `constqp`, the QP requested becoming a base the driver modulates per block: sptenc turns it off, and keeps their lookahead (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)). VideoToolbox has no constant QP at all: sptenc drives its constant quality setting (see [its options](#hevc)). Either way these settings are **identical for every tested QP**, only the base QP moves, so the comparison between candidates remains stable.
 
 Whether CRF would give a smaller or a bigger file at the same VMAF score depends on the content and is not something sptenc relies on. The guarantee does not come from the dial anyway: it comes from measuring every segment after it has been encoded, and encoding it again when it fails.

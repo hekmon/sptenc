@@ -41,8 +41,8 @@ const (
 	// CUDADefaultDevice is the default CUDA device index.
 	CUDADefaultDevice = 0
 
-	nvEncSpatialAQ    = 1  // enable spatial adaptive quantization
-	nvEncTemporalAQ   = 1  // enable temporal adaptive quantization
+	nvEncSpatialAQ    = 0  // spatial adaptive quantization off (see HEVCNVEncEncodeQP)
+	nvEncTemporalAQ   = 0  // temporal adaptive quantization off (see HEVCNVEncEncodeQP)
 	nvEncMaxLookahead = 32 // max frames buffered for adaptive I/B decisions (iadapt/badapt): in constqp this is a pure compression win, same QP for smaller files (verified effective even in lossless: at 0 the driver falls back to all-intra)
 )
 

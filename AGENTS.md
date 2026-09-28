@@ -79,7 +79,7 @@ Concurrency is implemented as a worker pool (`golang.org/x/sync/errgroup`) in `c
 Each encoder uses **distinct ffmpeg semantics** (X is the QP being tested):
 - `libx265`: `-preset slow -qp X` (no `aq-mode`: x265 disables AQ and cu-tree by itself in constant QP mode)
 - `libsvtav1`: `-preset 3 -qp X` (ffmpeg's `-qp` sets `aq-mode` 0: no adaptive quantization)
-- NVENC (`hevc_nvenc`, `av1_nvenc`): `-preset p7 -tune hq -rc constqp -qp X -rc-lookahead 32 -spatial-aq 1 -temporal-aq 1` (AQ is honored under `constqp`)
+- NVENC (`hevc_nvenc`, `av1_nvenc`): `-preset p7 -tune hq -rc constqp -qp X -rc-lookahead 32 -spatial-aq 0 -temporal-aq 0` (AQ is honored under `constqp`, hence turned off explicitly: see "NVENC runs without adaptive quantization" below)
 - `hevc_vaapi` and `hevc_d3d12va`: `-rc_mode CQP -qp X`
 - `av1_vaapi`: `-rc_mode CQP -global_quality X` (ffmpeg's `av1_vaapi` has no `-qp`)
 - `libaom-av1` (not selectable from the CLI): `-crf X -b:v 0`, aom's Q mode (`--end-usage=q`)
@@ -88,6 +88,14 @@ Each encoder uses **distinct ffmpeg semantics** (X is the QP being tested):
 These differences are subtle, encoder-specific, and break in different ways across ffmpeg versions. The `core.SegmentEncoder` interface enables testability, but the code behind it is intentionally explicit: the adapter about which function, preset and device each encoder gets, the encoder functions about every ffmpeg flag. Abstracting the adapter switch or the encoder functions behind a generic function would save a few dozen lines and cost hours of debugging when one encoder drifts. The codebase is **intentionally WET** (Write Explicit Twice) here, not DRY.
 
 **Implication:** The ffmpeg invocation *is* the business logic here. Refactoring the adapter for DRYness would reduce auditability.
+
+### NVENC runs without adaptive quantization
+
+Under `constqp` NVENC honors its spatial and temporal adaptive quantization (toggling the flags changes the stream): `-qp` becomes a base the driver lowers in flat and static areas, by NVIDIA's model of what the eye sees ("the required bit redistribution results in PSNR drop in most of the cases", its programming guide on spatial AQ). The VMAF gate does not reward those bits. Measured on the 20 real segments of the banding survey (BENCHMARKS.md, NVENC adaptive quantization), sptenc's arguments with the two flags on or off: at the same QP, AQ on made 1.57 times the data (median) for one more point of fidelity, and AQ off reached fidelity 93 with 22% less data, with `hevc_nvenc` as with `av1_nvenc`, on every segment (4% to 49% less), without more banding added and without a visible difference on the darkest segments.
+
+It is the rule of the other encoders: `libx265` and `libsvtav1` run without adaptive quantization in constant QP mode, and the CRF evaluation found that x265's spends bits VMAF does not see (see "QP (Constant QP), not CRF"). The search decides where quality goes, against the metric gated.
+
+**Implication:** do not turn NVENC's adaptive quantization back on, nor tune its strength, without measuring the size reaching the gate on real content: a setting that raises the score at a given QP is no gain, only a smaller size at the same measured quality is.
 
 ### The concat list states every segment's duration, and the concat snaps the timestamps
 

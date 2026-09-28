@@ -285,13 +285,19 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 			"-tune", "hq",
 			"-rc", "constqp",
 			"-qp", strconv.Itoa(config.Quantization),
-			// AQ flags are honored under constqp, despite NVIDIA documenting constqp as "the
-			// entire frame is encoded using QP specified in constQP". Measured: the encoder
-			// is deterministic (same command, same stream) and toggling -spatial-aq or
-			// -temporal-aq changes the stream. So -qp is a base QP the driver modulates per
-			// block, unlike libx265 which turns its AQ off by itself in constant QP mode.
-			// This does not harm the search: the flags are the same for every tested QP,
-			// only the base QP moves between two candidates.
+			// Adaptive quantization off, passed explicitly. NVENC honors it under constqp,
+			// despite NVIDIA documenting constqp as "the entire frame is encoded using QP
+			// specified in constQP": the encoder is deterministic (same command, same stream)
+			// and toggling -spatial-aq or -temporal-aq changes the stream, -qp being then a
+			// base the driver lowers in flat and static areas. Those bits follow NVIDIA's
+			// model of what the eye sees ("the required bit redistribution results in PSNR
+			// drop in most of the cases", its programming guide), which the VMAF gate does
+			// not reward: on 20 real segments, AQ on made 1.57 times the data at the same QP
+			// (median) for one more point of fidelity, and turning it off reached fidelity 93
+			// with 22% less data, on every segment, without adding more banding
+			// (BENCHMARKS.md, NVENC adaptive quantization). The search decides where quality goes, against the
+			// metric gated, as it does with libx265 and libsvtav1, whose adaptive
+			// quantization constant QP turns off.
 			"-spatial-aq", strconv.Itoa(nvEncSpatialAQ),
 			"-temporal-aq", strconv.Itoa(nvEncTemporalAQ),
 		)
