@@ -800,7 +800,7 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	// -bf 0, which the VideoToolbox wrapper turns into kVTCompressionPropertyKey_AllowFrameReordering
 	// set to false (FFmpeg n9.0.2, videotoolboxenc.c), against VideoToolbox's own default ("True by
 	// default", Apple's header). The wrapper reads -bf as allowed or not, not as a number of
-	// B-frames: -bf 1 and -bf 4 gave the same stream. On the episode of BENCHMARKS.md (M4 Max,
+	// B-frames: -bf 1 and -bf 4 gave the same encode. On the episode of BENCHMARKS.md (M4 Max,
 	// ffmpeg 9.0.1, with -g 250), VideoToolbox made 74% of the frames B-frames and the video came
 	// out 17% smaller at the default gates, smaller on 155 of its 163 segments, the QP the search
 	// kept moving on 19 of them only (10 up, 9 down).

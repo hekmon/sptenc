@@ -138,6 +138,29 @@ The quality setting sptenc drives (`-q:v`) is a constant QP for HEVC. In the out
 
 Neighbouring values often make the very same encode. On a segment of the episode (segment 107, 270 frames), `-q:v` 55 and 56, 57 to 59, 60 and 61, 62 and 63, 64 and 65, 66 and 67, 68 and 69 gave encodes of the same size to the byte and the same scores, in each of the settings where they were tried (keyframes every 12 frames, every 30 or at most every 250, with or without B-frames). No whole value gives QP 22: from `-q:v` 61 to 62, the fidelity of that segment jumped by about two points (91.87 to 93.98 with a keyframe every 12 frames). The search keeps the highest step that passes, and coarse steps land further above the gate: over the whole episode, a fidelity harmonic mean of 93.64 (93.68 without B-frames), against 93.43 with `hevc_nvenc` and 93.45 with `libx265`.
 
+### Keyframe interval and B-frames
+
+ffmpeg gives every encoder a keyframe every 12 frames and no B-frames, unless its wrapper replaces those defaults, and the VideoToolbox wrapper replaces neither (FFmpeg n9.0.2): sptenc passes `-g 250` and `-bf 1`. Segment 107 of the episode (270 frames), encoded alone, at the setting the search would keep, the highest `-q:v` step passing a fidelity harmonic mean of 93:
+
+| Setting | Keyframes | Kept `-q:v` | Fidelity | Size |
+|---|---|---|---|---|
+| `-g 12`, ffmpeg's default | 23, every 12 frames | 62 | 93.98 | 4.07 MB |
+| `-g 0`, left to VideoToolbox | 9, every 30 frames | 62 | 94.20 | 2.34 MB |
+| `-g 250` | 2, frames 0 and 250 | 60 | 93.09 | 0.91 MB |
+| `-g 250`, B-frames | 2 | 62 | 94.60 | 0.99 MB |
+
+`libx265` and `hevc_nvenc`, left to their defaults, put their keyframes on the same frames of this segment as `-g 250`. Fewer keyframes raised the fidelity at the same `-q:v` (93.98, 94.20 and 94.89 at 62), which is how `-g 250` passed one step lower. `-bf 1` and `-bf 4` gave the same encode, same size and same pictures: the wrapper reads the value as allowed or not. At the same `-q:v`, B-frames made this segment 16 to 29% smaller for 0.2 to 0.6 less fidelity: 17% smaller at a fidelity of 93, interpolated on a log scale between the steps around it, but the coarse steps put its encodes at 92.66 and 94.60, on either side of the gate, and the encode kept is 9% larger than without B-frames.
+
+The whole episode, each run from a cold cache:
+
+| Settings | Video stream | Keyframe every | Attempts per segment | Search | CPU busy | Fidelity |
+|---|---|---|---|---|---|---|
+| ffmpeg's defaults (12 frames, no B-frames) | 322.4 MiB | 11.6 frames | 4.73 | 51m25s | 99% | 93.64 |
+| `-g 250` | 267.8 MiB | 114.0 frames | 4.80 | 43m38s | 98% | 93.68 |
+| `-g 250`, B-frames: sptenc's | 221.2 MiB | 124.6 frames | 4.79 | 43m39s | 98% | 93.64 |
+
+`-g 250` made the video 17% smaller than ffmpeg's defaults, smaller on 147 of the 159 segments cut the same way (the first run was cut by an older build), 3 to 7 times on the end credits and segment 107. 122 of those segments kept their QP, 32 needed a lower one, 5 got a higher one. B-frames made it 17% smaller again than `-g 250` alone, smaller on 155 of the 163 segments, with 74% of the frames B-frames: the kept QP moved on 19 segments only, 10 up and 9 down, the coarse steps landing on either side of the gate about as often. The steps of the first run before the search took longer too (2m51s to count the frames, against 2m18s): its longer search can not be attributed to the settings alone. With B-frames, the timestamps of the output are those of the run without them, and of the `hevc_nvenc` output, on every frame.
+
 ## Banding
 
 CAMBI rates banding from 0 (none) up, and "a CAMBI score around 5 is where banding starts to become slightly annoying" ([CAMBI documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md)). The v1 models cap it at 17 in their score; the banding sptenc measures is not capped. Unless said otherwise, it is computed with the settings of the v1 models (`cambi_high_res_speedup=1080`, `cambi_vis_lum_threshold=0.06`).
