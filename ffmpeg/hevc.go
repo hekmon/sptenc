@@ -294,10 +294,13 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 			// drop in most of the cases", its programming guide), which the VMAF gate does
 			// not reward: on 20 real segments, AQ on made 1.57 times the data at the same QP
 			// (median) for one more point of fidelity, and turning it off reached fidelity 93
-			// with 22% less data, on every segment, without adding more banding
-			// (BENCHMARKS.md, NVENC adaptive quantization). The search decides where quality goes, against the
-			// metric gated, as it does with libx265 and libsvtav1, whose adaptive
-			// quantization constant QP turns off.
+			// with 22% less data, on every one of them. On the two whole contents measured at
+			// the default, the outputs came out 12% and 30% smaller, with more banding added,
+			// under the CAMBI gate (BENCHMARKS.md, NVENC adaptive quantization): AQ holds
+			// banding down on every segment at a cost in size on every segment, where the CAMBI
+			// gate measures it on each one and lowers the QP only where it passes its threshold.
+			// The search decides where quality goes, against the metrics gated, as it does with
+			// libx265 and libsvtav1, whose adaptive quantization constant QP turns off.
 			"-spatial-aq", strconv.Itoa(nvEncSpatialAQ),
 			"-temporal-aq", strconv.Itoa(nvEncTemporalAQ),
 		)

@@ -15,7 +15,7 @@ The measurements behind the quality, banding, search time, file size and disk sp
 
 - **Machine:** AMD Ryzen 9 9950X3D (16 cores, 32 threads), NVIDIA RTX 5090, Linux under WSL2 on Windows. ffmpeg n9.0.2 with libvmaf f85a8536 (a September 2026 build).
 - **Contents:** two 8-bit 1080p Blu-ray remuxes at 23.976 fps. A 26 min anime episode with dark gradients (37,393 frames, cut in 163 segments at threshold 8.0055) and a 101 min live-action film (145,397 frames, 225 segments at threshold 10), both with the default 5 s minimum segment length. Every run of a content encoded the very same segments. Source files of 4.04 and 23.77 GiB, lossless FFV1 masters of 14.29 and 59.30 GiB (33.0 and 35.2 GiB per hour).
-- **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others. NVENC ran with its adaptive quantization on, which sptenc has since turned off (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
+- **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others. NVENC ran with its adaptive quantization on, which sptenc has since turned off, except in the runs labeled AQ off (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
 - **Scores of the outputs:** each output scored against its source (or its lossless master, the same pictures), the whole file at once, then split back into its segments.
 - **Durations** are wall clock times, read from the timestamps of the logs. The Linux kernel of that machine had its clock tick adjusted, running from 3% slow to 10% fast depending on the day, and every duration measured on it ran with it, the ones sptenc prints included: only the timestamps follow the host's clock.
 
@@ -32,6 +32,7 @@ The v0.6.1 runs are sptenc v0.1.0. "v1 original" gates on the score of `vmaf_v1.
 | v1 original at 95 | 845.4 MiB | +383% | 19.1 | 4.33 | 2 | 96.44 | 95.21 | 96.72 |
 | Fidelity at 93 | 200.9 MiB | +15% | 25.8 | 3.72 | 0 | 94.05 | 92.02 | 93.36 |
 | Fidelity at 95 | 299.8 MiB | +71% | 22.7 | 3.88 | 0 | 95.51 | 93.89 | 95.29 |
+| Fidelity at 93, AQ off: the default | 176.5 MiB | +1% | 24.4 | 3.92 | 0 | 94.32 | 92.15 | 93.43 |
 
 **Live-action film**
 
@@ -42,8 +43,9 @@ The v0.6.1 runs are sptenc v0.1.0. "v1 original" gates on the score of `vmaf_v1.
 | v1 original at 95 | 6372.0 MiB | +278% | 18.3 | 3.89 | 2 | 96.97 | 95.36 | 96.29 |
 | Fidelity at 93 | 2587.6 MiB | +53% | 22.5 | 3.54 | 0 | 94.96 | 92.42 | 93.48 |
 | Fidelity at 95 | 4440.9 MiB | +163% | 19.9 | 3.67 | 0 | 96.39 | 94.51 | 95.42 |
+| Fidelity at 93, AQ off: the default | 1820.4 MiB | +8% | 20.7 | 3.78 | 0 | 95.14 | 92.11 | 93.37 |
 
-The default of v0.2.0, fidelity at 93 with the CAMBI gate at a mean of 1, gave the output of fidelity at 93 on both contents, packet for packet: the gate lowered no segment.
+The default of v0.2.0, fidelity at 93 with the CAMBI gate at a mean of 1, gave the output of fidelity at 93 on both contents with AQ on, packet for packet: the gate lowered no segment. With AQ off, it lowered none either (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
 
 Per segment, at 93:
 - **v1 original against v0.1.0:** v1 lowered the QP of 153 segments out of 163 on the episode (by up to 12) and raised it on 7, of 216 out of 225 on the film (by up to 11) and raised it on one. Most lost 2 to 5 QP (69% of the episode's segments, 80% of the film's), about 3 on average on both. The segments that lost exactly 3 grew 1.44 times on the episode, 1.93 times on the film.
@@ -56,7 +58,7 @@ The master profile of the manual, a mean of 99 and a minimum of 94, estimated on
 
 ## Search time
 
-The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93:
+The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93, AQ on but in the last row:
 
 | VMAF | Episode | Film | CPU busy (episode, film) |
 |---|---|---|---|
@@ -64,8 +66,9 @@ The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93:
 | v0.6.1 on the CPU (sptenc v0.1.0) | 16m35s | 1h2m53s | 87%, 86% |
 | v1 original | 17m46s | 1h3m19s | 81%, 79% |
 | Fidelity | 16m19s ² | 1h4m24s | 81%, 78% |
-| Fidelity and the CAMBI gate, the default | 18m20s, 18m51s ³ | 1h12m2s, 1h13m41s ³ | 83%, 79% |
+| Fidelity and the CAMBI gate | 18m20s, 18m51s ³ | 1h12m2s, 1h13m41s ³ | 83%, 79% |
 | Fidelity, CAMBI measured in every attempt ⁴ | 19m18s | 1h17m29s | 87%, 82% |
+| Fidelity and the CAMBI gate, AQ off: the default | 19m10s | 1h13m41s | 85%, 82% |
 
 ¹ Its log has no timestamps: sptenc printed 11m13s, corrected by the ratio of that run's printed total to its wall clock total (0.968).
 ² Two runs, in the evening then at night: 16m22s and 16m16s, the same QPs on every segment and the same video.
@@ -101,7 +104,24 @@ Under constant QP, NVENC honors its adaptive quantization: the QP asked for beco
 | Episode (10 segments) | −14% | −7% |
 | Per segment | −4% to −37% | −4% to −49% |
 
-Every segment was smaller with AQ off, with both encoders. With `hevc_nvenc`, AQ on made 1.57 times the data at the same QP (median of 260 encodes, 1.07 to 3.13 times) for one more point of fidelity (median, −0.13 to +3.21): AQ off needed 0 to 3 QPs lower to reach 93 and still made smaller files. The CAMBI gate lowered no segment in either setting, and on the grain over black of the episode (segment 140), AQ off added less banding, 0.005 on average against 0.048. At normal levels the encodes of the darkest segments look the same; with their levels stretched, AQ on turns that grain into more flat blocks than AQ off. The runs of the other sections predate this measurement: NVENC ran with AQ on.
+Each of the 20 segments was smaller with AQ off, with both encoders. With `hevc_nvenc`, AQ on made 1.57 times the data at the same QP (median of 260 encodes, 1.07 to 3.13 times) for one more point of fidelity (median, −0.13 to +3.21): AQ off needed 0 to 3 QPs lower to reach 93 and still made smaller files. The CAMBI gate lowered no segment in either setting, and on the grain over black of the episode (segment 140), AQ off added less banding, 0.005 on average against 0.048. At normal levels the encodes of the darkest segments look the same; with their levels stretched, AQ on turns that grain into more flat blocks than AQ off.
+
+### The default on the two contents
+
+The whole contents at the default, `hevc_nvenc -C 6` (the rows "AQ off: the default" of [Gates on the two contents](#gates-on-the-two-contents)), against the same runs with AQ on. AQ off made the video stream 12% smaller on the episode and 30% on the film, not on every segment: 9 of the episode's 163 segments came out larger (up to 17%), and 2 of the film's 225, its end credits among them (24% larger at a QP one higher). It lowered the QP of 125 segments of the episode and raised it on 8 (from 4 lower to 3 higher), lowered it on 215 of the film and raised it on 2 (from 5 lower to 1 higher), for 5% and 7% more attempts, and searches 4.5% and 2.3% longer than the night runs with AQ on.
+
+It added more banding. The CAMBI gate lowered no segment in either setting:
+
+| Per segment, both contents (388) | AQ off | AQ on |
+|---|---|---|
+| Added banding, mean above 0.1 | 9 | 0 |
+| Highest mean | 0.80 | 0.07 |
+| Worst frame above 1, 3 and 5 | 31, 5 and 1 | 10, 0 and 0 |
+| Highest worst frame | 6.30 | 2.70 |
+
+The segment at 0.80 is grain on a dark wall behind a face, in the film (QP 20; 0.017 at QP 22 with AQ on). Both settings remove the grain, AQ off leaves flatter patches: 75 frames above 1, in bursts of up to 8. With the levels stretched 16 times the difference is plain; at normal levels, on its worst frame (3.62), the encodes look alike. One QP lower it adds 0.52, two lower 0.24 (1.7 times the size), three lower 0.04. The 6.30 is a single frame at the end of a fade to black in the film's end credits: the source is nearly black there, and the encode, at QP 37, still carries the blocks of the frame before, a few codes above black.
+
+Over the whole files, the added banding is 0.0038 on average over the frames and 3.04 on the worst frame of the episode (0.0017 and 2.70 with AQ on), 0.0138 and 6.30 on the film (0.0014 and 1.79). v0 scores the outputs 94.32 and 95.14 (94.05 and 94.96 with AQ on), and 93 or more the segments holding 92.5% of the episode's frames and 94.7% of the film's: below it, the end credits of both, the studio logo of the film, and 5 segments of the episode within 0.8 of it.
 
 ## Banding
 
@@ -117,7 +137,7 @@ Sampled every 2 QPs from 0 to 40 on 20 segments of both contents (self-scores fr
 
 ### Added banding at the QPs the VMAF search picked
 
-The 776 segment encodes of fidelity at 93 and 95 on both contents, the statistic of each segment over its frames:
+The 776 segment encodes of fidelity at 93 and 95 on both contents, with AQ on (the default with AQ off adds more: see [The default on the two contents](#the-default-on-the-two-contents)), the statistic of each segment over its frames:
 
 | Per segment | Above 0.5 | Above 1 | Above 2 | Above 3 | Above 5 | Highest |
 |---|---|---|---|---|---|---|
