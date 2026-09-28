@@ -1,15 +1,16 @@
 # Split Encoder - Benchmarks
 
-The measurements behind the quality, banding, search time, file size and disk space figures of the [README](README.md) and the [manual](MANUAL.md). One machine, two contents, synthetic clips: they tell what happened there, not what will happen on yours.
+The measurements behind the quality, banding, search time, file size and disk space figures of the [README](README.md) and the [manual](MANUAL.md). One machine, a Mac for VideoToolbox, two contents, synthetic clips: they tell what happened there, not what will happen on yours.
 
 1. [Setup](#setup)
 2. [Gates on the two contents](#gates-on-the-two-contents)
 3. [Search time](#search-time)
 4. [Encoders](#encoders)
 5. [NVENC adaptive quantization](#nvenc-adaptive-quantization)
-6. [Banding](#banding)
-7. [Synthetic clips](#synthetic-clips)
-8. [Minimum picture sizes](#minimum-picture-sizes)
+6. [VideoToolbox](#videotoolbox)
+7. [Banding](#banding)
+8. [Synthetic clips](#synthetic-clips)
+9. [Minimum picture sizes](#minimum-picture-sizes)
 
 ## Setup
 
@@ -122,6 +123,20 @@ It added more banding. The CAMBI gate lowered no segment in either setting:
 The segment at 0.80 is grain on a dark wall behind a face, in the film (QP 20; 0.017 at QP 22 with AQ on). Both settings remove the grain, AQ off leaves flatter patches: 75 frames above 1, in bursts of up to 8. With the levels stretched 16 times the difference is plain; at normal levels, on its worst frame (3.62), the encodes look alike. One QP lower it adds 0.52, two lower 0.24 (1.7 times the size), three lower 0.04. The 6.30 is a single frame at the end of a fade to black in the film's end credits: the source is nearly black there, and the encode, at QP 37, still carries the blocks of the frame before, a few codes above black.
 
 Over the whole files, the added banding is 0.0038 on average over the frames and 3.04 on the worst frame of the episode (0.0017 and 2.70 with AQ on), 0.0138 and 6.30 on the film (0.0014 and 1.79). v0 scores the outputs 94.32 and 95.14 (94.05 and 94.96 with AQ on), and 93 or more the segments holding 92.5% of the episode's frames and 94.7% of the film's: below it, the end credits of both, the studio logo of the film, and 5 segments of the episode within 0.8 of it.
+
+## VideoToolbox
+
+`hevc_videotoolbox` on an Apple M4 Max (14 cores: 10 performance, 4 efficiency), macOS 27.0, ffmpeg 9.0.1, encoding the anime episode of [Setup](#setup) at the default, 2 segments at a time (`-C 2`).
+
+### A constant QP in uneven steps
+
+The quality setting sptenc drives (`-q:v`) is a constant QP for HEVC. In the output of the episode (keyframes at most every 250 frames, B-frames), every frame of a segment carries the same HEVC QP, I, P and B frames alike, none of the 301 parameter sets allows a change per block, and each value gave the same QP on every segment. The values the search kept:
+
+| `-q:v` | 66 | 64 | 62 | 61 | 60 | 57 | 55 | 54 | 53 | 51 | 46 | 43 | 42 | 41 | 38 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| HEVC QP | 19 | 20 | 21 | 23 | 23 | 24 | 25 | 26 | 26 | 28 | 30 | 31 | 32 | 32 | 34 |
+
+Neighbouring values often make the very same encode. On a segment of the episode (segment 107, 270 frames), `-q:v` 55 and 56, 57 to 59, 60 and 61, 62 and 63, 64 and 65, 66 and 67, 68 and 69 gave encodes of the same size to the byte and the same scores, in each of the settings where they were tried (keyframes every 12 frames, every 30 or at most every 250, with or without B-frames). No whole value gives QP 22: from `-q:v` 61 to 62, the fidelity of that segment jumped by about two points (91.87 to 93.98 with a keyframe every 12 frames). The search keeps the highest step that passes, and coarse steps land further above the gate: over the whole episode, a fidelity harmonic mean of 93.64 (93.68 without B-frames), against 93.43 with `hevc_nvenc` and 93.45 with `libx265`.
 
 ## Banding
 
