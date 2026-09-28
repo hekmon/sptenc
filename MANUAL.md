@@ -231,19 +231,20 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 > **Note:** `libaom-av1` is not supported. It is too slow for sptenc's iterative per-segment QP search, where each segment may be encoded multiple times. `libsvtav1` is the CPU AV1 encoder sptenc supports. Run `sptenc check` to see which encoders your ffmpeg build supports.
 
-> **Untested encoders:** `av1_vaapi` and `hevc_d3d12va` are implemented but have not been validated end to end (`hevc_vaapi` was, on Linux with an Intel iGPU, and the NVENC encoders on an RTX 5090 only). `av1_vaapi` needs a GPU that encodes AV1, and the author's only decodes it, as do the Intel iGPUs from Tiger Lake to Raptor Lake (11th to 14th generation Core, N100 included): ffmpeg then refuses to open the encoder, `No usable encoding entrypoint found for profile VAProfileAV1Profile0`. A GPU that can encode AV1 lists `VAEntrypointEncSlice` or `VAEntrypointEncSliceLP` for `VAProfileAV1Profile0` in `vainfo --display drm --device /dev/dri/renderD128`. `hevc_d3d12va` targets Intel and AMD GPUs on Windows, which the author does not have: NVIDIA users should use `hevc_nvenc` and `av1_nvenc`, not D3D12VA. Feedback from Intel or AMD hardware is welcome.
+> **Untested encoders:** `av1_vaapi` and `hevc_d3d12va` are implemented but have not been validated end to end (`hevc_vaapi` was, on Linux with an Intel iGPU, the NVENC encoders on an RTX 5090 only, and `hevc_videotoolbox` on an Apple M4 Max). `av1_vaapi` needs a GPU that encodes AV1, and the author's only decodes it, as do the Intel iGPUs from Tiger Lake to Raptor Lake (11th to 14th generation Core, N100 included): ffmpeg then refuses to open the encoder, `No usable encoding entrypoint found for profile VAProfileAV1Profile0`. A GPU that can encode AV1 lists `VAEntrypointEncSlice` or `VAEntrypointEncSliceLP` for `VAProfileAV1Profile0` in `vainfo --display drm --device /dev/dri/renderD128`. `hevc_d3d12va` targets Intel and AMD GPUs on Windows, which the author does not have: NVIDIA users should use `hevc_nvenc` and `av1_nvenc`, not D3D12VA. Feedback from Intel or AMD hardware is welcome.
 
 ### Encoder selection vs file size
 
-| | CPU encoders (`libx265`, `libsvtav1`) | Hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) |
-|---|---|---|
-| Output file size | Smaller | Larger |
-| Speed | Slower | Several times faster |
-| Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size |
+A CPU encoder makes the smallest file, a hardware encoder a larger one, by an amount that depends on the hardware encoder. Measured on one 26 min 1080p episode at the default (see [BENCHMARKS](BENCHMARKS.md#encoders)):
 
-Measured on one machine, an RTX 5090 with a 16 cores / 32 threads CPU, searching a 26 min 1080p episode at the default (see [BENCHMARKS](BENCHMARKS.md#encoders)): `hevc_nvenc` at preset p7, 6 segments at a time (`-C 6`), took 19 minutes; `libx265` at preset slow, 3 segments at a time (`-C 3`) and decoding on NVDEC, took 62 minutes, for a video stream 3% smaller than `hevc_nvenc`'s. The times compare these two setups, concurrency included, not the encoders alone (see below).
+| Hardware encoder | `libx265`'s stream against it |
+|---|---|
+| `hevc_nvenc` at preset p7, on an RTX 5090 | 3% smaller |
+| `hevc_vaapi`, on the integrated GPU of a Core i7-14700T | 17% smaller |
 
-One episode is one data point: the size gap depends on the content, on the encoder settings (15% with NVENC's adaptive quantization on, which sptenc turns off) and on the score gated (31% gated on the model's original score, AQ on), and the times on the machine and on `-C`. On this one, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
+A hardware encoder is the one to prototype a VMAF profile and search a scene threshold with, and the final CPU encode (`batchsearch --final-encode`) is worth its time in proportion to that gap. On the RTX 5090's machine, a 16 cores / 32 threads CPU, `hevc_nvenc` searched the episode in 19 minutes with 6 segments at a time (`-C 6`), `libx265` at preset slow in 62 with 3 (`-C 3`, decoding on NVDEC): 3.2 times as long for a stream 3% smaller, little gained. Over the Intel iGPU, the CPU encode saves 17%, in a time not measured on that machine. The times compare these setups, concurrency included, not the encoders alone (see below).
+
+One episode is one data point: the size gap depends on the content, on the encoder settings (15% with NVENC's adaptive quantization on, which sptenc turns off; VA-API runs at ffmpeg's settings, the driver's own quality level included) and on the score gated (31% gated on the model's original score, AQ on), and the times on the machine and on `-C`. On the RTX 5090's machine, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
 
 > **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes.
 >

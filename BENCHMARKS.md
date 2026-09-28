@@ -14,11 +14,11 @@ The measurements behind the quality, banding, search time, file size and disk sp
 
 ## Setup
 
-- **Machine:** AMD Ryzen 9 9950X3D (16 cores, 32 threads), NVIDIA RTX 5090, Linux under WSL2 on Windows. ffmpeg n9.0.2 with libvmaf f85a8536 (a September 2026 build).
-- **Contents:** two 8-bit 1080p Blu-ray remuxes at 23.976 fps. A 26 min anime episode with dark gradients (37,393 frames, cut in 163 segments at threshold 8.0055) and a 101 min live-action film (145,397 frames, 225 segments at threshold 10), both with the default 5 s minimum segment length. Every run of a content encoded the very same segments. Source files of 4.04 and 23.77 GiB, lossless FFV1 masters of 14.29 and 59.30 GiB (33.0 and 35.2 GiB per hour).
-- **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others. NVENC ran with its adaptive quantization on, which sptenc has since turned off, except in the runs labeled AQ off (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
+- **Machines:** AMD Ryzen 9 9950X3D (16 cores, 32 threads), NVIDIA RTX 5090, Linux under WSL2 on Windows, ffmpeg n9.0.2 with libvmaf f85a8536 (a September 2026 build), for every run but two: `hevc_vaapi`'s, on an Intel Core i7-14700T and its integrated GPU (Linux, iHD driver 26.3.2, ffmpeg n9.0.2; see [Encoders](#encoders)), and VideoToolbox's, on an Apple M4 Max (see [VideoToolbox](#videotoolbox)).
+- **Contents:** two 8-bit 1080p Blu-ray remuxes at 23.976 fps. A 26 min anime episode with dark gradients (37,393 frames, cut in 163 segments at threshold 8.0055) and a 101 min live-action film (145,397 frames, 225 segments at threshold 10), both with the default 5 s minimum segment length. Every run of a content on the first machine encoded the very same segments; the runs on the other machines cut the episode from its source, with builds cutting a few segments differently, and are compared on the segments cut the same way. Source files of 4.04 and 23.77 GiB, lossless FFV1 masters of 14.29 and 59.30 GiB (33.0 and 35.2 GiB per hour).
+- **Runs:** `hevc_nvenc` with `-C 6` (`libx265` with `-C 3` and `hevc_vaapi` with `-C 2` in [Encoders](#encoders)), a cold cache for each run (an empty cache directory), a harmonic mean gate. sptenc v0.1.0 for the v0 runs, development builds of v0.2.0 for the others. NVENC ran with its adaptive quantization on, which sptenc has since turned off, except in the runs labeled AQ off (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
 - **Scores of the outputs:** each output scored against its source (or its lossless master, the same pictures), the whole file at once, then split back into its segments.
-- **Durations** are wall clock times, read from the timestamps of the logs. The Linux kernel of that machine had its clock tick adjusted, running from 3% slow to 10% fast depending on the day, and every duration measured on it ran with it, the ones sptenc prints included: only the timestamps follow the host's clock.
+- **Durations** are wall clock times, read from the timestamps of the logs. The Linux kernel of the first machine had its clock tick adjusted, running from 3% slow to 10% fast depending on the day, and every duration measured on it ran with it, the ones sptenc prints included: only the timestamps follow the host's clock.
 
 ## Gates on the two contents
 
@@ -82,17 +82,18 @@ Where that CPU time goes, per 1080p frame, on a segment of the episode (886 fram
 
 ## Encoders
 
-The episode (the film was not encoded with `libx265`), `hevc_nvenc` with `-C 6` and `libx265` with `-C 3` (decoding on NVDEC), at sptenc's presets (p7 and slow), at the default (fidelity at 93, the CAMBI gate at a mean of 1) and gated on the v1 original score at 93. `hevc_nvenc` ran with its adaptive quantization off, as sptenc runs it, and on, as in the other sections:
+The episode (the film was not encoded with `libx265`), at the default (fidelity at 93, the CAMBI gate at a mean of 1) and gated on the v1 original score at 93. On the first machine, `libx265` with `-C 3` (decoding on NVDEC) and `hevc_nvenc` with `-C 6`, at sptenc's presets (slow and p7), `hevc_nvenc` with its adaptive quantization off, as sptenc runs it, and on, as in the other sections. On the Core i7-14700T, with its integrated GPU, `hevc_vaapi` with `-C 2`, at ffmpeg's settings: a keyframe at most every 120 frames, B-frames, and the driver's own speed and quality level (`-compression_level` is not set):
 
 | Encoder, gate | Search | Video stream | Attempts per segment | Mean QP | CPU busy |
 |---|---|---|---|---|---|
-| `hevc_nvenc`, default | 19m10s | 176.5 MiB | 3.92 | 24.4 | 85% |
 | `libx265`, default | 1h2m6s | 170.5 MiB | 3.88 | 25.9 | 88% |
+| `hevc_nvenc`, default | 19m10s | 176.5 MiB | 3.92 | 24.4 | 85% |
+| `hevc_vaapi`, default, on the i7-14700T | 52m19s | 204.7 MiB | 3.74 | 24.4 | 66% |
 | `hevc_nvenc` with AQ on, default | 18m20s, 18m51s | 200.9 MiB | 3.72 | 25.8 | 83% |
 | `hevc_nvenc` with AQ on, v1 original | 17m46s | 283.4 MiB | 3.99 | 23.5 | 81% |
 | `libx265`, v1 original | 1h1m14s | 196.5 MiB | 3.96 | 24.7 | 90% |
 
-At the default, the `libx265` stream is 3% smaller than the `hevc_nvenc` one, for a search 3.2 times as long: smaller on 115 segments out of 163, larger on 48 (from 42% smaller to 43% larger). It was 15% smaller than the `hevc_nvenc` stream with AQ on, and 31% gated on the original score: fidelity made the `hevc_nvenc` stream (AQ on) 29% smaller than the original score did, the `libx265` one 13% (it raised the QP of `libx265` on 120 segments out of 163 and lowered none). At the default, the CAMBI gate lowered no segment of either encoder; the banding `libx265` added is 0.0045 on average over the frames and 3.64 on its worst frame (`hevc_nvenc`: 0.0038 and 3.04, and 0.0017 and 2.70 with AQ on).
+At the default, the `libx265` stream is 3% smaller than the `hevc_nvenc` one, for a search 3.2 times as long on the same machine: smaller on 115 segments out of 163, larger on 48 (from 42% smaller to 43% larger). It was 15% smaller than the `hevc_nvenc` stream with AQ on, and 31% gated on the original score: fidelity made the `hevc_nvenc` stream (AQ on) 29% smaller than the original score did, the `libx265` one 13% (it raised the QP of `libx265` on 120 segments out of 163 and lowered none). The `libx265` stream is 17% smaller than the `hevc_vaapi` one, smaller on 149 of the 160 segments cut the same way (from 61% smaller to 62% larger), and the `hevc_nvenc` stream 14% smaller: the `hevc_vaapi` run cut the episode from its source, with a build cutting 3 segments differently. Its search ran on a machine where `libx265` did not run: its time says nothing of what a CPU final encode would cost there. At the default, the CAMBI gate lowered no segment of any of the three encoders; the banding `libx265` added is 0.0045 on average over the frames and 3.64 on its worst frame (`hevc_nvenc`: 0.0038 and 3.04, and 0.0017 and 2.70 with AQ on; `hevc_vaapi`: 0.0054 and 2.90).
 
 ## NVENC adaptive quantization
 

@@ -76,7 +76,7 @@ type HEVCLibx265EncodeQPConfig struct {
 // HEVCLibx265EncodeQP encodes a video file to HEVC/H.265 using the libx265 encoder via FFmpeg.
 // This is a CPU-based software encoder, slower than the GPU encoders. How much smaller its files
 // are at the same VMAF depends on the GPU encoder and on the content: 3% smaller than hevc_nvenc
-// on the one content measured (see MANUAL.md, Encoders).
+// and 17% smaller than hevc_vaapi on the one content measured (see MANUAL.md, Encoders).
 func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
