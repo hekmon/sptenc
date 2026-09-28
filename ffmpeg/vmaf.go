@@ -1161,7 +1161,9 @@ func (vs VMAFSummary) String() string {
 			strconv.FormatFloat(vs.OtherHarmonicMean, 'f', -1, float64Precision))
 	}
 	if vs.HasBanding {
-		fmt.Fprintf(&buffer, "Banding added (CAMBI, 0 = none, ~5 = slightly annoying): %s on average over the frames, %s on the worst frame. The reference rates %s on average, the distorted video %s.\n",
+		// The scale is CAMBI's, the banding of a picture, which the last two values are: the first two are how
+		// much higher the distorted video rates than the reference, and a scale tied to them read as absolute
+		fmt.Fprintf(&buffer, "Banding added, frame by frame how much higher the distorted video rates than the reference on CAMBI's scale (0 = no banding, ~5 = slightly annoying): %s on average over the frames, %s on the worst frame. The reference rates %s on average, the distorted video %s.\n",
 			strconv.FormatFloat(vs.Banding.AddedMean, 'f', -1, float64Precision),
 			strconv.FormatFloat(vs.Banding.AddedMax, 'f', -1, float64Precision),
 			strconv.FormatFloat(vs.Banding.SourceMean, 'f', -1, float64Precision),

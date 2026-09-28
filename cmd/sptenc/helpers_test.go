@@ -119,7 +119,7 @@ func TestSetupVMAF(t *testing.T) {
 		{"v0, original score reported", ffmpeg.VMAFModelV0FHD, false, []string{"--vmaf-original"}, ffmpeg.VMAFScoreFidelity, false, false, false,
 			[]string{"so the score sptenc reports is already its original one"}, nil},
 		{"v0, CAMBI threshold", ffmpeg.VMAFModelV0FHD, true, []string{"--cambi-max", "2"}, ffmpeg.VMAFScoreFidelity, false, true, false,
-			[]string{"gated too (CAMBI, 0 = none, ~5 = slightly annoying): at most 1 on average over the frames of a segment, and 2 on its worst frame"},
+			[]string{"gated too, frame by frame how much higher the encode rates than its source on CAMBI's scale (0 = no banding, ~5 = slightly annoying): at most 1 on average over the frames of a segment, and 2 on its worst frame"},
 			[]string{"fidelity"}},
 	} {
 		flags := []cli.Flag{vmafOriginalFlag("VMAF", false)}

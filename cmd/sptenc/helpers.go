@@ -245,7 +245,9 @@ func setupVMAF(ctx context.Context, cmd *cli.Command, out io.Writer, model ffmpe
 			return
 		}
 		if setup.cambi.Enabled() {
-			fmt.Fprintf(out, "The banding the encoder adds is gated too (CAMBI, 0 = none, ~5 = slightly annoying): %s\n",
+			// The scale is CAMBI's, the banding of a picture: the thresholds apply to how much higher the
+			// encode rates than its source, and a scale tied to them read as an absolute limit
+			fmt.Fprintf(out, "The banding the encoder adds is gated too, frame by frame how much higher the encode rates than its source on CAMBI's scale (0 = no banding, ~5 = slightly annoying): %s\n",
 				describeCAMBIGate(setup.cambi))
 		}
 		setup.reportBanding = setup.cambi.Enabled()
