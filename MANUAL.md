@@ -292,12 +292,6 @@ A high threshold discards weak boundaries, merging scenes into long runs. B/P-fr
 
 More dangerously, a short complex passage inside a long easy segment can fail VMAF locally while the segment-wide average still passes. An average gate does not see it, and a percentile gate lets through any passage shorter than its share of the segment (p5 tolerates its worst 5%: 4.5 s of a 90 s segment). The bad frames are statistically invisible, undermining the guarantee that every part of the video meets your quality floor.
 
-### The role of `batchsearch`
-
-`batchsearch` automates the tedious work of testing multiple thresholds and picking the one that produces the smallest file while still passing your VMAF targets. Its objective is file size — it has no opinion on whether the winning threshold's segment lengths are short enough for their percentile metrics to be trustworthy.
-
-If you care more about tight quality control than file size, skip `batchsearch`. Use the `thresholds` command to inspect distributions, pick a threshold manually, and run `encode`.
-
 ### The `--min-segment-length` guardrail
 
 The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that would create segments shorter than the given duration. This is a quality-floor guardrail: it prevents unreliable percentile metrics and B/P-frame starvation by merging short segments into their shorter neighbor.
@@ -305,6 +299,12 @@ The `--min-segment-length` flag (alias `-L`, default 5s) removes boundaries that
 It does **not** protect against the opposite problem. Segments longer than ~5 seconds may still be too long for your tolerance of the drowning risk. That judgment remains yours.
 
 Use the `thresholds` command to preview the segment distributions a threshold would produce before committing to an `encode` or a `batchsearch` run. It is fast and produces no files.
+
+### The role of `batchsearch`
+
+`batchsearch` automates the tedious work of testing multiple thresholds and picking the one that produces the smallest file while still passing your VMAF targets. Its objective is file size — it has no opinion on whether the winning threshold's segment lengths are short enough for their percentile metrics to be trustworthy.
+
+If you care more about tight quality control than file size, skip `batchsearch`. Use the `thresholds` command to inspect distributions, pick a threshold manually, and run `encode`.
 
 ### Reusing a threshold
 
