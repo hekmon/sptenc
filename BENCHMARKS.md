@@ -78,17 +78,17 @@ Where that CPU time goes, per 1080p frame, on a segment of the episode (886 fram
 
 ## Encoders
 
-The episode, `hevc_nvenc` with `-C 6` and `libx265` with `-C 3` (decoding on NVDEC), at sptenc's presets (p7 and slow), at the default (fidelity at 93, the CAMBI gate at a mean of 1) and gated on the v1 original score at 93:
+The episode (the film was not encoded with `libx265`), `hevc_nvenc` with `-C 6` and `libx265` with `-C 3` (decoding on NVDEC), at sptenc's presets (p7 and slow), at the default (fidelity at 93, the CAMBI gate at a mean of 1) and gated on the v1 original score at 93. `hevc_nvenc` ran with its adaptive quantization off, as sptenc runs it, and on, as in the other sections:
 
-| | `hevc_nvenc`, default | `libx265`, default | `hevc_nvenc`, v1 original | `libx265`, v1 original |
-|---|---|---|---|---|
-| Search | 18m20s, 18m51s | 1h2m6s | 17m46s | 1h1m14s |
-| Video stream | 200.9 MiB | 170.5 MiB | 283.4 MiB | 196.5 MiB |
-| Attempts per segment | 3.72 | 3.88 | 3.99 | 3.96 |
-| Mean QP | 25.8 | 25.9 | 23.5 | 24.7 |
-| CPU busy | 83% | 88% | 81% | 90% |
+| Encoder, gate | Search | Video stream | Attempts per segment | Mean QP | CPU busy |
+|---|---|---|---|---|---|
+| `hevc_nvenc`, default | 19m10s | 176.5 MiB | 3.92 | 24.4 | 85% |
+| `libx265`, default | 1h2m6s | 170.5 MiB | 3.88 | 25.9 | 88% |
+| `hevc_nvenc` with AQ on, default | 18m20s, 18m51s | 200.9 MiB | 3.72 | 25.8 | 83% |
+| `hevc_nvenc` with AQ on, v1 original | 17m46s | 283.4 MiB | 3.99 | 23.5 | 81% |
+| `libx265`, v1 original | 1h1m14s | 196.5 MiB | 3.96 | 24.7 | 90% |
 
-At the default, the `libx265` stream is 15% smaller than the `hevc_nvenc` one, against 31% gated on the original score: fidelity made the `hevc_nvenc` stream 29% smaller than the original score did, the `libx265` one 13% (it raised the QP of `libx265` on 120 segments out of 163 and lowered none). At the default, the CAMBI gate lowered no segment of either encoder; the banding `libx265` added is 0.0045 on average over the frames and 3.64 on its worst frame (`hevc_nvenc`: 0.0017 and 2.70).
+At the default, the `libx265` stream is 3% smaller than the `hevc_nvenc` one, for a search 3.2 times as long: smaller on 115 segments out of 163, larger on 48 (from 42% smaller to 43% larger). It was 15% smaller than the `hevc_nvenc` stream with AQ on, and 31% gated on the original score: fidelity made the `hevc_nvenc` stream (AQ on) 29% smaller than the original score did, the `libx265` one 13% (it raised the QP of `libx265` on 120 segments out of 163 and lowered none). At the default, the CAMBI gate lowered no segment of either encoder; the banding `libx265` added is 0.0045 on average over the frames and 3.64 on its worst frame (`hevc_nvenc`: 0.0038 and 3.04, and 0.0017 and 2.70 with AQ on).
 
 ## NVENC adaptive quantization
 

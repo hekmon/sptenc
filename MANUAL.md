@@ -235,17 +235,17 @@ sptenc supports multiple HEVC and AV1 encoders. The `--encoder` flag (alias `-e`
 
 | | CPU encoders (`libx265`, `libsvtav1`) | Hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) |
 |---|---|---|
-| Output file size | ✅ Smallest | ❌ Larger |
-| Speed | Slower | ✅ Several times faster |
+| Output file size | Smaller | Larger |
+| Speed | Slower | Several times faster |
 | Recommended for | Final archival encode | VMAF profile prototyping, split threshold value search, and final encodes when time matters more than size |
 
-Measured on one machine, an RTX 5090 with a 16 cores / 32 threads CPU, searching a 26 min 1080p episode at the default (see [BENCHMARKS](BENCHMARKS.md#encoders)): `hevc_nvenc` at preset p7, 6 segments at a time (`-C 6`), took 18 to 19 minutes; `libx265` at preset slow, 3 segments at a time (`-C 3`) and decoding on NVDEC, took 62 minutes, for a video stream 15% smaller than `hevc_nvenc`'s. The times compare these two setups, concurrency included, not the encoders alone (see below).
+Measured on one machine, an RTX 5090 with a 16 cores / 32 threads CPU, searching a 26 min 1080p episode at the default (see [BENCHMARKS](BENCHMARKS.md#encoders)): `hevc_nvenc` at preset p7, 6 segments at a time (`-C 6`), took 19 minutes; `libx265` at preset slow, 3 segments at a time (`-C 3`) and decoding on NVDEC, took 62 minutes, for a video stream 3% smaller than `hevc_nvenc`'s. The times compare these two setups, concurrency included, not the encoders alone (see below).
 
-One episode is one data point: the size gap depends on the content and on the score gated (31% gated on the model's original score), and the times on the machine and on `-C`. On this one, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
+One episode is one data point: the size gap depends on the content, on the encoder settings (15% with NVENC's adaptive quantization on, which sptenc turns off) and on the score gated (31% gated on the model's original score, AQ on), and the times on the machine and on `-C`. On this one, the GPU search was limited by the CPU, which decodes the lossless FFV1 intermediate twice per attempt and computes VMAF, not by the GPU: a smaller CPU would have made it slower, smaller GPUs were not measured.
 
 > **Concurrent segments (`-C`)**: segments are searched one at a time by default. The output is the same whatever the value, only the time it takes changes.
 >
-> **With a GPU encoder**, the number of encoding engines on the card is not the limit: a worker only feeds the encoder while it encodes and waits for VMAF the rest of the time, and the frames come from the CPU decoding the FFV1 intermediate, as measured above. On the RTX 5090 (three NVENC engines), `-C 6` kept the encoders busy 22 to 23% of the time and the CPU 83%: raise it until the CPU is saturated, the driver's encode session limit being the hard stop (an encode then fails to open its session).
+> **With a GPU encoder**, the number of encoding engines on the card is not the limit: a worker only feeds the encoder while it encodes and waits for VMAF the rest of the time, and the frames come from the CPU decoding the FFV1 intermediate, as measured above. On the RTX 5090 (three NVENC engines), `-C 6` kept the encoders busy 24% of the time and the CPU 85%: raise it until the CPU is saturated, the driver's encode session limit being the hard stop (an encode then fails to open its session).
 >
 > **With a CPU encoder**, a single encode already uses every thread of the machine, but does not keep a many-core CPU fully busy: on a 16 cores / 32 threads CPU, `libx265` at 1080p encoded 26% more frames per second with 2 concurrent segments (measured with VMAF v0 on the CPU). Expect less with fewer cores or bigger pictures (encodes alone, 2 at a time: +45% at 1080p, +21% at 2160p), mind the memory with 4K content, and measure on your machine.
 >
