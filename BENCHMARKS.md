@@ -177,6 +177,16 @@ The different encodes repeat (the same size and pictures up to 5 times), as if t
 
 sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, whatever `-C`: its hardware decoding and the rest of the work of a segment stay concurrent.
 
+[`cmd/concurrency-check`](cmd/concurrency-check), a program apart from sptenc, repeats the test for any encoder: 10 encodes alone and 10 rounds of two at once, each encode in a process of its own through sptenc's encoder adapter, by default on a synthetic clip (10 s of 1080p, ffmpeg's `testsrc2` with temporal noise) at the middle of the encoder's QP range, and it says whether the result contradicts what sptenc assumes of the encoder (`go run ./cmd/concurrency-check -encoder hevc_videotoolbox`, `-input` for a file of your own):
+
+| Encoder, clip, QP | Alone | Two at a time |
+|---|---|---|
+| `hevc_videotoolbox` (M4 Max), synthetic, 50 | 10 identical, 1 keyframe | 15 of 20 different: 13 with one keyframe more, 2 with two, 0.3 to 0.8% larger |
+| `hevc_videotoolbox` (M4 Max), segment 107, 50 | 10 identical, 2 keyframes | 17 of 20 different: 10 with one keyframe more, 16 to 18% larger, 7 with two, 33 to 35% larger |
+| `hevc_nvenc` (RTX 5090), synthetic, 25, 3 runs | 3 identical | 6 of 6 identical |
+
+A synthetic clip is enough to show it. The keyframes added cost little there, its temporal noise making every frame expensive, and much on segment 107, where they replace cheap predicted frames.
+
 ## Banding
 
 CAMBI rates banding from 0 (none) up, and "a CAMBI score around 5 is where banding starts to become slightly annoying" ([CAMBI documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md)). The v1 models cap it at 17 in their score; the banding sptenc measures is not capped. Unless said otherwise, it is computed with the settings of the v1 models (`cambi_high_res_speedup=1080`, `cambi_vis_lum_threshold=0.06`).

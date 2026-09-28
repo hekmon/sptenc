@@ -845,7 +845,9 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	// decoding through VideoToolbox) stays concurrent: -C 1 would make the output the same too,
 	// but by giving up that concurrency as well. The lock covers the encodes of this process
 	// only: two sptenc processes encoding with VideoToolbox at the same time still disturb each
-	// other.
+	// other. cmd/concurrency-check repeats the test on any machine, on a synthetic clip or a given
+	// file, and says whether the encodes still need to be kept apart (BENCHMARKS.md, Two encodes at
+	// once, for its results).
 	videoToolboxEncodes.Lock()
 	defer videoToolboxEncodes.Unlock()
 	// Prepare command
