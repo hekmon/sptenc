@@ -156,6 +156,10 @@ var thresholdsCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
+		videoStream := stats.VideoTrack()
+		if videoStream == nil {
+			return errors.New("no video stream found in source")
+		}
 		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
 		start := time.Now()
 		scenes, err := liveDetectScenes(ctx, cmd.StringArg("inputfile"), cmd.Float64(minThresholdFlagName),
@@ -168,7 +172,10 @@ var thresholdsCommand = &cli.Command{
 		)
 		// Candidates and their scenes (see searchCandidates)
 		minSegLen := cmd.Duration(minSegmentLengthFlagName)
-		candidates, segmentations := searchCandidates(bypass, cmd, scenes, stats.Format.Duration)
+		candidates, segmentations, err := searchCandidates(bypass, cmd, scenes, videoStream.RFrameRate, stats.Format.Duration)
+		if err != nil {
+			return err
+		}
 		if len(candidates) == 0 {
 			fmt.Fprintln(bypass, "No candidates found in the given range.")
 			return nil

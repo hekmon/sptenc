@@ -50,7 +50,8 @@ const (
 // tried: the offset goes away, not the rounding. A tolerance on the cut time would hide it but
 // has to be tuned against the frame rate. Frames do not have any of these issues: the Nth frame
 // out of the decoder is the Nth frame of the master, whatever the containers and their timestamps.
-// So Frame is what cuts (see Segment) and Start is only used to compute durations.
+// So Frame is what cuts (see Segment) and what the minimum segment length is counted on (see
+// core.FilterShortScenes, which met the same rounding), Start is only there to be printed.
 type Scene struct {
 	Frame int           // index (from 0) of the first frame of the new scene, which is also the number of frames before it
 	Start time.Duration // time of that frame since the first frame of the video stream

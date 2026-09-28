@@ -65,10 +65,10 @@ type ProgressStats struct {
 	Speed        float64
 }
 
-// Scene represents a detected scene boundary with its start time and detection score.
-// Frame is not used by core, which only reasons on durations and scores. It is carried along
-// because it is what the video is cut at in the end (see ffmpeg.Scene): it must come out of
-// the selection untouched.
+// Scene represents a detected scene boundary with its first frame, its start time and detection
+// score. Frame is what the video is cut at in the end (see ffmpeg.Scene) and what segments are
+// measured with (see FilterShortScenes): it must come out of the selection untouched. Start is
+// only there to be printed.
 type Scene struct {
 	Frame int
 	Start time.Duration

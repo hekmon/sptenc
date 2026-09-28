@@ -10,11 +10,15 @@ import (
 
 // FilterShortScenes wraps core.FilterShortScenes, handling the type conversion
 // between ffmpeg.Scene and core.Scene.
-func FilterShortScenes(scenes []ffmpeg.Scene, totalDuration, minDuration time.Duration) []ffmpeg.Scene {
+func FilterShortScenes(scenes []ffmpeg.Scene, frameRate string, totalDuration, minDuration time.Duration) ([]ffmpeg.Scene, error) {
 	if minDuration <= 0 || len(scenes) == 0 {
-		return scenes
+		return scenes, nil
 	}
-	return FromCoreScenes(core.FilterShortScenes(ToCoreScenes(scenes), totalDuration, minDuration))
+	filtered, err := core.FilterShortScenes(ToCoreScenes(scenes), frameRate, totalDuration, minDuration)
+	if err != nil {
+		return nil, err
+	}
+	return FromCoreScenes(filtered), nil
 }
 
 // ToCoreScenes converts ffmpeg scenes to core scenes.

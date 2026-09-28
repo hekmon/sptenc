@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+	"math/big"
 	"sort"
 	"time"
 )
@@ -10,6 +12,9 @@ import (
 // but before splitting, so the QP search and VMAF evaluation operate on
 // segments that are long enough to be encoder-meaningful and to yield
 // statistically valid percentile metrics (p1 needs ≥100 frames, p5 needs ≥20).
+// frameRate is the rate of the video stream, as ffprobe writes it ("num/den"):
+// segments are counted in its frames, from the Frame of each boundary and, for
+// the last one, from totalDuration.
 //
 // # WHY THIS EXISTS
 //
@@ -30,11 +35,32 @@ import (
 //  3. QP search convergence is unstable: the cache records statistics for
 //     segments whose VMAF variance is dominated by sample-size noise.
 //
-// # WHY DURATION-BASED, NOT FRAME-BASED
+// # WHY ON THE FRAME GRID, NOT ON THE TIMESTAMPS
 //
-// Scene boundaries are already expressed as timestamps (time.Duration). Using
-// frames would require a reliable frame rate, introduce rounding issues, and
-// is less intuitive for users ("4 seconds" vs "96 frames at 24 fps").
+// The minimum is given as a duration ("5s" reads better than "120 frames at
+// 23.976 fps"), but the segments are measured in frames: a segment is too
+// short when its frames last less than minDuration at the frame rate, and
+// segments are compared with one another by their number of frames.
+//
+// The first design compared the durations between the timestamps of the
+// scenes. Containers round timestamps, Matroska to the millisecond, and
+// muxers do not round alike: mkvmerge rounds half a millisecond down, ffmpeg,
+// which writes the master, up. On the 26 min episode of BENCHMARKS.md, the
+// source and its master had the very same 1017 boundaries, at the same frames
+// with the same scores, and still merged three segments differently. Rounded,
+// a frame at 23.976 fps lasts 41 or 42 ms, so segments of the same number of
+// frames were a millisecond apart, not at the same places on the source and on
+// the master: in a burst of about 75 micro-scenes, which short segment the
+// loop below took first, and which neighbour it merged it into, followed the
+// rounding. The same threshold did not give the same scenes on a source and on
+// its master (split --master).
+//
+// Rebuilding every time from the frame index and the frame rate gives both the
+// same times, but rounded to the nanosecond: two spans of the same number of
+// frames can still be a nanosecond apart, and the order and the tie rule of
+// the loop stop applying where the frames are equal. A tolerance on the
+// durations needs a number to be tuned. Frames are exact, and the frame rate
+// is reliable: a variable frame rate is rejected before anything is cut.
 //
 // # WHY GREEDY SHORTEST-FIRST
 //
@@ -65,34 +91,42 @@ import (
 //
 // EDGE CASES
 //
-//   - minDuration == 0: returns scenes unchanged (fast path).
+//   - minDuration == 0: returns scenes unchanged (fast path), without reading
+//     the frame rate.
+//   - The last segment ends at totalDuration, on the frame grid: rounded to
+//     the nearest frame.
 //   - Total video shorter than minDuration: returns empty (single segment).
 //   - Single scene input + minDuration > 0: still single segment.
 //   - Cluster of consecutive short segments: handled iteratively; each merge
 //     may create a new segment that is still short, which gets merged again.
-func FilterShortScenes(scenes []Scene, totalDuration, minDuration time.Duration) (filtered []Scene) {
+func FilterShortScenes(scenes []Scene, frameRate string, totalDuration, minDuration time.Duration) (filtered []Scene, err error) {
 	if minDuration <= 0 || len(scenes) == 0 {
-		return scenes
+		return scenes, nil
 	}
+	num, den, err := parseFrameRateFraction(frameRate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid frame rate %q: %w", frameRate, err)
+	}
+	minFrames := durationToFrames(minDuration, num, den, true)
 	filtered = make([]Scene, len(scenes))
 	copy(filtered, scenes)
-	// Build segment durations from boundaries.
-	// segments[i] is the duration of the segment starting at boundary i-1
-	// (or time zero) and ending at boundary i (or totalDuration).
-	durations := make([]time.Duration, 0, len(filtered)+1)
-	durations = append(durations, filtered[0].Start)
+	// Build segment lengths, in frames, from boundaries.
+	// lengths[i] is the length of the segment starting at boundary i-1
+	// (or the first frame) and ending at boundary i (or totalDuration).
+	lengths := make([]int, 0, len(filtered)+1)
+	lengths = append(lengths, filtered[0].Frame)
 	for i := 1; i < len(filtered); i++ {
-		durations = append(durations, filtered[i].Start-filtered[i-1].Start)
+		lengths = append(lengths, filtered[i].Frame-filtered[i-1].Frame)
 	}
-	durations = append(durations, totalDuration-filtered[len(filtered)-1].Start)
+	lengths = append(lengths, durationToFrames(totalDuration, num, den, false)-filtered[len(filtered)-1].Frame)
 	// Greedy loop: repeatedly find the shortest sub-minimum segment and merge
 	// it into its shorter neighbour until all segments satisfy the floor.
 	for {
 		// Find the shortest segment
 		shortestIdx := -1
-		for i, d := range durations {
-			if d < minDuration {
-				if shortestIdx == -1 || d < durations[shortestIdx] {
+		for i, length := range lengths {
+			if length < minFrames {
+				if shortestIdx == -1 || length < lengths[shortestIdx] {
 					shortestIdx = i
 				}
 			}
@@ -104,28 +138,28 @@ func FilterShortScenes(scenes []Scene, totalDuration, minDuration time.Duration)
 		switch shortestIdx {
 		case 0:
 			// First segment is too short: merge right by removing the first boundary.
-			durations[1] += durations[0]
-			durations = durations[1:]
+			lengths[1] += lengths[0]
+			lengths = lengths[1:]
 			filtered = filtered[1:]
-		case len(durations) - 1:
+		case len(lengths) - 1:
 			// Last segment is too short: merge left by removing the last boundary.
-			durations[len(durations)-2] += durations[len(durations)-1]
-			durations = durations[:len(durations)-1]
+			lengths[len(lengths)-2] += lengths[len(lengths)-1]
+			lengths = lengths[:len(lengths)-1]
 			filtered = filtered[:len(filtered)-1]
 		default:
 			// Middle segment: merge into the shorter neighbour. In case of a tie
 			// the left neighbour is preferred for determinism.
-			leftDur := durations[shortestIdx-1]
-			rightDur := durations[shortestIdx+1]
-			if leftDur <= rightDur {
+			leftLength := lengths[shortestIdx-1]
+			rightLength := lengths[shortestIdx+1]
+			if leftLength <= rightLength {
 				// Merge left: remove boundary shortestIdx-1.
-				durations[shortestIdx-1] += durations[shortestIdx]
-				durations = append(durations[:shortestIdx], durations[shortestIdx+1:]...)
+				lengths[shortestIdx-1] += lengths[shortestIdx]
+				lengths = append(lengths[:shortestIdx], lengths[shortestIdx+1:]...)
 				filtered = append(filtered[:shortestIdx-1], filtered[shortestIdx:]...)
 			} else {
 				// Merge right: remove boundary shortestIdx.
-				durations[shortestIdx] += durations[shortestIdx+1]
-				durations = append(durations[:shortestIdx+1], durations[shortestIdx+2:]...)
+				lengths[shortestIdx] += lengths[shortestIdx+1]
+				lengths = append(lengths[:shortestIdx+1], lengths[shortestIdx+2:]...)
 				filtered = append(filtered[:shortestIdx], filtered[shortestIdx+1:]...)
 			}
 		}
@@ -136,6 +170,21 @@ func FilterShortScenes(scenes []Scene, totalDuration, minDuration time.Duration)
 		// ... some scenes remain, continue checking for too short segments
 	}
 	return
+}
+
+// durationToFrames returns the number of frames of a num/den frame rate lasting d: rounded up
+// with ceil (the fewest frames lasting at least d: a segment lasts less than d exactly when it
+// has fewer frames than that), to the nearest frame otherwise. Computed exactly: d times num
+// overflows an int64 past 21 hours at 119.88 fps (120000/1001).
+func durationToFrames(d time.Duration, num, den int64, ceil bool) int {
+	n := new(big.Int).Mul(big.NewInt(int64(d)), big.NewInt(num))
+	q := new(big.Int).Mul(big.NewInt(den), big.NewInt(int64(time.Second)))
+	if ceil {
+		n.Add(n, new(big.Int).Sub(q, big.NewInt(1)))
+	} else {
+		n.Add(n, new(big.Int).Rsh(q, 1))
+	}
+	return int(n.Div(n, q).Int64())
 }
 
 // Candidate is a threshold along with the scene boundaries it produces.
@@ -153,14 +202,14 @@ type Candidate struct {
 // the minimum duration is a guardrail applied on the cuts that were picked. The input is
 // never modified, every call starts from the full list: GetCandidates explains why both
 // points are load-bearing.
-func SelectScenes(scenes []Scene, threshold float64, totalDuration, minDuration time.Duration) []Scene {
+func SelectScenes(scenes []Scene, threshold float64, frameRate string, totalDuration, minDuration time.Duration) ([]Scene, error) {
 	selected := make([]Scene, 0, len(scenes))
 	for _, scene := range scenes {
 		if scene.Score >= threshold {
 			selected = append(selected, scene)
 		}
 	}
-	return FilterShortScenes(selected, totalDuration, minDuration)
+	return FilterShortScenes(selected, frameRate, totalDuration, minDuration)
 }
 
 // GetCandidates returns every threshold worth testing up to maxThreshold, in ascending order,
@@ -241,11 +290,11 @@ func SelectScenes(scenes []Scene, threshold float64, totalDuration, minDuration 
 //     break reproducibility.
 //   - Several thresholds producing the same scenes: the lowest one is kept. Any of them would
 //     do for this input; there is no principled choice for another input.
-//   - Candidates are compared by boundaries times only: two lists with the same times are the
+//   - Candidates are compared by boundaries only: two lists cutting at the same frames are the
 //     same scenes whatever the scores.
 //   - minDuration == 0: no merge, every unique score within range is a distinct candidate.
 //   - No marker within range: returns no candidates.
-func GetCandidates(scenes []Scene, maxThreshold float64, totalDuration, minDuration time.Duration) (candidates []Candidate) {
+func GetCandidates(scenes []Scene, maxThreshold float64, frameRate string, totalDuration, minDuration time.Duration) (candidates []Candidate, err error) {
 	// Collect unique scores within range and sort them ascending
 	thresholds := make([]float64, 0, len(scenes))
 	seen := make(map[float64]bool, len(scenes))
@@ -259,7 +308,10 @@ func GetCandidates(scenes []Scene, maxThreshold float64, totalDuration, minDurat
 	// Compute the scenes of each one, always from the full list
 	candidates = make([]Candidate, 0, len(thresholds))
 	for _, threshold := range thresholds {
-		selected := SelectScenes(scenes, threshold, totalDuration, minDuration)
+		var selected []Scene
+		if selected, err = SelectScenes(scenes, threshold, frameRate, totalDuration, minDuration); err != nil {
+			return nil, err
+		}
 		if len(candidates) > 0 && sameBoundaries(candidates[len(candidates)-1].Scenes, selected) {
 			continue
 		}
@@ -273,7 +325,7 @@ func sameBoundaries(a, b []Scene) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Start != b[i].Start {
+		if a[i].Frame != b[i].Frame {
 			return false
 		}
 	}

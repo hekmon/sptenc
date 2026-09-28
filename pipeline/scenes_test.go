@@ -35,8 +35,14 @@ func TestReusableThreshold_SameSelection(t *testing.T) {
 		{Start: 30 * time.Second, Score: 24.278},
 	}
 	for _, scene := range scenes {
-		fromScore := core.SelectScenes(scenes, scene.Score, time.Minute, 0)
-		fromThreshold := core.SelectScenes(scenes, ReusableThreshold(scene.Score, 1), time.Minute, 0)
+		fromScore, err := core.SelectScenes(scenes, scene.Score, "25", time.Minute, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fromThreshold, err := core.SelectScenes(scenes, ReusableThreshold(scene.Score, 1), "25", time.Minute, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(fromScore) != len(fromThreshold) {
 			t.Errorf("score %v: %d scenes from the score but %d from the reusable threshold",
 				scene.Score, len(fromScore), len(fromThreshold))

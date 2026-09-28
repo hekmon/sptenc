@@ -495,7 +495,10 @@ var batchsearchCommand = &cli.Command{
 			1+len(scenes), time.Since(start).Round(time.Second),
 		)
 		// Candidates and their scenes (see searchCandidates)
-		candidates, segmentations := searchCandidates(bypass, cmd, scenes, totalDuration)
+		candidates, segmentations, err := searchCandidates(bypass, cmd, scenes, videoStream.RFrameRate, totalDuration)
+		if err != nil {
+			return err
+		}
 		if len(candidates) == 0 {
 			return fmt.Errorf("no candidates found in the %s–%s range",
 				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),

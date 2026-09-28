@@ -372,7 +372,10 @@ var encodeCommand = &cli.Command{
 			)
 			// Apply min-segment-length filter if requested.
 			if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
-				filtered := pipeline.FilterShortScenes(scenes, totalDuration, minSegLen)
+				var filtered []ffmpeg.Scene
+				if filtered, err = pipeline.FilterShortScenes(scenes, videoStream.RFrameRate, totalDuration, minSegLen); err != nil {
+					return fmt.Errorf("failed to merge the scenes shorter than %s: %w", minSegLen, err)
+				}
 				if removed := len(scenes) - len(filtered); removed > 0 {
 					fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
 						removed, minSegLen, 1+len(filtered))

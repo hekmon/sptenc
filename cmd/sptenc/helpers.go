@@ -550,11 +550,14 @@ func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *f
 // (see pipeline.ReusableThreshold).
 //
 // No candidates are returned if there is no scene within the range.
-func searchCandidates(out io.Writer, cmd *cli.Command, scenes []ffmpeg.Scene, totalDuration time.Duration) (
-	thresholds []float64, segmentations [][]ffmpeg.Scene) {
+func searchCandidates(out io.Writer, cmd *cli.Command, scenes []ffmpeg.Scene, frameRate string, totalDuration time.Duration) (
+	thresholds []float64, segmentations [][]ffmpeg.Scene, err error) {
 	// Steps 2 to 5
-	allCandidates := core.GetCandidates(pipeline.ToCoreScenes(scenes), cmd.Float64(maxThresholdFlagName),
-		totalDuration, cmd.Duration(minSegmentLengthFlagName))
+	allCandidates, err := core.GetCandidates(pipeline.ToCoreScenes(scenes), cmd.Float64(maxThresholdFlagName),
+		frameRate, totalDuration, cmd.Duration(minSegmentLengthFlagName))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to compute the candidate thresholds: %w", err)
+	}
 	if len(allCandidates) == 0 {
 		return
 	}

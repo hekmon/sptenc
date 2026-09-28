@@ -176,7 +176,8 @@ var splitCommand = &cli.Command{
 			return fmt.Errorf("failed to get streams infos: %w", err)
 		}
 		// reject what encode would reject later, before spending the time and the disk space
-		if _, err = checkSourceVideo(stats); err != nil {
+		var videoStream *ffmpeg.FFProbeBinaryStream
+		if videoStream, err = checkSourceVideo(stats); err != nil {
 			return
 		}
 		duration := stats.Format.Duration
@@ -224,7 +225,10 @@ var splitCommand = &cli.Command{
 
 		// Apply min-segment-length filter if requested.
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
-			filtered := pipeline.FilterShortScenes(scenes, duration, minSegLen)
+			var filtered []ffmpeg.Scene
+			if filtered, err = pipeline.FilterShortScenes(scenes, videoStream.RFrameRate, duration, minSegLen); err != nil {
+				return fmt.Errorf("failed to merge the scenes shorter than %s: %w", minSegLen, err)
+			}
 			if removed := len(scenes) - len(filtered); removed > 0 {
 				fmt.Fprintf(bypass, "\tMerged %d boundaries to enforce min segment length of %s → %d scenes\n",
 					removed, minSegLen, 1+len(filtered))
