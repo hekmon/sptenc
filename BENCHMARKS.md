@@ -178,7 +178,17 @@ Two `hevc_videotoolbox` encodes running at the same time change each other's out
 
 The different encodes repeat (the same size and pictures up to 5 times), as if the extra keyframes landed on a few frames, which ones depending on how the two encodes shared the engine. A first test, with the keyframe every 12 frames of ffmpeg's default, gave 7 lone encodes alike, one of them while two VMAF passes loaded the CPU, and 1 of 4 encodes run two at a time with a keyframe more (2.5% larger). In the episode runs above, all with 2 segments at a time, the encode kept for segment 107 differed from the lone one every time, from 5 to 14% larger: their sizes carry keyframes this added, the settings they compare having all run that way. The stream of a lone encode is not the same from one run to the next, only its pictures and its size are.
 
-sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, whatever `-C`: its hardware decoding and the rest of the work of a segment stay concurrent.
+sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, whatever `-C`: its hardware decoding and the rest of the work of a segment stay concurrent. The whole episode, at sptenc's settings, before and with it:
+
+| Encodes | Video stream | Keyframes | Attempts per segment | Search | CPU busy |
+|---|---|---|---|---|---|
+| Two at a time, `-C 2`, before the lock | 221.2 MiB | 300 | 4.79 | 43m39s ¹ | 98% |
+| One at a time, `-C 2` | 220.0 MiB | 219 | 4.79 | 46m16s | 97% |
+| One at a time, `-C 1` | 220.0 MiB | 219 | 4.70 | 52m20s | 84% |
+
+¹ A build counting the frames of the encode kept for each segment, where the later ones count those of every encode: the run with the lock at `-C 2` took 4.4% more CPU time for as many attempts, and its search 6% longer.
+
+With the lock, the output is the same at `-C 2` and `-C 1`: the same QP, size, keyframes and pictures on every segment, the same scores. The run before it differs from them on 71 of the 163 segments: 81 keyframes more, on 55 segments, and another QP on 6, for a stream 0.55% larger. Of the 219 keyframes, 217 are the ones `-g 250` puts, at the start of each segment and every 250 frames within it, the other 2 VideoToolbox's own, at both values of `-C`. `-C 1` searched 13% longer than `-C 2`, the CPU busy 84% of the time against 97%, although a segment searched alone starts from what the previous ones found: 15 attempts less in all.
 
 [`cmd/concurrency-check`](cmd/concurrency-check), a program apart from sptenc, repeats the test for any encoder: 10 encodes alone and 10 rounds of two at once, each encode in a process of its own through sptenc's encoder adapter, by default on a synthetic clip (10 s of 1080p, ffmpeg's `testsrc2` with temporal noise) at the middle of the encoder's QP range, and it says whether the result contradicts what sptenc assumes of the encoder (`go run ./cmd/concurrency-check -encoder hevc_videotoolbox`, `-input` for a file of your own):
 

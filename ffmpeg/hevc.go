@@ -844,10 +844,13 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	// run while a decode loop or a VMAF pass decoded through it were all the lone one. So the
 	// encodes wait for each other, while everything else a worker does (counting frames, VMAF,
 	// decoding through VideoToolbox) stays concurrent: -C 1 would make the output the same too,
-	// but by giving up that concurrency as well. The lock covers the encodes of this process
-	// only: two sptenc processes encoding with VideoToolbox at the same time still disturb each
-	// other. cmd/concurrency-check repeats the test on any machine, on a synthetic clip or a given
-	// file, and says whether the encodes still need to be kept apart (BENCHMARKS.md, Two encodes at
+	// but by giving up that concurrency as well. On the whole episode, the search with the lock
+	// gave the same output at -C 2 and -C 1, segment by segment, and took 13% longer at -C 1;
+	// without the lock, 71 of its 163 segments came out different at -C 2, with 81 keyframes more
+	// and another QP on 6 of them. The lock covers the encodes of this process only: two sptenc
+	// processes encoding with VideoToolbox at the same time still disturb each other.
+	// cmd/concurrency-check repeats the test on any machine, on a synthetic clip or a given file,
+	// and says whether the encodes still need to be kept apart (BENCHMARKS.md, Two encodes at
 	// once, for its results).
 	videoToolboxEncodes.Lock()
 	defer videoToolboxEncodes.Unlock()
