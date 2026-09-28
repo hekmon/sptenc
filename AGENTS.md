@@ -43,6 +43,15 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 - **`ffmpeg/hevc.go` and `ffmpeg/av1.go`** — One function per encoder, spelling out every ffmpeg flag: `libx265`, `hevc_nvenc`, `hevc_vaapi`, `hevc_d3d12va` and `hevc_videotoolbox` in `hevc.go`; `libsvtav1`, `av1_nvenc`, `av1_vaapi` and `libaom-av1` in `av1.go`. `libaom-av1` exists in the adapter but is blocked from CLI selection as too slow for iterative QP search.
 - **`ffmpeg/vmaf.go`** — VMAF computation with the v1 models (on the CPU, inputs decoded by the run's hardware decoder when their codec allows it). A pass is built from what it measures (`VMAFMeasures`: the fidelity score, the original score, the banding feature, in any combination) and its report read on the keys that pass produces; `VMAFReport.Summary` is what the final VMAF of an encode and the `vmaf` command report (the gated score's statistics, the other score's harmonic mean, the banding). The probes: `VMAFProbe` runs a pass on synthetic pictures of a given size, `VMAFCAMBIProbe` tells whether a model feeds on CAMBI and takes the fidelity clip.
 
+## Where things are documented
+
+Each document has its job, and a statement goes where its job is:
+- **`MANUAL.md` states facts**: how sptenc works, why, and what to expect. It gives a number only when the fact needs one (a default, the order of magnitude of a result), with a link to the measurement behind it.
+- **`BENCHMARKS.md` holds the full details backing those facts**: the machine, the content, the settings, the tables, what was compared with what. A figure of the manual with no measurement here, or in a source the manual cites, does not belong in the manual.
+- **`README.md`** introduces sptenc and its commands. **`AGENTS.md`** records the design decisions, what was rejected and why, with the key numbers and a pointer to BENCHMARKS. **Code comments** give the reason for the code they sit on, with the measurement that justifies it.
+
+Every figure, wherever it appears, is measured or sourced, and a size comparison names what it is compared with.
+
 ## Key architectural constraints
 
 ### QP (Constant QP), not CRF
