@@ -501,7 +501,7 @@ var encodeCommand = &cli.Command{
 				return
 			}
 			duration = time.Since(start)
-			fmt.Fprintf(bypass, "Source segments merged in %s.\n", duration.Round(time.Second))
+			fmt.Fprintf(bypass, "\tSource segments merged in %s.\n", duration.Round(time.Second))
 		} else {
 			vmafSource = cmd.StringArg("inputpath")
 		}
