@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hekmon/processpriority"
@@ -698,6 +699,10 @@ const (
 	HEVCVideoToolboxQPMax = 100
 )
 
+// videoToolboxEncodes lets one hevc_videotoolbox encode run at a time in the process (see
+// HEVCVideoToolboxEncodeQP).
+var videoToolboxEncodes sync.Mutex
+
 // HEVCVideoToolboxEncodeQPConfig holds the configuration for HEVC encoding using VideoToolbox.
 type HEVCVideoToolboxEncodeQPConfig struct {
 	// Input
@@ -828,6 +833,21 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 		"-max_interleave_delta", "0",
 		config.Output,
 	)
+	//// one encode at a time: DO NOT REMOVE
+	// Two hevc_videotoolbox encodes running at the same time change each other's output, although
+	// nothing is shared between the two ffmpeg processes but the media engine of the chip. On a
+	// segment of the episode of BENCHMARKS.md (M4 Max, ffmpeg 9.0.1), 10 encodes run alone gave the
+	// same stream (the same size, the same pictures, 2 keyframes); of 20 encodes run two at a time,
+	// 17 came out with one or two keyframes more, from 9 to 24% larger, and -prio_speed 0 changed
+	// nothing (16 of 20). VideoToolbox's hardware decoding does not disturb an encode: 20 encodes
+	// run while a decode loop or a VMAF pass decoded through it were all the lone one. So the
+	// encodes wait for each other, while everything else a worker does (counting frames, VMAF,
+	// decoding through VideoToolbox) stays concurrent: -C 1 would make the output the same too,
+	// but by giving up that concurrency as well. The lock covers the encodes of this process
+	// only: two sptenc processes encoding with VideoToolbox at the same time still disturb each
+	// other.
+	videoToolboxEncodes.Lock()
+	defer videoToolboxEncodes.Unlock()
 	// Prepare command
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Encode with: %s", getPrintableCMDLine(FFMPEGBinary, args)))

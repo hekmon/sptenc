@@ -162,6 +162,21 @@ The whole episode, each run from a cold cache:
 
 `-g 250` made the video 17% smaller than ffmpeg's defaults, smaller on 147 of the 159 segments cut the same way (the first run was cut by an older build), 3 to 7 times on the end credits and segment 107. 122 of those segments kept their QP, 32 needed a lower one, 5 got a higher one. B-frames made it 17% smaller again than `-g 250` alone, smaller on 155 of the 163 segments, with 74% of the frames B-frames: the kept QP moved on 19 segments only, 10 up and 9 down, the coarse steps landing on either side of the gate about as often. The steps of the first run before the search took longer too (2m51s to count the frames, against 2m18s): its longer search can not be attributed to the settings alone. With B-frames, the timestamps of the output are those of the run without them, and of the `hevc_nvenc` output, on every frame.
 
+### Two encodes at once
+
+Two `hevc_videotoolbox` encodes running at the same time change each other's output, although the two ffmpeg processes share nothing but the media engine of the chip. Segment 107, encoded by sptenc's command, alone and two at a time, each encode described by its size, the checksum of its decoded pictures and its keyframes:
+
+| Encodes | The same as alone | One keyframe more | Two keyframes more |
+|---|---|---|---|
+| Alone (`-g 250`, B-frames, `-q:v 62`), 10 | 10 | | |
+| Two at a time, 20 | 3 | 10, 9 to 13% larger | 7, 21 to 24% larger |
+| Two at a time with `-prio_speed 0`, 20 | 4 | 9, 9 to 13% larger | 7, 22 to 25% larger |
+| Alone while VideoToolbox decodes: in a loop, 10, and for a VMAF pass, 10 | 20 | | |
+
+The different encodes repeat (the same size and pictures up to 5 times), as if the extra keyframes landed on a few frames, which ones depending on how the two encodes shared the engine. A first test, with the keyframe every 12 frames of ffmpeg's default, gave 7 lone encodes alike, one of them while two VMAF passes loaded the CPU, and 1 of 4 encodes run two at a time with a keyframe more (2.5% larger). In the episode runs above, all with 2 segments at a time, the encode kept for segment 107 differed from the lone one every time, from 5 to 14% larger: their sizes carry keyframes this added, the settings they compare having all run that way. The stream of a lone encode is not the same from one run to the next, only its pictures and its size are.
+
+sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, whatever `-C`: its hardware decoding and the rest of the work of a segment stay concurrent.
+
 ## Banding
 
 CAMBI rates banding from 0 (none) up, and "a CAMBI score around 5 is where banding starts to become slightly annoying" ([CAMBI documentation](https://github.com/Netflix/vmaf/blob/master/resource/doc/cambi.md)). The v1 models cap it at 17 in their score; the banding sptenc measures is not capped. Unless said otherwise, it is computed with the settings of the v1 models (`cambi_high_res_speedup=1080`, `cambi_vis_lum_threshold=0.06`).
