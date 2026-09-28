@@ -448,25 +448,35 @@ func TestFindAllSegmentsQP_CAMBIKeepInvalidQP(t *testing.T) {
 	}
 }
 
-// TestFindAllSegmentsQP_CAMBIFinalFrameCount checks that the frame count of the encode is
-// checked on the QP kept, the walk's.
-func TestFindAllSegmentsQP_CAMBIFinalFrameCount(t *testing.T) {
-	encoder := &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(),
-		bandingResults: bandingCurve(map[int]BandingStats{13: addedBanding(1.5, 4)})}
-	cambiSearch(t, encoder, 1, CAMBIOffValue, 1, 1, false, nil)
-	if len(encoder.probePaths) != 2 {
-		t.Fatalf("expected the source and the encode kept probed, got %v", encoder.probePaths)
+// TestFindAllSegmentsQP_CAMBIWalkFrameCount checks that the encodes of the walk are counted like
+// the VMAF search's, right after they are made (see segmentQP): a short one is encoded again, the
+// retry counted among the encodes of the walk, and short twice, the segment fails.
+func TestFindAllSegmentsQP_CAMBIWalkFrameCount(t *testing.T) {
+	// the VMAF search keeps QP 13, which adds too much banding: the walk encodes QP 12, kept
+	banding := map[int]BandingStats{13: addedBanding(1.5, 4)}
+	encoder := &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(), bandingResults: bandingCurve(banding),
+		encodeFrames: map[string][]int{"seg_000000_qp012.mkv": {999}}}
+	results, _, callbacks := cambiSearch(t, encoder, 1, CAMBIOffValue, 1, 1, false, nil)
+	if !slices.Equal(results.QPs, []int{12}) || results.CAMBIWalkAttempts != 2 {
+		t.Errorf("expected QP 12 kept, encoded twice by the walk, got %v and %d walk encodes", results.QPs, results.CAMBIWalkAttempts)
 	}
-	if _, qp, err := extractSegmentAndQP(encoder.probePaths[1]); err != nil || qp != 12 {
-		t.Errorf("expected the encode of QP 12 checked, got %s", encoder.probePaths[1])
+	if !slices.Equal(encodedQPs(t, encoder, 0), []int{26, 13, 14, 12, 12}) {
+		t.Errorf("expected the encode of QP 12 made again, got %v", encodedQPs(t, encoder, 0))
 	}
-	// and a count off there fails the segment
-	encoder = &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(),
-		bandingResults: bandingCurve(map[int]BandingStats{13: addedBanding(1.5, 4)}),
-		probeResults: []VideoStream{
-			{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "24/1", Height: 1080},
-			{NbFrames: 999, NbReadFrames: 999, RFrameRate: "24/1", Height: 1080},
-		}}
+	if len(encoder.countPaths) != 1+len(encoder.encodeCalls) {
+		t.Fatalf("expected the source and every encode counted, got %v", encoder.countPaths)
+	}
+	for i, call := range encoder.encodeCalls {
+		if encoder.countPaths[1+i] != call.output {
+			t.Errorf("encode %d (%s) not counted right after it was made: %v", i, call.output, encoder.countPaths)
+		}
+	}
+	if len(callbacks.warnings) != 1 || !strings.Contains(callbacks.warnings[0], "QP 12 has 999 frames instead of 1000") {
+		t.Errorf("expected a warning about the short encode of QP 12, got %v", callbacks.warnings)
+	}
+	// short twice, the segment fails
+	encoder = &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(), bandingResults: bandingCurve(banding),
+		encodeFrames: map[string][]int{"seg_000000_qp012.mkv": {999, 999}}}
 	auditor, _ := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
 		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
 	cambiAuditor, _ := NewCAMBIChecker(1, CAMBIOffValue)
@@ -483,8 +493,8 @@ func TestFindAllSegmentsQP_CAMBIFinalFrameCount(t *testing.T) {
 		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
 		Encoder:       encoder,
 	})
-	if err == nil || !strings.Contains(err.Error(), "999 frames instead of 1000") {
-		t.Errorf("expected the frame count of the encode kept to fail, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "999 frames instead of 1000, twice") {
+		t.Errorf("expected a walk encode short twice to fail the segment, got %v", err)
 	}
 }
 

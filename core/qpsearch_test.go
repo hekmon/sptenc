@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,10 +37,14 @@ type mockEncoder struct {
 	probeResults     []VideoStream
 	probeCallIdx     int
 	countErr         error
-	counts           map[string]int // what CountFrames returns for each file, recorded by ProbeStream
-	probePaths       []string       // the files ProbeStream was called on, in order
-	frameRate        string         // declared by the default probe result (24/1 when empty)
-	validateQP       bool
+	counts           map[string]int // what CountFrames returns for each file: recorded by ProbeStream for the sources, by Encode for the encodes
+	// encodeFrames makes encodes short: the frames of the successive encodes of a file (by name),
+	// before they hold the stream's (see Encode)
+	encodeFrames map[string][]int
+	probePaths   []string // the files ProbeStream was called on, in order
+	countPaths   []string // the files CountFrames was called on, in order
+	frameRate    string   // declared by the default probe result (24/1 when empty)
+	validateQP   bool
 }
 
 type mockEncodeCall struct {
@@ -60,7 +65,7 @@ func (m *mockEncoder) QPRange() (min, max int, found bool) {
 	return m.qpMin, m.qpMax, true
 }
 
-func (m *mockEncoder) Encode(_ context.Context, input, output string, qp int, _ VideoStream,
+func (m *mockEncoder) Encode(_ context.Context, input, output string, qp int, stream VideoStream,
 	_ func(ProgressStats), _ func(string), _ func(error)) error {
 	if m.encodeErr != nil {
 		return m.encodeErr
@@ -76,6 +81,16 @@ func (m *mockEncoder) Encode(_ context.Context, input, output string, qp int, _ 
 	m.mu.Lock()
 	m.activeEncodes--
 	m.encodeCalls = append(m.encodeCalls, mockEncodeCall{input, output, qp})
+	// What CountFrames will find in the encode: the frames of the stream it was given, unless the
+	// test made it short
+	if m.counts == nil {
+		m.counts = make(map[string]int)
+	}
+	frames := stream.NbReadFrames
+	if short := m.encodeFrames[filepath.Base(output)]; len(short) > 0 {
+		frames, m.encodeFrames[filepath.Base(output)] = short[0], short[1:]
+	}
+	m.counts[output] = frames
 	m.mu.Unlock()
 	// Create a dummy file so getFileSize succeeds for the selected QP.
 	return os.WriteFile(output, []byte("dummy"), 0644)
@@ -183,6 +198,7 @@ func (m *mockEncoder) CountFrames(_ context.Context, path string, _ func(Progres
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.countPaths = append(m.countPaths, path)
 	return m.counts[path], nil
 }
 
@@ -772,52 +788,92 @@ func TestFindAllSegmentsQP_CountFramesError(t *testing.T) {
 	}
 }
 
-func TestFindAllSegmentsQP_FinalSegmentFrameMismatch(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-
-	vmafResults := make(map[int]VMAFStats, 52)
-	for qp := 0; qp <= 51; qp++ {
-		vmafResults[qp] = linearVMAF(qp)
+// TestFindAllSegmentsQP_EncodeFrameCount checks that every encode is counted right after it is
+// made, before it is measured (see segmentQP): one short of the segment's frames is encoded again,
+// with a warning, and counted as an attempt; short twice, the segment fails without measuring it.
+func TestFindAllSegmentsQP_EncodeFrameCount(t *testing.T) {
+	search := func(encodeFrames map[string][]int) (*mockEncoder, *warningCallbacks, QPSearchResults, error) {
+		t.Helper()
+		// a linear curve gated on a mean of 80, from 26 ± 13: QPs 26, 13 and 14 encoded, 13 kept
+		encoder := &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(), encodeFrames: encodeFrames}
+		auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+			VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+		if err != nil {
+			t.Fatal(err)
+		}
+		workingDir := t.TempDir()
+		source := filepath.Join(workingDir, "segment.mkv")
+		if err = os.WriteFile(source, []byte("source"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		callbacks := &warningCallbacks{}
+		results, err := FindAllSegmentsQP(context.Background(), callbacks, QPSearchConfig{
+			SegmentsPaths: []string{source},
+			Auditor:       auditor,
+			WorkingDir:    workingDir,
+			StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
+			Encoder:       encoder,
+		})
+		return encoder, callbacks, results, err
 	}
-
-	// First ProbeStream call returns 1000 frames (source).
-	// Second ProbeStream call (on final encoded segment) returns 999 frames.
-	encoder := &mockEncoder{
-		name:        "mock",
-		qpMin:       0,
-		qpMax:       51,
-		vmafResults: vmafResults,
-		probeResults: []VideoStream{
-			{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "24/1", Height: 1080, Duration: time.Minute},
-			{NbFrames: 999, NbReadFrames: 999, RFrameRate: "24/1", Height: 1080, Duration: time.Minute},
-		},
+	encodesOf := func(encoder *mockEncoder, qp int) (n int) {
+		for _, call := range encoder.encodeCalls {
+			if call.qp == qp {
+				n++
+			}
+		}
+		return
 	}
-
-	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
-		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	measuresOf := func(encoder *mockEncoder, qp int) (n int) {
+		for _, call := range encoder.vmafCalls {
+			if _, callQP, err := extractSegmentAndQP(call.distorted); err == nil && callQP == qp {
+				n++
+			}
+		}
+		return
+	}
+	// Every encode whole: the source counted, then each encode right after it was made
+	encoder, callbacks, reference, err := search(nil)
 	if err != nil {
-		t.Fatalf("failed to create auditor: %v", err)
+		t.Fatal(err)
 	}
-
-	config := QPSearchConfig{
-		SegmentsPaths: []string{filepath.Join(tmpDir, "segment.mkv")},
-		Auditor:       auditor,
-		WorkingDir:    tmpDir,
-		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
-		Encoder:       encoder,
+	if !slices.Equal(reference.QPs, []int{13}) || len(callbacks.warnings) != 0 {
+		t.Fatalf("expected QP 13 without a warning, got %v and %v", reference.QPs, callbacks.warnings)
 	}
-
-	if err := os.WriteFile(config.SegmentsPaths[0], []byte("source"), 0644); err != nil {
-		t.Fatalf("failed to create source segment: %v", err)
+	if len(encoder.countPaths) != 1+len(encoder.encodeCalls) {
+		t.Fatalf("expected the source and every encode counted, got %v", encoder.countPaths)
 	}
-
-	_, err = FindAllSegmentsQP(ctx, &mockCallbacks{}, config)
-	if err == nil {
-		t.Fatal("expected error when final segment frame count mismatches, got nil")
+	for i, call := range encoder.encodeCalls {
+		if encoder.countPaths[1+i] != call.output {
+			t.Errorf("encode %d (%s) not counted right after it was made: %v", i, call.output, encoder.countPaths)
+		}
 	}
-	if !strings.Contains(err.Error(), "999 frames instead of 1000") {
-		t.Errorf("expected frame mismatch error, got %v", err)
+	// The encode of QP 13 short once: encoded again, the search and its result unchanged
+	encoder, callbacks, results, err := search(map[string][]int{"seg_000000_qp013.mkv": {999}})
+	if err != nil {
+		t.Fatalf("a short encode should be encoded again, got %v", err)
+	}
+	if !slices.Equal(results.QPs, reference.QPs) || !slices.Equal(results.SegmentsFrames, []int{1000}) {
+		t.Errorf("expected QP 13 and its 1000 frames, got %v and %v", results.QPs, results.SegmentsFrames)
+	}
+	if encodesOf(encoder, 13) != 2 || measuresOf(encoder, 13) != 1 {
+		t.Errorf("expected QP 13 encoded twice and measured once, got %d encodes and %d measures",
+			encodesOf(encoder, 13), measuresOf(encoder, 13))
+	}
+	if results.TotalNbAttempts != reference.TotalNbAttempts+1 {
+		t.Errorf("expected the retry counted as an attempt: %d, got %d", reference.TotalNbAttempts+1, results.TotalNbAttempts)
+	}
+	if len(callbacks.warnings) != 1 || !strings.Contains(callbacks.warnings[0], "QP 13 has 999 frames instead of 1000") {
+		t.Errorf("expected a warning about the short encode of QP 13, got %v", callbacks.warnings)
+	}
+	// Short twice: the segment fails, the short encodes never measured
+	encoder, _, _, err = search(map[string][]int{"seg_000000_qp013.mkv": {999, 999}})
+	if err == nil || !strings.Contains(err.Error(), "999 frames instead of 1000, twice") {
+		t.Errorf("expected an encode short twice to fail the segment, got %v", err)
+	}
+	if encodesOf(encoder, 13) != 2 || measuresOf(encoder, 13) != 0 {
+		t.Errorf("expected QP 13 encoded twice and never measured, got %d encodes and %d measures",
+			encodesOf(encoder, 13), measuresOf(encoder, 13))
 	}
 }
 
@@ -2029,8 +2085,8 @@ func TestFindAllSegmentsQP_FrameRateMismatch(t *testing.T) {
 		qpMax:       51,
 		vmafResults: vmafResults,
 		// The mock serves probe results in call order: the first call is the source probe of
-		// segment 0, which sets the frame rate of the whole set; every later probe (the
-		// encodes of segment 0, then segment 1) gets the mock default, 24/1.
+		// segment 0, which sets the frame rate of the whole set; the next one, the source of
+		// segment 1 (the encodes are counted, not probed), gets the mock default, 24/1.
 		probeResults: []VideoStream{
 			{NbFrames: 1000, NbReadFrames: 1000, RFrameRate: "25/1", Height: 1080, Duration: time.Minute},
 		},

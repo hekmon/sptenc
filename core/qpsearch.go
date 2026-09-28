@@ -533,26 +533,9 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 		)
 		return
 	}
-	// Verify output files frames count when done: on the QP kept, after the CAMBI stage
-	defer func() {
-		if err != nil {
-			// if we exit with an error, no need to check that everything is fine
-			return
-		}
-		finalQPSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, outcome.qp))
-		var finalStream VideoStream
-		if finalStream, err = probeVideoStream(ctx, scb, config, workerID, finalQPSegmentPath); err != nil {
-			// make findSegmentQP return an error
-			err = fmt.Errorf("failed to get streams infos of final segment: %w", err)
-			return
-		}
-		if outcome.frames = finalStream.NbReadFrames; outcome.frames != totalFrames {
-			// make findSegmentQP return an error
-			err = fmt.Errorf("final segment has %d frames instead of %d", outcome.frames, totalFrames)
-			return
-		}
-		scb.Debug(workerID, "Final segment has %d frames, as original GOP.", outcome.frames)
-	}()
+	// The encode kept holds them all: every encode is counted right after it is made, before
+	// anything is measured of it (see segmentQP)
+	outcome.frames = totalFrames
 	// Search
 	var testedQPs []int // the CAMBI walk adds its encodes
 	if !config.KeepInvalidQP {
@@ -615,12 +598,23 @@ func probeVideoStream(ctx context.Context, scb QPSearchCallbacks, config QPSearc
 	if stream, err = config.Encoder.ProbeStream(ctx, filePath, debug, runtimeError); err != nil {
 		return
 	}
-	scb.OnSegmentAnalysisStart(workerID, stream.Duration)
-	defer scb.OnSegmentAnalysisStop(workerID)
-	stream.NbReadFrames, err = config.Encoder.CountFrames(ctx, filePath, func(stats ProgressStats) {
-		scb.OnSegmentAnalysisProgress(workerID, stats)
-	}, debug, runtimeError)
+	stream.NbReadFrames, err = countFrames(ctx, scb, config, workerID, filePath, stream.Duration)
 	return
+}
+
+// countFrames decodes the whole video stream of a file to count its frames, reported as the
+// analysis of the segment, its progress in time up to duration.
+func countFrames(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig, workerID int, filePath string,
+	duration time.Duration) (frames int, err error) {
+	scb.OnSegmentAnalysisStart(workerID, duration)
+	defer scb.OnSegmentAnalysisStop(workerID)
+	return config.Encoder.CountFrames(ctx, filePath, func(stats ProgressStats) {
+		scb.OnSegmentAnalysisProgress(workerID, stats)
+	}, func(msg string) {
+		scb.Debug(workerID, msg)
+	}, func(err error) {
+		scb.Error(workerID, err)
+	})
 }
 
 // searchSegmentQP finds the highest valid QP (smallest file) for a segment.
@@ -782,12 +776,13 @@ func searchSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearch
 		}
 		// Test candidate and narrow the search
 		scb.OnSegmentNewCandidate(workerID, candidateQP)
-		if vmafStats, _, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, candidateQP, videoTrack,
+		var encodes int
+		if vmafStats, _, encodes, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, candidateQP, videoTrack,
 			VMAFMeasures{Score: true}); err != nil {
 			err = fmt.Errorf("failed to produce QP %d: %w", candidateQP, err)
 			return
 		}
-		nbAttempts++
+		nbAttempts += encodes
 		results[candidateQP] = vmafStats
 		testedQPs = append(testedQPs, candidateQP)
 		scb.OnSegmentCandidateDone(workerID, candidateQP, config.Auditor.Validate(vmafStats))
@@ -846,26 +841,84 @@ func interpolateCandidate(scb QPSearchCallbacks, config QPSearchConfig,
 	return
 }
 
-// segmentQP encodes a segment at qp and measures its encode (see measureSegment).
+// segmentQP encodes a segment at qp, checks that the encode holds every frame of the segment,
+// encoding it again once when it does not, and measures it (see measureSegment). encodes is the
+// number of encodes made, the retry's included.
+//
+// # WHY THIS EXISTS
+//
+// An encoder can exit without an error and a frame short: hevc_videotoolbox reported "Error
+// encoding frame: -12912" on one frame of a 270 frames segment, and ffmpeg still exited 0 with the
+// 269 others. VMAF scores such an encode all the same, pairing the frames of both videos by their
+// index: after the gap, every frame was compared with the next one of the segment, and the encode
+// scored a harmonic mean of 93.63 (93.98 complete), passing the gate. Its score would steer the
+// search like any other, and kept, it would leave the output a frame short.
+//
+// # WHY EVERY ENCODE, NOT ONLY THE ONE KEPT
+//
+// The frames used to be counted on the encode kept only, once the search of the segment was
+// done. That caught the encode above before the output, but by failing the whole run, after a
+// search its score may already have misled: every score steers the search, the bracket and the
+// forecast of the next QP, not only the kept one's. Counted right after each encode, a short one
+// is never measured, and the encode kept, like every other, holds the frames of the segment:
+// nothing is left to check once the search is done.
+//
+// # WHY ONE RETRY
+//
+// The failure was transient: the same QP of the same segment, encoded again alone, gave its 270
+// frames, and the next run of the same file went past that segment. Short a second time, the
+// encode of that QP is no transient failure any more: the segment fails, rather than the search
+// looping on an encoder that drops frames.
+//
+// # EDGE CASES
+//
+//   - The retry overwrites the short encode: the file measured, and maybe kept, is the whole one.
+//   - Both encodes are attempts, in the counts of the segment and of the search: the retry is an
+//     encode like the others.
+//   - The frames are counted like the segment's own (CountFrames, decoding the whole stream): a
+//     count that differs is an encode that differs, not two ways of counting.
+//   - A count that fails, an encode that can not be decoded, fails the segment, like an encode
+//     that fails.
 func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	input string, workerID, segment, qp int, videoTrack VideoStream, measures VMAFMeasures) (
-	vmafStats VMAFStats, banding BandingStats, err error) {
+	vmafStats VMAFStats, banding BandingStats, encodes int, err error) {
+	const tries = 2 // one retry (see WHY ONE RETRY)
 	output := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, segment, qp))
-	// Encode
-	scb.OnSegmentEncodeStart(workerID, videoTrack.NbReadFrames)
-	encodeErr := config.Encoder.Encode(ctx, input, output, qp, videoTrack, func(stats ProgressStats) {
-		scb.OnSegmentEncodeProgress(workerID, stats)
-	}, func(msg string) {
-		scb.Debug(workerID, msg)
-	}, func(err error) {
-		scb.Error(workerID, err)
-	})
-	scb.OnSegmentEncodeStop(workerID)
-	if encodeErr != nil {
-		err = fmt.Errorf("failed to encode segment: %w", encodeErr)
-		return
+	for {
+		// Encode
+		scb.OnSegmentEncodeStart(workerID, videoTrack.NbReadFrames)
+		encodeErr := config.Encoder.Encode(ctx, input, output, qp, videoTrack, func(stats ProgressStats) {
+			scb.OnSegmentEncodeProgress(workerID, stats)
+		}, func(msg string) {
+			scb.Debug(workerID, msg)
+		}, func(err error) {
+			scb.Error(workerID, err)
+		})
+		scb.OnSegmentEncodeStop(workerID)
+		encodes++
+		if encodeErr != nil {
+			err = fmt.Errorf("failed to encode segment: %w", encodeErr)
+			return
+		}
+		// Its frames, before anything is measured of it
+		var frames int
+		if frames, err = countFrames(ctx, scb, config, workerID, output, videoTrack.Duration); err != nil {
+			err = fmt.Errorf("failed to count the frames of the encode: %w", err)
+			return
+		}
+		if frames == videoTrack.NbReadFrames {
+			scb.Debug(workerID, "Segment %d: QP %d: the encode has the %d frames of the segment", segment, qp, frames)
+			break
+		}
+		if encodes == tries {
+			err = fmt.Errorf("the encode has %d frames instead of %d, twice", frames, videoTrack.NbReadFrames)
+			return
+		}
+		scb.Warning(workerID, "Segment %d: the encode of QP %d has %d frames instead of %d, encoding it again",
+			segment+1, qp, frames, videoTrack.NbReadFrames)
 	}
-	return measureSegment(ctx, scb, config, input, workerID, segment, qp, videoTrack, measures)
+	vmafStats, banding, err = measureSegment(ctx, scb, config, input, workerID, segment, qp, videoTrack, measures)
+	return
 }
 
 // segmentBanding measures the banding the encode of a segment at qp added, on the file the

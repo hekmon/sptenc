@@ -102,7 +102,7 @@ type cambiOutcome struct {
 	qp         int             // the QP kept
 	walked     bool            // the QP of the VMAF search failed the CAMBI thresholds: the QPs below it were tried
 	walk       []int           // the QPs the walk measured, in order (the ones skipped for failing VMAF left out)
-	encodes    int             // the QPs the walk encoded, the others were encoded by the VMAF search
+	encodes    int             // the encodes the walk made, a retry included (see segmentQP): the other QPs were encoded by the VMAF search
 	bestEffort CAMBIBestEffort // the threshold given up, when no QP passed them all
 }
 
@@ -183,7 +183,7 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 	// The walk
 	outcome.walked = true
 	defer func() {
-		scb.Debug(workerID, "Segment %d: CAMBI walk from QP %d: QP %d kept, %d QPs encoded", segment, vmafQP, outcome.qp, outcome.encodes)
+		scb.Debug(workerID, "Segment %d: CAMBI walk from QP %d: QP %d kept, %d encodes", segment, vmafQP, outcome.qp, outcome.encodes)
 	}()
 	for qp := vmafQP - 1; qp >= qpMin; qp-- {
 		if vmafStats, encoded := results[qp]; encoded {
@@ -200,13 +200,16 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 		} else {
 			scb.OnSegmentCAMBICandidate(workerID, qp)
 			outcome.walk = append(outcome.walk, qp)
-			var qpBanding BandingStats
-			if vmafStats, qpBanding, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, qp, videoTrack,
+			var (
+				qpBanding BandingStats
+				encodes   int
+			)
+			if vmafStats, qpBanding, encodes, err = segmentQP(ctx, scb, config, segmentPath, workerID, segment, qp, videoTrack,
 				VMAFMeasures{Score: true, Banding: true}); err != nil {
 				err = fmt.Errorf("failed to produce QP %d: %w", qp, err)
 				return
 			}
-			outcome.encodes++
+			outcome.encodes += encodes
 			results[qp] = vmafStats
 			*testedQPs = append(*testedQPs, qp)
 			if !config.Auditor.Validate(vmafStats) {
