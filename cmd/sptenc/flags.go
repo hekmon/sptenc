@@ -352,9 +352,11 @@ const (
 	vmafMeanFlagName        = "vmaf-mean"
 	vmafProfileCategoryName = "VMAF Profile"
 	// The CAMBI gate, on the banding the encoder adds (see core.CAMBIChecker). A mean of 1 is a
-	// safety net: no segment of the two real contents of BENCHMARKS.md came near it at the QPs
-	// their VMAF search picked (0.10 at most), and it catches the smooth gradients fidelity
-	// passes with bands added. The worst frame is for strict limits, off by default.
+	// safety net: no segment of the two real contents of BENCHMARKS.md reached it at the QPs
+	// their VMAF search picked (0.80 at most, with hevc_nvenc), and it catches the smooth
+	// gradients fidelity passes with bands added. Lower, it would chase CAMBI's own floor:
+	// hevc_nvenc adds more than 0.5 to a clean radial gradient at every QP from 0 to 40. The
+	// worst frame is for strict limits, off by default.
 	cambiMeanFlagName = "cambi-mean"
 	cambiMaxFlagName  = "cambi-max"
 	cambiMeanDefault  = 1

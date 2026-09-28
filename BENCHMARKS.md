@@ -104,7 +104,7 @@ Under constant QP, NVENC honors its adaptive quantization: the QP asked for beco
 | Episode (10 segments) | −14% | −7% |
 | Per segment | −4% to −37% | −4% to −49% |
 
-Each of the 20 segments was smaller with AQ off, with both encoders. With `hevc_nvenc`, AQ on made 1.57 times the data at the same QP (median of 260 encodes, 1.07 to 3.13 times) for one more point of fidelity (median, −0.13 to +3.21): AQ off needed 0 to 3 QPs lower to reach 93 and still made smaller files. The CAMBI gate lowered no segment in either setting, and on the grain over black of the episode (segment 140), AQ off added less banding, 0.005 on average against 0.048. At normal levels the encodes of the darkest segments look the same; with their levels stretched, AQ on turns that grain into more flat blocks than AQ off.
+Each of the 20 segments was smaller with AQ off, with both encoders. With `hevc_nvenc`, AQ on made 1.57 times the data at the same QP (median of 260 encodes, 1.07 to 3.13 times) for one more point of fidelity (median, −0.13 to +3.21): AQ off needed 0 to 3 QPs lower to reach 93 and still made smaller files. The CAMBI gate lowered no segment in either setting, and on the grain over black of the episode (segment 140), AQ off added less banding, 0.005 on average against 0.048. At normal levels the encodes of the darkest segments look the same; with their levels stretched, AQ on turns that grain into more flat blocks than AQ off. On the synthetic gradients, AQ off adds more banding at the same QP, and the CAMBI gate walks them further down, to about the size AQ on reached (see [The CAMBI gate on smooth gradients](#the-cambi-gate-on-smooth-gradients)).
 
 ### The default on the two contents
 
@@ -158,18 +158,21 @@ Its cost on the episode's segment above: at fidelity 95 (QP 25, worst frame 3.42
 
 ### The CAMBI gate on smooth gradients
 
-Four synthetic 10-bit 1080p clips of 5 s where encoders add banding, encoded every 2 QPs from 10 to 50 (and 0 to 8 where needed) with sptenc's `hevc_nvenc` and `libx265` arguments. The QP fidelity at 93 picks, the mean banding the encoder added there, and where a mean of 1 takes it:
+Four synthetic 10-bit 1080p clips of 5 s where encoders add banding, encoded with sptenc's `hevc_nvenc` and `libx265` arguments: `hevc_nvenc` at every QP from 0 to 50, `libx265` and `hevc_nvenc` with AQ on every 2 QPs from 10 to 50 (and 0 to 8 where needed). The QP fidelity at 93 picks, the mean banding the encoder added there, and where a mean of 1 takes it; run on the four clips with `hevc_nvenc`, sptenc itself kept the QPs of the rows without AQ:
 
 | Clip | Encoder | Fidelity at 93 (added mean) | With the CAMBI gate | File size |
 |---|---|---|---|---|
-| Dark ramp brightening over time | `hevc_nvenc` | QP 46 (2.05) | QP 28 (0.36) | 1.09 times |
+| Dark ramp brightening over time | `hevc_nvenc` | QP 38 (3.17) | QP 19 (0.39) | 0.80 times |
+| Dark ramp brightening over time | `hevc_nvenc` with AQ on | QP 46 (2.05) | QP 28 (0.36) | 1.09 times |
 | Bluish vertical gradient (sky) | `libx265` | QP 36 (3.28) | QP 34 (0) | 1.02 times |
-| The sky with grain | `hevc_nvenc` | QP 20 (3.02) | QP 10 (0.88) | 174 times |
+| The sky with grain | `hevc_nvenc` | QP 12 (2.76) | QP 3 (0.92) | 199 times |
+| The sky with grain | `hevc_nvenc` with AQ on | QP 20 (3.02) | QP 10 (0.88) | 174 times |
 | The sky with grain | `libx265` | QP 14 (2.07) | QP 4 (0) | 117 times |
-| Radial vignette | `hevc_nvenc` | QP 42 (0.78) | QP 42 | the same |
+| Radial vignette | `hevc_nvenc` | QP 35 (0.60) | QP 35 | the same |
+| Radial vignette | `hevc_nvenc` with AQ on | QP 42 (0.78) | QP 42 | the same |
 | The ramp, the sky, the vignette | the other encoder | 0 to 0.16 | the same | the same |
 
-Sampled every 2 QPs: the gate, walking one QP at a time, can stop one QP higher. Fidelity rises with the QP on 7 of these 8 pairs, by up to 2.35: these clips cost the encoders a few hundred bytes per frame. The added banding does not always shrink as the QP goes down either: at high QP the steps turn coarse and CAMBI rates them lower (the worst frame of the `libx265` ramp adds 9.67 at QP 36, nothing at 50). The vignette gets 0.63 to 1.28 from NVENC at every QP from 6 to 42 and 0.22 at QP 0: a gate at 0.5 would take it from QP 42 down to 4.
+Sampled every 2 QPs, the gate, walking one QP at a time, can stop one QP higher. Fidelity rises with the QP on 7 of the 8 pairs sampled every 2 QPs, by up to 2.35, and over the same QPs on 3 of the 4 clips with `hevc_nvenc` AQ off, by up to 1.15: these clips cost the encoders a few hundred bytes per frame, and the ramp encode the gate keeps is even smaller than fidelity's. The added banding does not always shrink as the QP goes down either: at high QP the steps turn coarse and CAMBI rates them lower (the worst frame of the `libx265` ramp adds 9.67 at QP 36, nothing at 50). The vignette gets more than 0.5 from `hevc_nvenc` at every QP from 0 to 40, 0.74 to 1.19 below the QP fidelity picks: a gate at 0.5 would walk it down to QP 0 for nothing and keep QP 35, a CAMBI best effort. With AQ on, it got 0.63 to 1.28 from QP 6 to 42 and 0.22 at QP 0, and a gate at 0.5 would have taken it from QP 42 down to 4.
 
 The clips, as ffmpeg `lavfi` graphs (`nullsrc=s=1920x1080:r=24000/1001:d=5,format=yuv420p10le,` then):
 - ramp: `geq=lum='64+160*X/W+20*T':cb=512:cr=512`
