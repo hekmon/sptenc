@@ -776,6 +776,23 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	args = append(args,
 		"-q:v", strconv.Itoa(quality),
 	)
+	//// keyframe interval: DO NOT REMOVE
+	// Without -g, hevc_videotoolbox puts a keyframe every 12 frames: 12 is libavcodec's generic
+	// default for every encoder, which the wrappers of libx265 and NVENC replace with their
+	// library's own choice and the VideoToolbox wrapper does not, passing it on as
+	// kVTCompressionPropertyKey_MaxKeyFrameInterval (FFmpeg n9.0.2, videotoolboxenc.c). -g 0
+	// would leave that property unset, to VideoToolbox's own default ("the video encoder should
+	// choose where to place all key frames", Apple's header): on a segment of the episode of
+	// BENCHMARKS.md (270 frames, M4 Max, ffmpeg 9.0.1), it placed one every 30 frames. 250 is
+	// libx265's default maximum, and libx265 and NVENC, left to their defaults, put their
+	// keyframes on the same frames of that segment (0 and 250). At the quality the search keeps
+	// (fidelity harmonic mean 93), the segment took 4.07 MB every 12 frames, 2.34 MB every 30
+	// and 0.91 MB with 250, which passed at -q:v 60 where the other two needed 62. Passed
+	// explicitly, not left to the wrapper: a change of its default in FFmpeg would change
+	// sptenc's outputs, and the QPs its cache learned, without notice.
+	args = append(args,
+		"-g", "250",
+	)
 	//// parameter sets in-band, before every keyframe: DO NOT REMOVE
 	// hevc_videotoolbox writes the quality into the PPS (init_qp_minus26) and emits the
 	// VPS/SPS/PPS only once, in the container extradata. When segments encoded at different
