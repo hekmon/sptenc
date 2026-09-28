@@ -237,7 +237,7 @@ func (qpsr QPSearchResults) SegmentsDurations() (durations []time.Duration, err 
 	durations = make([]time.Duration, len(qpsr.SegmentsFrames))
 	for i, frames := range qpsr.SegmentsFrames {
 		if durations[i], err = FramesDuration(frames, qpsr.FrameRate); err != nil {
-			return nil, fmt.Errorf("segment %d: %w", i, err)
+			return nil, fmt.Errorf("segment %d: %w", i+1, err)
 		}
 	}
 	return
@@ -336,6 +336,11 @@ func (qpsr QPSearchResults) GetMeanStdDev() (mean, stddev float64) {
 	return stat.MeanStdDev(qpf, nil)
 }
 
+// job is a segment to search. segment is its index, from 0, in the slices of the results and in
+// the names of the files (segEncodedOutputFormat, as the segment muxer names the segments). Every
+// message numbers it from 1, errors and debug lines included, like the log lines and the live
+// display: the segment a failure names is the one the log showed, and the error adds its file,
+// whose name counts from 0.
 type job struct {
 	segment int
 	path    string
@@ -392,12 +397,12 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 					scb.OnSegmentStart(wID, job.segment, job.path)
 					// Find this segment QP
 					if segment, err = findSegmentQP(workerCtx, scb, config, wID, job.segment, job.path); err != nil {
-						err = fmt.Errorf("failed to find the right encoding QP for segment %d: %w", job.segment, err)
+						err = fmt.Errorf("failed to find the right encoding QP for segment %d (%s): %w", job.segment+1, filepath.Base(job.path), err)
 						return
 					}
 					encodedSegmentPath := filepath.Join(config.WorkingDir, fmt.Sprintf(segEncodedOutputFormat, job.segment, segment.qp))
 					if segmentSize, err = getFileSize(encodedSegmentPath); err != nil {
-						err = fmt.Errorf("failed to get the size of segment %d: %w", job.segment, err)
+						err = fmt.Errorf("failed to get the size of segment %d: %w", job.segment+1, err)
 						return
 					}
 					// Update global stats
@@ -412,8 +417,8 @@ func FindAllSegmentsQP(ctx context.Context, scb QPSearchCallbacks, config QPSear
 						results.FrameRate = segment.frameRate
 					} else if segment.frameRate != results.FrameRate {
 						resultsAccess.Unlock()
-						return fmt.Errorf("segment %d has a frame rate of %s while the previous ones have %s",
-							job.segment, segment.frameRate, results.FrameRate)
+						return fmt.Errorf("segment %d (%s) has a frame rate of %s while the previous ones have %s",
+							job.segment+1, filepath.Base(job.path), segment.frameRate, results.FrameRate)
 					}
 					results.TotalSegmentsFrames += segment.frames
 					results.TotalEncodedFrames += segment.frames * segment.attempts
@@ -502,7 +507,7 @@ type segmentOutcome struct {
 
 func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig,
 	workerID, segment int, segmentPath string) (outcome segmentOutcome, err error) {
-	scb.Debug(workerID, "Segment %d: Search for the right QP", segment)
+	scb.Debug(workerID, "Segment %d: Search for the right QP", segment+1)
 	// Prepare
 	videoTrack, err := probeVideoStream(ctx, scb, config, workerID, segmentPath)
 	if err != nil {
@@ -528,8 +533,8 @@ func findSegmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchCo
 	// Abort if frame count is 0 or negative
 	totalFrames := videoTrack.NbReadFrames
 	if totalFrames <= 0 {
-		err = fmt.Errorf("segment %d: frame count is 0 or negative (NbReadFrames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
-			segment, totalFrames, outcome.duration, videoTrack.RFrameRate,
+		err = fmt.Errorf("frame count is 0 or negative (NbReadFrames: %d, duration: %s, frameRate: %s). Cannot proceed without valid frame count",
+			totalFrames, outcome.duration, videoTrack.RFrameRate,
 		)
 		return
 	}
@@ -907,7 +912,7 @@ func segmentQP(ctx context.Context, scb QPSearchCallbacks, config QPSearchConfig
 			return
 		}
 		if frames == videoTrack.NbReadFrames {
-			scb.Debug(workerID, "Segment %d: QP %d: the encode has the %d frames of the segment", segment, qp, frames)
+			scb.Debug(workerID, "Segment %d: QP %d: the encode has the %d frames of the segment", segment+1, qp, frames)
 			break
 		}
 		if encodes == tries {
@@ -951,11 +956,11 @@ func measureSegment(ctx context.Context, scb QPSearchCallbacks, config QPSearchC
 	// What was measured only: a banding pass has no score, a score pass no banding
 	switch {
 	case measures.Score && measures.Banding:
-		scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s, banding: %s", segment, qp, vmafStats, banding)
+		scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s, banding: %s", segment+1, qp, vmafStats, banding)
 	case measures.Score:
-		scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s", segment, qp, vmafStats)
+		scb.Debug(workerID, "Segment %d: QP %d: VMAF results: %s", segment+1, qp, vmafStats)
 	case measures.Banding:
-		scb.Debug(workerID, "Segment %d: QP %d: banding: %s", segment, qp, banding)
+		scb.Debug(workerID, "Segment %d: QP %d: banding: %s", segment+1, qp, banding)
 	}
 	return
 }

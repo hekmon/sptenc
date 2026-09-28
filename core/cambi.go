@@ -183,12 +183,12 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 	// The walk
 	outcome.walked = true
 	defer func() {
-		scb.Debug(workerID, "Segment %d: CAMBI walk from QP %d: QP %d kept, %d encodes", segment, vmafQP, outcome.qp, outcome.encodes)
+		scb.Debug(workerID, "Segment %d: CAMBI walk from QP %d: QP %d kept, %d encodes", segment+1, vmafQP, outcome.qp, outcome.encodes)
 	}()
 	for qp := vmafQP - 1; qp >= qpMin; qp-- {
 		if vmafStats, encoded := results[qp]; encoded {
 			if !config.Auditor.Validate(vmafStats) {
-				scb.Debug(workerID, "Segment %d: CAMBI walk: QP %d failed the VMAF thresholds, skipped", segment, qp)
+				scb.Debug(workerID, "Segment %d: CAMBI walk: QP %d failed the VMAF thresholds, skipped", segment+1, qp)
 				continue
 			}
 			scb.OnSegmentCAMBICandidate(workerID, qp)
@@ -213,7 +213,7 @@ func searchSegmentCAMBI(ctx context.Context, scb QPSearchCallbacks, config QPSea
 			results[qp] = vmafStats
 			*testedQPs = append(*testedQPs, qp)
 			if !config.Auditor.Validate(vmafStats) {
-				scb.Debug(workerID, "Segment %d: CAMBI walk: QP %d failed the VMAF thresholds", segment, qp)
+				scb.Debug(workerID, "Segment %d: CAMBI walk: QP %d failed the VMAF thresholds", segment+1, qp)
 				scb.OnSegmentCAMBICandidateDone(workerID, qp, false)
 				continue
 			}

@@ -877,6 +877,41 @@ func TestFindAllSegmentsQP_EncodeFrameCount(t *testing.T) {
 	}
 }
 
+// TestFindAllSegmentsQP_ErrorNamesSegment checks that a failure numbers its segment from 1, like
+// the warnings and the log lines, and names its file, whose name counts from 0 (see job).
+func TestFindAllSegmentsQP_ErrorNamesSegment(t *testing.T) {
+	// the second segment's encode of QP 13, the one its search keeps, short twice
+	encoder := &mockEncoder{name: "mock", qpMax: 51, vmafResults: linearCurve(),
+		encodeFrames: map[string][]int{"seg_000001_qp013.mkv": {999, 999}}}
+	auditor, err := NewVMAFChecker(VMAFOffValue, VMAFOffValue, VMAFOffValue, VMAFOffValue,
+		VMAFOffValue, VMAFOffValue, VMAFOffValue, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workingDir := t.TempDir()
+	segments := make([]string, 3)
+	for segment := range segments {
+		segments[segment] = filepath.Join(workingDir, fmt.Sprintf("seg_%06d.mkv", segment))
+		if err = os.WriteFile(segments[segment], []byte("source"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	callbacks := &warningCallbacks{}
+	_, err = FindAllSegmentsQP(context.Background(), callbacks, QPSearchConfig{
+		SegmentsPaths: segments,
+		Auditor:       auditor,
+		WorkingDir:    workingDir,
+		StatsCache:    &mockStatsCache{mean: 26, stddev: 13},
+		Encoder:       encoder,
+	})
+	if err == nil || !strings.Contains(err.Error(), "for segment 2 (seg_000001.mkv): ") {
+		t.Errorf("expected the error to name segment 2 and its file, got %v", err)
+	}
+	if len(callbacks.warnings) != 1 || !strings.HasPrefix(callbacks.warnings[0], "Segment 2: ") {
+		t.Errorf("expected the warning to name segment 2 too, got %v", callbacks.warnings)
+	}
+}
+
 func TestFindAllSegmentsQP_BestEffortMultipleSegments(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

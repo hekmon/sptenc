@@ -250,7 +250,7 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 - `mockStatsCache` — returns a fixed, configurable mean and stddev (its `Snapshot` always reports a history). `mockCallbacks` — no-op implementation of the progress callbacks. `recordingCallbacks` records worker IDs, reported totals, the candidate events (the VMAF search and the CAMBI walk) and the segment results, from any number of workers.
 
 **Critical test files:**
-- `core/qpsearch_test.go` — Convergence, best-effort fallback, cache guidance, ephemeral convergence, multi-segment runs, error propagation from `Encode`/`ComputeVMAF`/`ProbeStream`, `KeepInvalidQP` behavior, every encode counted before it is measured (a short one encoded again once, then failing the segment).
+- `core/qpsearch_test.go` — Convergence, best-effort fallback, cache guidance, ephemeral convergence, multi-segment runs, error propagation from `Encode`/`ComputeVMAF`/`ProbeStream`, `KeepInvalidQP` behavior, every encode counted before it is measured (a short one encoded again once, then failing the segment), a failure numbering its segment from 1 and naming its file.
 - `core/predictor_test.go` — Interpolation accuracy, extrapolation clamping, VMAF 100 ceiling adaptation, monotonicity, insufficient-point errors.
 - `core/cache_persistent_test.go` and `core/cache_ephemeral_test.go` — `AddRun` deduplication, concurrent access, save/load roundtrip, empty-cache heuristic, filename stability and golden names (the original score marker, fidelity without one), the one-segment seed weight.
 - `core/vmaf_test.go` — Checker construction errors, boundary values, active/inactive threshold combinations.
