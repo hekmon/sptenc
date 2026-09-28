@@ -792,13 +792,15 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	// choose where to place all key frames", Apple's header): on a segment of the episode of
 	// BENCHMARKS.md (270 frames, M4 Max, ffmpeg 9.0.1), it placed one every 30 frames. 250 is
 	// libx265's default maximum, and libx265 and NVENC, left to their defaults, put their
-	// keyframes on the same frames of that segment (0 and 250). At the quality the search keeps
-	// (fidelity harmonic mean 93), the segment took 4.07 MB every 12 frames, 2.34 MB every 30
-	// and 0.91 MB with 250, which passed at -q:v 60 where the other two needed 62. On the whole
-	// episode (-C 2), -g 250 made the video 17% smaller than every 12 frames, smaller on 147 of
-	// the 159 segments compared, 3 to 7 times on the end credits and that segment. Passed
-	// explicitly, not left to the wrapper: a change of its default in FFmpeg would change
-	// sptenc's outputs, and the QPs its cache learned, without notice.
+	// keyframes on the same frames of that segment (0 and 250; with the B-frames allowed below,
+	// VideoToolbox puts its second one at 248: -g sets a maximum, and it keeps its keyframes 248
+	// frames apart on the whole episode). At the quality the search keeps (fidelity harmonic mean
+	// 93), the segment took 4.07 MB every 12 frames, 2.34 MB every 30 and 0.91 MB with 250, which
+	// passed at -q:v 60 where the other two needed 62. On the whole episode (-C 2), -g 250 made
+	// the video 17% smaller than every 12 frames, smaller on 147 of the 159 segments compared, 3
+	// to 7 times on the end credits and that segment. Passed explicitly, not left to the wrapper:
+	// a change of its default in FFmpeg would change sptenc's outputs, and the QPs its cache
+	// learned, without notice.
 	args = append(args,
 		"-g", "250",
 	)

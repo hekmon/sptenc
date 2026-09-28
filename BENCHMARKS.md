@@ -151,7 +151,7 @@ ffmpeg gives every encoder a keyframe every 12 frames and no B-frames, unless it
 | `-g 12`, ffmpeg's default | 23, every 12 frames | 62 | 93.98 | 4.07 MB |
 | `-g 0`, left to VideoToolbox | 9, every 30 frames | 62 | 94.20 | 2.34 MB |
 | `-g 250` | 2, frames 0 and 250 | 60 | 93.09 | 0.91 MB |
-| `-g 250`, B-frames | 2 | 62 | 94.60 | 0.99 MB |
+| `-g 250`, B-frames | 2, frames 0 and 248 | 62 | 94.60 | 0.99 MB |
 
 `libx265` and `hevc_nvenc`, left to their defaults, put their keyframes on the same frames of this segment as `-g 250`. Fewer keyframes raised the fidelity at the same `-q:v` (93.98, 94.20 and 94.89 at 62), which is how `-g 250` passed one step lower. `-bf 1` and `-bf 4` gave the same encode, same size and same pictures: the wrapper reads the value as allowed or not. At the same `-q:v`, B-frames made this segment 16 to 29% smaller for 0.2 to 0.6 less fidelity: 17% smaller at a fidelity of 93, interpolated on a log scale between the steps around it, but the coarse steps put its encodes at 92.66 and 94.60, on either side of the gate, and the encode kept is 9% larger than without B-frames.
 
@@ -188,7 +188,7 @@ sptenc now runs the `hevc_videotoolbox` encodes of a process one at a time, what
 
 ¹ A build counting the frames of the encode kept for each segment, where the later ones count those of every encode: the run with the lock at `-C 2` took 4.4% more CPU time for as many attempts, and its search 6% longer.
 
-With the lock, the output is the same at `-C 2` and `-C 1`: the same QP, size, keyframes and pictures on every segment, the same scores. The run before it differs from them on 71 of the 163 segments: 81 keyframes more, on 55 segments, and another QP on 6, for a stream 0.55% larger. Of the 219 keyframes, 217 are the ones `-g 250` puts, at the start of each segment and every 250 frames within it, the other 2 VideoToolbox's own, at both values of `-C`. `-C 1` searched 13% longer than `-C 2`, the CPU busy 84% of the time against 97%, although a segment searched alone starts from what the previous ones found: 15 attempts less in all.
+With the lock, the output is the same at `-C 2` and `-C 1`: the same QP, size, keyframes and pictures on every segment, the same scores. The run before it differs from them on 71 of the 163 segments: 81 keyframes more, on 55 segments, and another QP on 6, for a stream 0.55% larger. The 219 keyframes are the ones `-g 250` puts, at both values of `-C`: at the start of each segment and every 248 frames within it, the interval VideoToolbox keeps with B-frames under a maximum of 250. `-C 1` searched 13% longer than `-C 2`, the CPU busy 84% of the time against 97%, although a segment searched alone starts from what the previous ones found: 15 attempts less in all.
 
 [`cmd/concurrency-check`](cmd/concurrency-check), a program apart from sptenc, repeats the test for any encoder: 10 encodes alone and 10 rounds of two at once, each encode in a process of its own through sptenc's encoder adapter, by default on a synthetic clip (10 s of 1080p, ffmpeg's `testsrc2` with temporal noise) at the middle of the encoder's QP range, and it says whether the result contradicts what sptenc assumes of the encoder (`go run ./cmd/concurrency-check -encoder hevc_videotoolbox`, `-input` for a file of your own):
 
