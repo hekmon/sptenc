@@ -1161,13 +1161,18 @@ func (vs VMAFSummary) String() string {
 			strconv.FormatFloat(vs.OtherHarmonicMean, 'f', -1, float64Precision))
 	}
 	if vs.HasBanding {
-		// The scale is CAMBI's, the banding of a picture, which the last two values are: the first two are how
-		// much higher the distorted video rates than the reference, and a scale tied to them read as absolute
-		fmt.Fprintf(&buffer, "Banding added, frame by frame how much higher the distorted video rates than the reference on CAMBI's scale (0 = no banding, ~5 = slightly annoying): %s on average over the frames, %s on the worst frame. The reference rates %s on average, the distorted video %s.\n",
-			strconv.FormatFloat(vs.Banding.AddedMean, 'f', -1, float64Precision),
-			strconv.FormatFloat(vs.Banding.AddedMax, 'f', -1, float64Precision),
+		// Two kinds of values on CAMBI's scale, the banding of a picture, one line each. First how each video rates,
+		// next to the legend of the scale, which describes ratings. Then the banding added the gate reads, how much
+		// higher the distorted video rates than the reference, signed as the rises they are: unsigned, or next to
+		// the legend, they read as ratings. Computed frame by frame, 0 where the distorted video does not rate
+		// higher, the rises are not the difference of the two ratings above them.
+		fmt.Fprintf(&buffer, "Banding on CAMBI's scale (0 = no banding, ~5 = slightly annoying): the reference rates %s on average over the frames, the distorted video %s.\n",
 			strconv.FormatFloat(vs.Banding.SourceMean, 'f', -1, float64Precision),
 			strconv.FormatFloat(vs.Banding.EncodeMean, 'f', -1, float64Precision),
+		)
+		fmt.Fprintf(&buffer, "Banding added, frame by frame how much higher the distorted video rates than the reference: +%s on average over the frames, +%s on the worst frame.\n",
+			strconv.FormatFloat(vs.Banding.AddedMean, 'f', -1, float64Precision),
+			strconv.FormatFloat(vs.Banding.AddedMax, 'f', -1, float64Precision),
 		)
 	}
 	return buffer.String()

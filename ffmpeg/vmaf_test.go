@@ -368,7 +368,8 @@ func TestVMAFReport_BothScoresAndBanding(t *testing.T) {
 		}
 		rendered := summary.String()
 		if !strings.HasPrefix(rendered, tc.title) || !strings.Contains(rendered, tc.line) ||
-			!strings.Contains(rendered, "Banding added, frame by frame how much higher the distorted video rates than the reference on CAMBI's scale (0 = no banding, ~5 = slightly annoying): 15.831217 on average over the frames, 15.831217 on the worst frame. The reference rates 6.653077 on average, the distorted video 22.484294.") {
+			!strings.Contains(rendered, "Banding on CAMBI's scale (0 = no banding, ~5 = slightly annoying): the reference rates 6.653077 on average over the frames, the distorted video 22.484294.\n"+
+				"Banding added, frame by frame how much higher the distorted video rates than the reference: +15.831217 on average over the frames, +15.831217 on the worst frame.\n") {
 			t.Errorf("unexpected rendering of %s:\n%s", tc.gated, rendered)
 		}
 	}

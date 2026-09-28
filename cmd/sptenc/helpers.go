@@ -246,7 +246,8 @@ func setupVMAF(ctx context.Context, cmd *cli.Command, out io.Writer, model ffmpe
 		}
 		if setup.cambi.Enabled() {
 			// The scale is CAMBI's, the banding of a picture: the thresholds apply to how much higher the
-			// encode rates than its source, and a scale tied to them read as an absolute limit
+			// encode rates than its source, signed as the rises they are (describeCAMBIGate), or next to
+			// the legend of the scale they would read as limits on the rating itself
 			fmt.Fprintf(out, "The banding the encoder adds is gated too, frame by frame how much higher the encode rates than its source on CAMBI's scale (0 = no banding, ~5 = slightly annoying): %s\n",
 				describeCAMBIGate(setup.cambi))
 		}
@@ -287,12 +288,12 @@ func describeCAMBIGate(gate core.CAMBIChecker) string {
 	max, hasMax := thresholds["max"]
 	switch {
 	case hasMean && hasMax:
-		return fmt.Sprintf("at most %s on average over the frames of a segment, and %s on its worst frame",
+		return fmt.Sprintf("at most +%s on average over the frames of a segment, and +%s on its worst frame",
 			strconv.FormatFloat(mean, 'f', -1, 64), strconv.FormatFloat(max, 'f', -1, 64))
 	case hasMean:
-		return fmt.Sprintf("at most %s on average over the frames of a segment", strconv.FormatFloat(mean, 'f', -1, 64))
+		return fmt.Sprintf("at most +%s on average over the frames of a segment", strconv.FormatFloat(mean, 'f', -1, 64))
 	case hasMax:
-		return fmt.Sprintf("at most %s on the worst frame of a segment", strconv.FormatFloat(max, 'f', -1, 64))
+		return fmt.Sprintf("at most +%s on the worst frame of a segment", strconv.FormatFloat(max, 'f', -1, 64))
 	default:
 		return "off"
 	}
