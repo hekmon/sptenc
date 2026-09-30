@@ -58,10 +58,13 @@ func main() {
 			"  3. Re-encodes at a lower QP if any threshold is not met.\n" +
 			"  4. Merges all validated segments into the final output file.\n" +
 			"  5. Embeds the final VMAF results as metadata tags.\n\n" +
-			"TRADE-OFF\n" +
-			"Every segment meets the target VMAF profile at the highest QP (smallest size) that passes,\n" +
-			"but encoding takes significantly longer than a standard single-pass encode\n" +
-			"because multiple QP candidates are tested per segment.\n\n" +
+			"TIME AND FILE SIZE\n" +
+			"Every segment meets the target VMAF profile at the highest QP (smallest size) that passes.\n" +
+			"Several QP candidates are encoded and measured per segment, where a standard encode makes a\n" +
+			"single pass. The floor is the same with every encoder, and the encoder sets the time and the\n" +
+			"size: a CPU encoder makes the smallest file, a GPU encoder a larger one in less time, how much\n" +
+			"larger depending on the GPU encoder and on the content (see MANUAL.md, Encoders). Several\n" +
+			"segments can be searched at once (--concurrent-segments), for the same output.\n\n" +
 			"This is not the same as a single CRF pass followed by a whole-file VMAF check.\n" +
 			"That approach only validates an average: one complex scene in an otherwise steady movie\n" +
 			"can be destroyed while the overall result still looks acceptable. sptenc\n" +
