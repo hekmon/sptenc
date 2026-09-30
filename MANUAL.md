@@ -33,7 +33,7 @@ When using a pre-segmented directory, `--original-file` (alias `-f`) is **requir
 
 ## Disk space
 
-sptenc cuts and measures a lossless copy of the video, the master (FFV1 on 10 bits, see [Base ffmpeg encode options](#base-ffmpeg-encode-options)), and that copy is large. Measured on two 1080p 8-bit Blu-ray remuxes:
+sptenc cuts and measures a lossless copy of the video made of intra frames only, the master (FFV1 on 10 bits, see [Base ffmpeg encode options](#base-ffmpeg-encode-options)), and that copy is large: where a source is usually lossy and stores most of its frames as their differences from neighbouring ones, the master keeps every frame without loss and compresses each one on its own, which lets sptenc cut it at any frame. Measured on two 1080p 8-bit Blu-ray remuxes:
 
 | Source | Source file | Master | Master per hour |
 |---|---|---|---|
