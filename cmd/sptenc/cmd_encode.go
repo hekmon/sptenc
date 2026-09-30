@@ -72,7 +72,8 @@ var encodeCommand = &cli.Command{
 		"second one is time saved, so sptenc takes it by itself whenever it knows it can:\n" +
 		"  * A hardware encoder (" + string(ffmpeg.HEVCEncoderNVEnc) + ", " + string(ffmpeg.HEVCEncoderVAAPI) + ", " + string(ffmpeg.HEVCEncoderD3D12VA) + ", " + string(ffmpeg.HEVCEncoderVideoToolbox) + ",\n" +
 		"    " + string(ffmpeg.AV1EncoderNVEnc) + ", " + string(ffmpeg.AV1EncoderVAAPI) + ") decodes with the same GPU. Nothing to set. Fast: the right choice\n" +
-		"    to try VMAF profiles.\n" +
+		"    to try VMAF profiles, and a final file meeting the same floor, larger than a CPU encoder's\n" +
+		"    by an amount that depends on the GPU encoder and on the content (see MANUAL.md, Encoders).\n" +
 		"  * A CPU encoder (" + string(ffmpeg.HEVCEncoderLibx265) + ", " + string(ffmpeg.AV1EncoderSVTAV1) + ") gives the smallest file, and the CPU is what it has.\n" +
 		"    If there is a GPU in the machine anyway, an integrated one or Apple silicon included, hand\n" +
 		"    it the decoding: --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD on Linux), --" + d3d12DecFlagName + "\n" +

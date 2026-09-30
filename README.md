@@ -36,7 +36,7 @@ Coming from Av1an or CRF with VMAF spot checks? See [how sptenc compares](MANUAL
 - 🎬 **Scene-aware segmentation** - Segments are cut on scene changes and each one must pass the floor on its own: a bad scene can not hide in the average of the whole file. The whole-file VMAF computed at the end is recorded in the output, it is not the gate
 - 📊 **Multi-metric validation** - Combine mean, harmonic mean, median, percentiles (P1/P5/P10/P25) and worst frame; every enabled threshold must pass
 - 🧠 **Adaptive QP search** - Each segment converges on the highest QP that still passes in a few attempts, and stats kept from previous runs make the next ones start closer (see [Adaptive QP Search](MANUAL.md#adaptive-qp-search))
-- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox. Prototype a VMAF profile fast on the GPU and encode the final file small on the CPU, or keep the GPU encode when time matters more than size: the CPU saved 3% over NVENC, 17% over an Intel iGPU and 23% over an Apple M4 Max on the episode measured, and the floor is proven the same way (see [Encoders](MANUAL.md#encoders))
+- ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox, the floor proven the same way with each. Keep the GPU encode as the final file, or encode the final file on the CPU for a smaller one: the CPU saved 3% over NVENC, 17% over an Intel iGPU and 23% over an Apple M4 Max on the episode measured. The GPU is also the fast way to try a VMAF profile (see [Encoders](MANUAL.md#encoders))
 - 🚀 **Hardware acceleration wherever it helps** - GPU decoding even alongside a CPU encoder and several segments searched in parallel: same output, less time. VMAF itself runs on the CPU: the v1 models have no GPU implementation (see [why](MANUAL.md#vmaf-runs-on-the-cpu))
 - 🔬 **Automatic scene threshold search** - `batchsearch` tries several scene detection thresholds and keeps the one that produces the smallest passing file
 - 📋 **A file that remembers** - The output's tags record how it was made and what it scored: the whole-file VMAF and banding, the model and the thresholds, the encoder and its preset, the QP statistics and the number of best effort segments (see [Metadata tags](MANUAL.md#metadata-tags))
@@ -92,17 +92,20 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 ./sptenc encode video.mkv output.mkv --vmaf-model vmaf_v1.0.16_1d5h_2160
 ```
 
-### Fast VMAF profile prototyping with NVENC on the second GPU
+### Encode on an NVIDIA GPU
 ```bash
-./sptenc encode video.mkv output.mkv --encoder hevc_nvenc --nvidia-gpu-index 1 --vmaf-hmean 93
-# Once happy with the profile, re-run with the default libx265 for a smaller file, or keep this one
+# The same floor as with libx265, in less time and a larger file, and the fast way to try a VMAF
+# profile. -C searches several segments at a time: raise it until the CPU, which still decodes
+# the lossless intermediate and computes VMAF, is saturated
+./sptenc encode video.mkv output.mkv --encoder hevc_nvenc -C 3 --vmaf-hmean 93
 ```
 
 ### CPU encode with the GPU decoding on the side
 ```bash
 # libx265 runs on the CPU: the source and the encoded segments are decoded by NVDEC instead (a
-# hardware encoder does this by itself), only the lossless intermediate stays decoded by the CPU
-./sptenc encode video.mkv output.mkv --nvdec --vmaf-hmean 93
+# hardware encoder does this by itself), only the lossless intermediate stays decoded by the CPU.
+# A single encode does not keep a many-core CPU busy: 2 or 3 segments at a time encode faster
+./sptenc encode video.mkv output.mkv --nvdec -C 2 --vmaf-hmean 93
 ```
 
 ### Pre-segmented directory
@@ -127,10 +130,11 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 ### Search for the threshold that yields the smallest passing file
 ```bash
 # Fast search on GPU: the output is the best candidate, encoded by the GPU encoder
-./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-hmean 93
+./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc -C 3 --vmaf-hmean 93
 # Same search, but once the best threshold is found the file is re-encoded with the equivalent
-# CPU encoder to shrink it even further (one run: no need to run the search first)
-./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc --vmaf-hmean 93 --final-encode
+# CPU encoder, 2 segments at a time, for a smaller file (one run: no need to run the search first)
+./sptenc batchsearch video.mkv output.mkv --encoder hevc_nvenc -C 3 --vmaf-hmean 93 \
+    --final-encode --final-concurrent-segments 2
 ```
 
 ### Manual pipeline (master → split → encode)
