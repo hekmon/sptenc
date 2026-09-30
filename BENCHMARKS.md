@@ -46,7 +46,7 @@ The v0.6.1 runs are sptenc v0.1.0. "v1 original" gates on the score of `vmaf_v1.
 | Fidelity at 95 | 4440.9 MiB | +163% | 19.9 | 3.67 | 0 | 96.39 | 94.51 | 95.42 |
 | Fidelity at 93, AQ off: the default | 1820.4 MiB | +8% | 20.7 | 3.78 | 0 | 95.14 | 92.11 | 93.37 |
 
-The default of v0.2.0, fidelity at 93 with the CAMBI gate at a mean of 1, gave the output of fidelity at 93 on both contents with AQ on, packet for packet: the gate lowered no segment. With AQ off, it lowered none either (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)).
+The default of v0.2.0, fidelity at 93 with the CAMBI gate at a mean of 1, gave the output of fidelity at 93 on both contents with AQ on, packet for packet: the gate lowered no segment. With AQ off, it lowered none either (see [NVENC adaptive quantization](#nvenc-adaptive-quantization)). At the default, the video stream averages 0.95 Mb/s on the episode and 2.52 Mb/s on the film.
 
 Per segment, at 93:
 - **v1 original against v0.1.0:** v1 lowered the QP of 153 segments out of 163 on the episode (by up to 12) and raised it on 7, of 216 out of 225 on the film (by up to 11) and raised it on one. Most lost 2 to 5 QP (69% of the episode's segments, 80% of the film's), about 3 on average on both. The segments that lost exactly 3 grew 1.44 times on the episode, 1.93 times on the film.
@@ -56,6 +56,20 @@ Per segment, at 93:
 At 95, v0 scores 95 or more the segments of fidelity holding 65.1% of the episode's frames (117 segments out of 163) and 93.8% of the film's (208 out of 225).
 
 The master profile of the manual, a mean of 99 and a minimum of 94, estimated on the 20 segments encoded every 2 QPs from 0 to 40 for [the banding survey](#sources-against-themselves), fidelity's harmonic mean standing for its mean (it is never higher): at the highest QP reaching 99, the worst frame is at 95.1 to 98.6 on 19 segments, and at 91.7 on the last one, which a minimum of 93 takes 2 QPs lower and one of 94 4 QPs lower. Over the 20 segments, a minimum of 93 adds 0.7% to the size a mean of 99 gives alone, one of 94 1.7%. At those QPs, they add 0.009 of banding at most on average over their frames (0.78 on the worst frame): no CAMBI mean threshold from 0.1 to 1 lowers any of them (NVENC ran with AQ on). With AQ off, the film segment that adds 0.80 at the default adds nothing from QP 14 down, and this profile keeps QP 8 for it. On the [smooth gradients](#the-cambi-gate-on-smooth-gradients), a mean of 0.25 takes the `hevc_nvenc` ramp from QP 19 (0.39) to 18 (0.24), where 0.5 keeps 19, and both take the `libx265` clean sky, which adds 1.12 at QP 14, down to QP 8 (0.06, 1.11 times the size, sampled every 2 QPs); the grainy sky and the vignette reach fidelity 99 at no QP, with `hevc_nvenc` as with `libx265`.
+
+The small files profile of the manual, a p25 of 88 and a p1 of 82 with the harmonic mean off, on the same 20 segments, encoded with sptenc's `hevc_nvenc` arguments (AQ off) at every QP from 12 to 46 through its encoder adapter, each encode scored as sptenc scores it. The QP a profile keeps is the highest passing all its gates; the CAMBI gate, at a mean of 1, then lowered none. Data summed over the 20 segments, against the default; scores averaged over the segments, at the QPs kept:
+
+| Profile | Data | Mean QP | Harmonic mean | p1 | Worst frame |
+|---|---|---|---|---|---|
+| Harmonic mean 93, the default | 1 | 23.20 | 93.47 | 87.47 | 87.10 |
+| p25 88 + p1 82 | 0.67 | 26.05 | 90.90 | 84.35 | 83.97 |
+| p25 88 alone | 0.62 | 26.50 | 90.44 | 83.48 | 82.97 |
+| p25 88 + worst frame 82 | 0.68 | 25.95 | 91.04 | 84.64 | 84.24 |
+| Harmonic mean 90 | 0.63 | 26.25 | 90.61 | 83.41 | 82.95 |
+| Harmonic mean 88 | 0.52 | 27.90 | 88.75 | 80.80 | 80.32 |
+| Harmonic mean 85 | 0.39 | 30.20 | 85.75 | 76.44 | 75.75 |
+
+The p1 lowered the QP of 4 segments, by 2 or 3, for 7% more data than the p25 alone. On two of them, the default keeps a higher QP, its harmonic mean passing with the worst frames far below: segment 73 of the episode at QP 27 (harmonic mean 93.23, p1 77.90), where the small files profile keeps QP 24 (p1 85.21, 1.37 times the default's size), and segment 114 at QP 30 (93.59, p1 81.00), where it keeps QP 29 (p1 82.58) with its worst frame at 80.82: a worst frame threshold of 82 would take it one QP lower.
 
 ## Search time
 
