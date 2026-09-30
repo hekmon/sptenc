@@ -18,9 +18,9 @@ This approach gives each scene the highest QP, so the smallest size, that still 
 
 You probably don't need sptenc if you just want to shrink a video for your phone. Standard tools like HandBrake or ffmpeg with CRF are faster and perfectly fine for that.
 
-sptenc is built for workflows where you want the **smallest file size that still meets a VMAF floor you can prove**:
+sptenc is built for workflows where you want the **smallest file size that still meets a VMAF floor you can prove, scene by scene**:
 
-- **Archival & preservation** — You have a high-bitrate source or lossless master (or an expensive AI-upscaled restoration) and want to compress it without ever dropping below a VMAF floor you can prove.
+- **Archival & preservation** — You have a high-bitrate source or lossless master (or an expensive AI-upscaled restoration) and want to compress it without any scene dropping below a VMAF floor you can prove.
 - **Quality-per-bit optimization** — You target a specific visual fidelity at the smallest size and currently do manual CRF sweeps, screenshot comparisons, or test encodes to find the right settings. sptenc automates that search and writes the resulting VMAF scores into the output file.
 - **Large collection processing** — You process many files against a single, carefully tuned quality profile. sptenc treats that profile as a contract: every segment is encoded, measured, and corrected until it passes, without you checking scores by hand.
 - **NAS / media server optimization** — You maintain a personal library of high-bitrate remuxes and need to balance quality against storage costs. sptenc replaces manual CRF trial-and-error with a measurable guarantee, so you keep the quality that matters and reclaim the space that doesn't.
