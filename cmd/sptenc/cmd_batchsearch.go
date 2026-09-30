@@ -895,20 +895,20 @@ type batchStatus struct {
 	bestCandidateIndex    int // read by liveprogress render goroutine, written by main loop: see comment below
 	// results
 	encoded []string
-	sizes   []int64
+	sizes   []int64 // read by liveprogress render goroutine, written by main loop: see comment below
 	results []core.QPSearchResults
 	// line formating
-	currentCandidateStyle termenv.Style
-	bestCandidateStyle    termenv.Style
-	testedCandidateStyle  termenv.Style
-	futureCandidateStyle  termenv.Style
+	nonImprovingCandidateStyle termenv.Style
+	improvingCandidateStyle    termenv.Style
+	bestCandidateStyle         termenv.Style
+	futureCandidateStyle       termenv.Style
 	// liveprogress
 	candidatesLine *liveprogress.CustomLine
 	progressBar    *liveprogress.Bar
 	separatorLine  *liveprogress.CustomLine
 }
 
-// Data race on currentCandidateIndex / bestCandidateIndex:
+// Data race on currentCandidateIndex / bestCandidateIndex / sizes:
 // These fields are read by the liveprogress render goroutine and written by the
 // main loop without synchronization. This is intentional: the worst case is a
 // briefly stale UI frame (100 ms), which is invisible to the human eye and does
@@ -923,9 +923,9 @@ func (bs *batchStatus) Start() {
 	bs.results = make([]core.QPSearchResults, len(bs.candidates))
 	// Init styles
 	termenvProfile := liveprogress.GetTermProfile()
-	bs.currentCandidateStyle = termenvProfile.String().Underline()
+	bs.nonImprovingCandidateStyle = termenvProfile.String().CrossOut()
+	bs.improvingCandidateStyle = termenvProfile.String().Underline()
 	bs.bestCandidateStyle = termenvProfile.String().Bold()
-	bs.testedCandidateStyle = termenvProfile.String().CrossOut()
 	bs.futureCandidateStyle = termenvProfile.String().Faint()
 	// Plug to liveprogress
 	bs.candidatesLine = liveprogress.AddCustomLine(bs.line)
@@ -977,20 +977,39 @@ func (bs *batchStatus) Stop() {
 }
 
 func (bs *batchStatus) line() string {
+	return fmt.Sprintf(" Candidates | %s", bs.render(bs.nonImprovingCandidateStyle.Styled,
+		bs.improvingCandidateStyle.Styled, bs.bestCandidateStyle.Styled, bs.futureCandidateStyle.Styled))
+}
+
+// render returns the candidates as their line shows them, marked the way the live line of a
+// segment marks its QPs (see segmentCandidates.render): a candidate tested is underlined when its
+// file came out smaller than every file before it and struck otherwise (a strike: the ones after
+// the best are what --strikes counts), the one being tested is plain, the best so far is in bold
+// on top of its underline, and the ones not tested yet are faint. A mark does not change once set,
+// only the bold moves: a best beaten later stays underlined, as a QP that passed does when a higher
+// one passes, where striking it would tell it failed when its file was only larger.
+func (bs *batchStatus) render(nonImproving, improving, best, future func(string) string) string {
 	candidates := make([]string, len(bs.candidates))
+	var smallest int64 // the smallest file of the candidates before i
 	for i, candidate := range bs.candidates {
+		text := strconv.FormatFloat(candidate, 'f', -1, 64)
 		switch {
 		case i == bs.currentCandidateIndex:
-			candidates[i] = bs.currentCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
-		case i == bs.bestCandidateIndex:
-			candidates[i] = bs.bestCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
-		case i < bs.currentCandidateIndex:
-			candidates[i] = bs.testedCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
+			// being tested: plain
+		case i > bs.currentCandidateIndex:
+			text = future(text)
+		case i == 0 || bs.sizes[i] < smallest:
+			smallest = bs.sizes[i]
+			text = improving(text)
 		default:
-			candidates[i] = bs.futureCandidateStyle.Styled(strconv.FormatFloat(candidate, 'f', -1, 64))
+			text = nonImproving(text)
 		}
+		if i == bs.bestCandidateIndex && i < bs.currentCandidateIndex {
+			text = best(text)
+		}
+		candidates[i] = text
 	}
-	return fmt.Sprintf(" Candidates | %s", strings.Join(candidates, " "))
+	return strings.Join(candidates, " ")
 }
 
 // computePlateauToBest returns the longest run of consecutive non-improving
