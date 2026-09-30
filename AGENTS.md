@@ -4,9 +4,9 @@
 
 ## What this is
 
-`sptenc` is a **perceptual-quality, VMAF-driven video encoder** written in Go. It targets a specific niche: **archival/preservation workflows where provable VMAF floors matter more than encoding speed**.
+`sptenc` is a **perceptual-quality, VMAF-driven video encoder** written in Go. Its promise: **every scene of the output meets a VMAF floor, measured on the segments that end up in the file, at the smallest size that passes**. The promise is never traded for speed: no sampled frames, no probe standing in for the output, no cap on attempts. A change making sptenc faster by measuring less breaks it; speed is gained around the measurement (GPU encoders, hardware decoding, concurrent segments). The encoder sets the time and the size: on the episode of BENCHMARKS.md, `libx265` made a stream 3% smaller than `hevc_nvenc` for a search 3.2 times as long on the same machine, 17% smaller than `hevc_vaapi` and 23% smaller than `hevc_videotoolbox` (BENCHMARKS.md, Encoders). Archival is one of its uses, not the only one (README.md, Who is this for?).
 
-It is not a general-purpose ffmpeg wrapper, a bulk streaming prep tool, or a speed-oriented chunk encoder like Av1an. The tradeoffs are steep and intentional.
+It is not a general-purpose ffmpeg wrapper nor a streaming ladder builder. Av1an runs scenes in parallel, as sptenc can (`-C`), but aims probes at a score where sptenc holds a floor measured on the output (MANUAL.md, Compared to other approaches).
 
 ## The core concept
 
@@ -34,7 +34,7 @@ This is a **closed-loop control system**, not a script that runs ffmpeg in a loo
 
 - **`README.md`** — Overview, all commands, quick start.
 - **`MANUAL.md`** — QP-vs-CRF rationale, Av1an comparison, VMAF thresholds, encoder choice, cache system, GPU selection.
-- **`cmd/sptenc/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold before slow CPU final encodes. Includes the live progress UI, the pick of the smallest passing file and the `--strikes` early stop (the candidates themselves come from `searchCandidates` in `cmd/sptenc/helpers.go`, over `core.GetCandidates`).
+- **`cmd/sptenc/cmd_batchsearch.go`** — The **parameter discovery engine**, not a utility. GPU-accelerated sweeps to find the optimal scene detection threshold, whose best candidate is the output unless a CPU final encode follows (`--final-encode`). Includes the live progress UI, the pick of the smallest passing file and the `--strikes` early stop (the candidates themselves come from `searchCandidates` in `cmd/sptenc/helpers.go`, over `core.GetCandidates`).
 - **`core/interfaces.go`** — `SegmentEncoder` interface contract; changes here affect both `core/` and `pipeline/`.
 - **`core/qpsearch.go`** — Adaptive QP search algorithm. Statistical cache (mean/stddev) + Fritsch-Butland interpolation, converges in ~3–5 attempts per segment.
 - **`core/cambi.go`** — The CAMBI gate: the "at most" thresholds on the banding the encoder added, and the stage run once the VMAF search of a segment found its QP (`searchSegmentCAMBI`: one measure there, the walk down one QP at a time when it fails, the best effort). The caches learn the QP of the VMAF search, never the walked one (`QPSearchResults.VMAFSearchQPs`).
@@ -60,7 +60,7 @@ Every figure, wherever it appears, is measured or sourced, and a size comparison
 The search needs a dial that is deterministic and monotonic for a given segment: QP→VMAF is, which lets the interpolation converge in ~3–5 attempts per segment. CRF→VMAF is too (measured with libx265): "CRF is too noisy to be searched" was the documented reason for years and it is wrong, do not bring it back. Fidelity, the score sptenc gates on, never rose with the QP on 20 real segments. Two exceptions are measured: the model's original score on a source that is banded already, whose lowest QPs score below slightly higher ones (see the banded source point of "VMAF v1 by default, on the CPU"), and fidelity itself on smooth synthetic gradients costing a few hundred bytes per frame (BENCHMARKS.md, The CAMBI gate on smooth gradients), where the search still keeps a measured pass, maybe not the highest one.
 
 The actual reasons:
-- QP exists on every supported encoder, CRF does not (hardware encoders expose a constant quantizer or their own quality target). QP ranges, cache statistics and the GPU search → CPU final encode workflow are all built on that single dial.
+- QP exists on every supported encoder, CRF does not (hardware encoders expose a constant quantizer or their own quality target). QP ranges, cache statistics and `batchsearch --final-encode` (a GPU search, then the final encode on the CPU) are all built on that single dial.
 - CRF is a rate control moving bits with the encoder's own perceptual model, which is not VMAF. Here the scene splitter and the per-segment search decide where quality varies, against the metric the user chose, and a segment cut on scene changes (short scenes merged into a neighbor) leaves little for a rate control to adapt to.
 
 No claim is made about which one gives the smaller file at the same VMAF: it depends on the content. Switching the CPU encoders to CRF has been evaluated (file size needed to reach VMAF hmean 93 and 95, CRF relative to QP, three synthetic single-scene clips):
@@ -266,9 +266,9 @@ This means `core/` can be unit-tested with mocked encoders that return predeterm
 ## Correct frame of reference
 
 When evaluating changes, compare against:
-- **Av1an** — targets parallelism and speed; sptenc targets quality certainty
+- **Av1an** — both run scenes in parallel (sptenc with `-C`); Av1an aims a limited number of probes at a score (by default encoded with its own fast settings, the chunk then encoded again without being measured), sptenc holds a floor measured on the segments of the output, with no cap on attempts
 - **Single-pass CRF + VMAF spot-checking** — sptenc guarantees per-segment floors; CRF guarantees averages
-- **Commercial archival solutions** — compare feature sets and quality guarantees; sptenc targets the same niche with an open-source, locally-run model
+- **Commercial archival solutions** — compare feature sets and quality guarantees for archival, one of sptenc's uses, where sptenc offers an open-source, locally-run model
 
 ## Final note
 
