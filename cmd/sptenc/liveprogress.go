@@ -47,6 +47,25 @@ var batchProgressRunes = liveprogress.BarRunes{
 	RightEnd: '❯', // https://www.compart.com/unicode/U+276F
 }
 
+// formatSpeed writes the speed ffmpeg reports with the precision ffmpeg gives it, three significant
+// digits (its progress reads 0.853x, 1.62x, 24.1x, 382x), keeping the trailing zeros ffmpeg drops: a
+// steady speed reported as 24x then 24.1x would change the width of the bar's line at every report.
+// The width then stays the same from 1x to 99.9x. A fixed number of decimals would drop a digit
+// ffmpeg gave (1.62x as 1.6x with one) or invent one (24.1x as 24.10x with two). From 1000x on
+// ffmpeg writes an exponent (1.25e+04x), written out here (12500x).
+func formatSpeed(speed float64) string {
+	var decimals int
+	switch {
+	case speed < 1:
+		decimals = 3
+	case speed < 10:
+		decimals = 2
+	case speed < 100:
+		decimals = 1
+	}
+	return strconv.FormatFloat(speed, 'f', decimals, 64)
+}
+
 /*
  * Master
  */
@@ -98,7 +117,7 @@ func liveCountFrames(ctx context.Context, path string, codec ffmpeg.CodecName, d
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | %d frames | speed: %sx", currentStats.CurrentFrame, strconv.FormatFloat(currentStats.Speed, 'f', -1, 64))
+			return fmt.Sprintf(" left | %d frames | speed: %sx", currentStats.CurrentFrame, formatSpeed(currentStats.Speed))
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
@@ -192,7 +211,7 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | speed: %sx", strconv.FormatFloat(currentStats.Speed, 'f', -1, 64))
+			return fmt.Sprintf(" left | speed: %sx", formatSpeed(currentStats.Speed))
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
@@ -240,7 +259,7 @@ func liveSplitScenes(ctx context.Context, path, outputDir string, totalDuration 
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | speed: %sx", strconv.FormatFloat(currentStats.Speed, 'f', -1, 64))
+			return fmt.Sprintf(" left | speed: %sx", formatSpeed(currentStats.Speed))
 		}),
 	)
 	defer liveprogress.RemoveBar(bar)
@@ -290,7 +309,7 @@ func liveConcatDuration(ctx context.Context, workingDir, outputFile string, segm
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | speed: %sx", strconv.FormatFloat(speed, 'f', -1, 64))
+			return fmt.Sprintf(" left | speed: %sx", formatSpeed(speed))
 		}),
 	)
 	defer liveprogress.RemoveBar(concatBar)
@@ -895,7 +914,7 @@ func liveRemuxSwapVideo(ctx context.Context, originalFile, newVideoFile, outputF
 		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
 		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
 		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
-			return fmt.Sprintf(" left | speed: %sx", strconv.FormatFloat(currentStats.Speed, 'f', -1, 64))
+			return fmt.Sprintf(" left | speed: %sx", formatSpeed(currentStats.Speed))
 		}),
 	)
 	defer liveprogress.RemoveBar(remuxBar)

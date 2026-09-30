@@ -71,3 +71,24 @@ func TestSegmentDoneLine(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatSpeed feeds the speeds as ffmpeg wrote them in its progress: three significant digits,
+// trailing zeros dropped (2x, 24x), an exponent from 1000x.
+func TestFormatSpeed(t *testing.T) {
+	for _, tc := range []struct {
+		speed float64
+		want  string
+	}{
+		{0.853, "0.853"},
+		{1.62, "1.62"},
+		{2, "2.00"},
+		{24, "24.0"},
+		{24.1, "24.1"},
+		{382, "382"},
+		{1.25e+04, "12500"},
+	} {
+		if got := formatSpeed(tc.speed); got != tc.want {
+			t.Errorf("%v: want %q, got %q", tc.speed, tc.want, got)
+		}
+	}
+}
