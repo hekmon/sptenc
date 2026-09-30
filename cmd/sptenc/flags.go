@@ -189,7 +189,7 @@ const (
 	sceneThresholdDefault = 10.0 // single-threshold commands: encode, split
 	minThresholdDefault   = 8.0  // search floor: batchsearch, thresholds
 	maxThresholdFlagName  = "max-threshold"
-	maxThresholdDefault   = 50.0
+	maxThresholdDefault   = 40.0
 	maxCandidatesFlagName = "max-candidates"
 	maxCandidatesDefault  = 20
 	minDropFlagName       = "min-drop"
