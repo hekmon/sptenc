@@ -365,6 +365,7 @@ type LiveQPSearch struct {
 	segmentsCandidates       []segmentCandidates
 	segmentsCandidatesAccess []sync.Mutex
 	failedCandidateStyle     termenv.Style
+	passedCandidateStyle     termenv.Style
 	vmafQPCandidateStyle     termenv.Style
 	// File analysis (the bar is in time, the frames counted so far are shown next to it)
 	analysisProgressBars []*liveprogress.Bar
@@ -382,6 +383,7 @@ func (to *LiveQPSearch) Start(totalSegments int, globalDuration time.Duration) {
 	to.segmentsCandidatesAccess = make([]sync.Mutex, to.Concurrency)
 	termenvProfile := liveprogress.GetTermProfile()
 	to.failedCandidateStyle = termenvProfile.String().CrossOut()
+	to.passedCandidateStyle = termenvProfile.String().Underline()
 	to.vmafQPCandidateStyle = termenvProfile.String().Bold()
 	to.analysisProgressBars = make([]*liveprogress.Bar, to.Concurrency)
 	to.analysisFrames = make([]atomic.Int64, to.Concurrency)
@@ -484,7 +486,8 @@ func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath s
 	}
 	to.segmentsStatusLine[workerID] = liveprogress.AddCustomLine(func() string {
 		to.segmentsCandidatesAccess[workerID].Lock()
-		candidates := to.segmentsCandidates[workerID].render(to.failedCandidateStyle.Styled, to.vmafQPCandidateStyle.Styled)
+		candidates := to.segmentsCandidates[workerID].render(to.failedCandidateStyle.Styled,
+			to.passedCandidateStyle.Styled, to.vmafQPCandidateStyle.Styled)
 		to.segmentsCandidatesAccess[workerID].Unlock()
 		if candidates == "" {
 			// first step is to analyse source files for total number of frames, no candidate yet
@@ -578,13 +581,14 @@ func markCandidate(candidates []liveCandidate, qp int, passed bool) {
 	}
 }
 
-// render returns the candidates as the live line shows them: the QPs that failed struck, the ones
-// that passed or are being measured plain, the QP the VMAF search found in bold, and the walk of
-// the CAMBI stage after a "· CAMBI" label, alone while the banding of that QP is being measured.
-func (sc segmentCandidates) render(failed, vmafQP func(string) string) string {
+// render returns the candidates as the live line shows them: the QPs measured struck when they
+// failed and underlined when they passed, the one being measured plain, the QP the VMAF search
+// found in bold on top of its mark (struck for a VMAF best effort), and the walk of the CAMBI stage
+// after a "· CAMBI" label, alone while the banding of that QP is being measured.
+func (sc segmentCandidates) render(failed, passed, vmafQP func(string) string) string {
 	parts := make([]string, 0, len(sc.search)+1+len(sc.walk))
 	for _, candidate := range sc.search {
-		text := candidate.text(failed)
+		text := candidate.text(failed, passed)
 		if candidate.qp == sc.vmafQP {
 			text = vmafQP(text)
 		}
@@ -593,18 +597,23 @@ func (sc segmentCandidates) render(failed, vmafQP func(string) string) string {
 	if sc.vmafQP >= 0 {
 		parts = append(parts, "· CAMBI")
 		for _, candidate := range sc.walk {
-			parts = append(parts, candidate.text(failed))
+			parts = append(parts, candidate.text(failed, passed))
 		}
 	}
 	return strings.Join(parts, " ")
 }
 
-// text returns the QP of the candidate, struck when it failed.
-func (lc liveCandidate) text(failed func(string) string) string {
-	if lc.done && !lc.passed {
+// text returns the QP of the candidate, struck when it failed, underlined when it passed, plain
+// while it is being measured.
+func (lc liveCandidate) text(failed, passed func(string) string) string {
+	switch {
+	case !lc.done:
+		return strconv.Itoa(lc.qp)
+	case lc.passed:
+		return passed(strconv.Itoa(lc.qp))
+	default:
 		return failed(strconv.Itoa(lc.qp))
 	}
-	return strconv.Itoa(lc.qp)
 }
 
 func (to *LiveQPSearch) OnSegmentAnalysisStart(workerID int, duration time.Duration) {

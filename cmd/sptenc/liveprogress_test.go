@@ -7,37 +7,40 @@ import (
 )
 
 // TestSegmentCandidatesRender follows the live line of a segment through its search, with marks
-// in place of the terminal styles: ~struck~ for a failed QP, *bold* for the QP of the VMAF search.
+// in place of the terminal styles: ~struck~ for a failed QP, _underlined_ for a passed one, *bold*
+// for the QP of the VMAF search.
 func TestSegmentCandidatesRender(t *testing.T) {
 	failed := func(s string) string { return "~" + s + "~" }
+	passed := func(s string) string { return "_" + s + "_" }
 	vmafQP := func(s string) string { return "*" + s + "*" }
 	var candidates segmentCandidates
 	candidates.reset()
 	expect := func(step, want string) {
 		t.Helper()
-		if got := candidates.render(failed, vmafQP); got != want {
+		if got := candidates.render(failed, passed, vmafQP); got != want {
 			t.Errorf("%s: want %q, got %q", step, want, got)
 		}
 	}
 	expect("counting the frames", "")
-	search := func(qp int, passed bool) {
+	search := func(qp int, pass bool, encoding string) {
+		t.Helper()
 		candidates.search = append(candidates.search, liveCandidate{qp: qp})
-		expect("encoding", candidates.render(failed, vmafQP)) // being measured: plain
-		markCandidate(candidates.search, qp, passed)
+		expect("encoding", encoding) // being measured: plain
+		markCandidate(candidates.search, qp, pass)
 	}
-	search(26, false)
-	search(13, true)
-	search(14, false)
-	expect("the VMAF search", "~26~ 13 ~14~")
+	search(26, false, "26")
+	search(13, true, "~26~ 13")
+	search(14, false, "~26~ _13_ 14")
+	expect("the VMAF search", "~26~ _13_ ~14~")
 	// the CAMBI stage measures the banding of the QP found
 	candidates.vmafQP = 13
-	expect("the banding of the QP found", "~26~ *13* ~14~ · CAMBI")
+	expect("the banding of the QP found", "~26~ *_13_* ~14~ · CAMBI")
 	candidates.walk = append(candidates.walk, liveCandidate{qp: 12})
-	expect("the walk", "~26~ *13* ~14~ · CAMBI 12")
+	expect("the walk", "~26~ *_13_* ~14~ · CAMBI 12")
 	markCandidate(candidates.walk, 12, false)
 	candidates.walk = append(candidates.walk, liveCandidate{qp: 11})
 	markCandidate(candidates.walk, 11, true)
-	expect("the walk done", "~26~ *13* ~14~ · CAMBI ~12~ 11")
+	expect("the walk done", "~26~ *_13_* ~14~ · CAMBI ~12~ _11_")
 	// a VMAF best effort failed, and is the QP found all the same
 	candidates.reset()
 	candidates.search = append(candidates.search, liveCandidate{qp: 0, done: true})
