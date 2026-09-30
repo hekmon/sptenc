@@ -489,14 +489,14 @@ func (to *LiveQPSearch) OnSegmentStart(workerID, segmentIndex int, segmentPath s
 		if candidates == "" {
 			// first step is to analyse source files for total number of frames, no candidate yet
 			if to.Concurrency > 1 {
-				return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP...", workerID, segmentIndex+1)
+				return fmt.Sprintf(" [#%d]    Segment | %d - Searching for optimal QP...", workerID, segmentIndex+1)
 			}
-			return fmt.Sprintf("    Segment | %d - Searching for best QP...", segmentIndex+1)
+			return fmt.Sprintf("    Segment | %d - Searching for optimal QP...", segmentIndex+1)
 		}
 		if to.Concurrency > 1 {
-			return fmt.Sprintf(" [#%d]    Segment | %d - Searching for best QP: %s", workerID, segmentIndex+1, candidates)
+			return fmt.Sprintf(" [#%d]    Segment | %d - Searching for optimal QP: %s", workerID, segmentIndex+1, candidates)
 		}
-		return fmt.Sprintf("    Segment | %d - Searching for best QP: %s", segmentIndex+1, candidates)
+		return fmt.Sprintf("    Segment | %d - Searching for optimal QP: %s", segmentIndex+1, candidates)
 	})
 }
 
