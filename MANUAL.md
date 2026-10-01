@@ -361,7 +361,7 @@ Every stream of the source other than video (audio, subtitles, attachments, data
 
 **For small files, shrinking the audio is up to you.** The lossless tracks of a Blu-ray remux can outweigh a video encoded with the [small files profile](#recommended-values). Dropping the tracks you do not need and keeping the lossy core of the others re-encodes nothing. Do it on sptenc's output with mkvmerge, which comes with MKVToolNix: it keeps sptenc's tags and rewrites the statistics of the tracks.
 - **DTS-HD**: `--reduce-to-core` keeps its DTS core (ffmpeg's `dca_core` bitstream filter does the same).
-- **TrueHD**: the AC-3 core some TrueHD tracks embed is a track of its own in a file muxed by mkvmerge, when the remux kept it: keep that one and drop the TrueHD. ffmpeg's `truehd_core` bitstream filter is something else: it keeps the TrueHD, without its Atmos data.
+- **TrueHD**: unlike DTS-HD, it carries no lossy core in its own stream. The AC-3 core some TrueHD sources embed is a separate stream, which remuxing tools list as a track of its own (MakeMKV and mkvmerge do): a remux holds it if whoever made it kept it, `mkvmerge -i` lists the tracks of a file. Keep that AC-3 track if the remux has one, and drop the TrueHD. If it has none, nothing extracts one from the TrueHD: only re-encoding gives a lossy track. ffmpeg's `truehd_core` bitstream filter is something else: it keeps the TrueHD, without its Atmos data.
 
 Re-encoding the audio is the step beyond, and its quality is nothing sptenc measures.
 
