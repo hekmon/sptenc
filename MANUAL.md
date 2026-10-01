@@ -359,6 +359,12 @@ The output is always Matroska (`.mkv`) because it is the most permissive contain
 
 Every stream of the source other than video (audio, subtitles, attachments, data) is copied into the output. When every audio track is 16 or 24-bit little-endian PCM (`pcm_s16le`, `pcm_s24le`, as in MKV remuxes of Blu-ray discs), they are losslessly compressed to FLAC; otherwise audio is copied as is.
 
+**For small files, shrinking the audio is up to you.** The lossless tracks of a Blu-ray remux can outweigh a video encoded with the [small files profile](#recommended-values). Dropping the tracks you do not need and keeping the lossy core of the others re-encodes nothing. Do it on sptenc's output with mkvmerge, which comes with MKVToolNix: it keeps sptenc's tags and rewrites the statistics of the tracks.
+- **DTS-HD**: `--reduce-to-core` keeps its DTS core (ffmpeg's `dca_core` bitstream filter does the same).
+- **TrueHD**: the AC-3 core some TrueHD tracks embed is a track of its own in a file muxed by mkvmerge, when the remux kept it: keep that one and drop the TrueHD. ffmpeg's `truehd_core` bitstream filter is something else: it keeps the TrueHD, without its Atmos data.
+
+Re-encoding the audio is the step beyond, and its quality is nothing sptenc measures.
+
 At the end, the whole output is scored against its source: every statistic of the gated score (fidelity, or the original score with `--vmaf-original`) and the harmonic mean of the other one, with a model that has a banding feature, and the banding when the [CAMBI gate](#fidelity-and-banding) is on: added by the encoder (mean and worst frame), in the source and in the encode (means). They are printed and written in the [tags](#metadata-tags).
 
 Color metadata (`colorspace`, `color_trc` and `color_primaries`) is probed from the source and re-injected into the output container. The color range (`color_range`) is the exception: the output declares the range of the encoded video, and a full range ("PC") source comes out in limited range ("TV"), converted when the master is written (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)). Tested with libx265, hevc_nvenc, libsvtav1 and av1_nvenc, on 8-bit and 10-bit full range sources. HDR metadata handling is still being validated.
