@@ -71,6 +71,17 @@ The small files profile of the manual, a p25 of 88 and a p1 of 82 with the harmo
 
 The p1 lowered the QP of 4 segments, by 2 or 3, for 7% more data than the p25 alone. On two of them, the default keeps a higher QP, its harmonic mean passing with the worst frames far below: segment 73 of the episode at QP 27 (harmonic mean 93.23, p1 77.90), where the small files profile keeps QP 24 (p1 85.21, 1.37 times the default's size), and segment 114 at QP 30 (93.59, p1 81.00), where it keeps QP 29 (p1 82.58) with its worst frame at 80.82: a worst frame threshold of 82 would take it one QP lower.
 
+The same profile on the two whole contents, run as the default was (`hevc_nvenc -C 6`, the same pre-cut segments, a cold cache). The whole run counts everything after the segments: the search, the merges, the frame counts, the final VMAF and the remux.
+
+| Content, profile | Video stream | Bitrate | Mean QP | Attempts per segment | Search | Whole run | Fidelity: harmonic mean, p1, worst frame | Banding added: mean, worst frame |
+|---|---|---|---|---|---|---|---|---|
+| Episode, the default | 176.5 MiB | 0.95 Mb/s | 24.4 | 3.92 | 19m10s | 27m37s | 93.43, 86.36, 54.74 | 0.0038, 3.04 |
+| Episode, small files | 144.9 MiB | 0.78 Mb/s | 27.3 | 3.94 | 19m37s | 28m18s | 90.98, 84.30, 67.77 | 0.0025, 2.35 |
+| Film, the default | 1820.4 MiB | 2.52 Mb/s | 20.7 | 3.78 | 1h13m41s | 1h50m2s | 93.37, 84.21, 53.52 | 0.0138, 6.30 |
+| Film, small files | 1186.1 MiB | 1.64 Mb/s | 23.0 | 3.64 | 1h8m3s | 1h43m23s | 91.36, 83.24, 75.83 | 0.0402, 5.01 |
+
+The small files profile made the video 18% smaller on the episode and 35% on the film. Against the default, it kept a higher QP on 144 of the episode's 163 segments and 200 of the film's 225 (3.3 and 3.4 higher on average), the same on 8 and 18, and a lower one on 11 and 7: at the default's QP, those fail a p1 of 82 or a p25 of 88, which the default's harmonic mean let through, the end credits of the film among them (QP 28 against 37). The worst frame of each file rose, from 54.74 to 67.77 and from 53.52 to 75.83. The CAMBI gate lowered 5 segments of the film by 2 to 4 QPs (11 more encodes), where it lowered none at the default: segments 136 to 142, around the one adding 0.80 at the default (see [The default on the two contents](#the-default-on-the-two-contents)), the higher QPs adding more.
+
 ## Search time
 
 The search alone, wall clock, `hevc_nvenc -C 6`, harmonic mean 93, AQ on but in the last row:
