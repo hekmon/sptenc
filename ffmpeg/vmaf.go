@@ -616,9 +616,11 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
-	// Hardware-accelerated decoding, when requested and when the codec allows it
+	// Hardware-accelerated decoding, when requested and when the codec allows it, the pictures handed
+	// back in the pixel format of a software decode (see softwarePixelFormat)
 	distortedHW := HWDecoderConfig{}
 	referenceHW := HWDecoderConfig{}
+	var distortedFormat, referenceFormat string
 	if config.NVDec || config.VAAPIDec || config.D3D12Dec || config.VideoToolboxDec {
 		distortedHW = SelectCompatibleDecoders(ctx, config.DistortedPath,
 			config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
@@ -628,6 +630,8 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 			config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
 			config.NVDevice, config.VAAPIDevice, config.D3D12Device,
 		)
+		distortedHW, distortedFormat = softwarePixelFormat(ctx, config.DistortedPath, distortedHW)
+		referenceHW, referenceFormat = softwarePixelFormat(ctx, config.ReferencePath, referenceHW)
 	}
 	//// distorted file first
 	args = appendHWAccelArgs(args, distortedHW)
@@ -642,8 +646,11 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.ReferencePath,
 	)
 	//// vmaf filter
-	inputFilters := func(rgbToYUV YUVMatrix, colorFilter string) string {
+	inputFilters := func(pixelFormat string, rgbToYUV YUVMatrix, colorFilter string) string {
 		filters := "setpts=PTS-STARTPTS"
+		if pixelFormat != "" {
+			filters += ",format=" + pixelFormat
+		}
 		if rgbToYUV != "" {
 			filters += "," + RGBToYUVFilter(rgbToYUV)
 		}
@@ -654,8 +661,8 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	}
 	args = append(args,
 		"-filter_complex",
-		"[0:v]"+inputFilters(config.DistortedRGBToYUV, "")+"[distorted];[1:v]"+
-			inputFilters(config.ReferenceRGBToYUV, config.ReferenceColorFilter)+
+		"[0:v]"+inputFilters(distortedFormat, config.DistortedRGBToYUV, "")+"[distorted];[1:v]"+
+			inputFilters(referenceFormat, config.ReferenceRGBToYUV, config.ReferenceColorFilter)+
 			"[reference];[distorted][reference]"+pass.filter(config.ReportPath, NbThreadsToUse),
 	)
 	//// no ffmpeg output
@@ -734,6 +741,36 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 //     picture needs a matrix to become YUV, and relabelled, the matrix ffmpeg would pick is the
 //     unspecified one, BT.601's coefficients.
 const vmafSameMatrix = "setparams=colorspace=unknown"
+
+// softwarePixelFormat returns the pixel format a software decode gives the pictures of a file, for
+// an input of a VMAF pass decoded by hardware: dec as it is, and the format its pictures must be
+// handed back in. A file that can not be probed for it is decoded in software (dec disabled). For a
+// file decoded in software, nothing is probed nor returned.
+//
+// # WHY
+//
+// A hardware decoder hands its pictures back in its own layout, p010le or nv12, which the libvmaf
+// filter does not take: ffmpeg converts that input as well, and its format negotiation can then
+// convert it into the format of the other input rather than the other input into its own, which is
+// what it does when that input comes from a software decode. Measured with NVDEC on the encodes of
+// hevc_nvenc, in the final VMAF of encode: the encodes of an 8-bit 4:2:0 source were reduced to 8
+// bits (fidelity within 0.03 of the search frame by frame, the banding added read 0.68 on average
+// where the same pass decoded in software read 0.46), those of a full range 4:4:4 source were
+// brought to 4:4:4 and full range (up to 1.61 from the search on a frame). Repacked into the pixel
+// format of a software decode, which loses nothing, the final VMAF matched the search frame by
+// frame in both cases.
+func softwarePixelFormat(ctx context.Context, path string, dec HWDecoderConfig) (HWDecoderConfig, string) {
+	if !dec.Enabled() {
+		return dec, ""
+	}
+	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: path}); err == nil {
+		if video := stats.VideoTrack(); video != nil && video.PixFmt != "" {
+			return dec, video.PixFmt
+		}
+	}
+	dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec = false, false, false, false
+	return dec, ""
+}
 
 // appendHWAccelArgs appends the appropriate -hwaccel flags for the given decoder config.
 func appendHWAccelArgs(args []string, dec HWDecoderConfig) []string {

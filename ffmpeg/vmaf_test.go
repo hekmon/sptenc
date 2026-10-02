@@ -777,3 +777,58 @@ func TestVMAFCompute(t *testing.T) {
 		t.Errorf("v0: want 99.26 for both scores, got %+v and %+v", v0.Pooled.Fidelity, v0.Pooled.Original)
 	}
 }
+
+// TestVMAFComputeHardwareDecoded scores an encode decoded by NVDEC as it scores it decoded in
+// software, frame by frame: the pictures of a hardware decoder are handed back in the pixel format of
+// a software decode (see softwarePixelFormat). The reference is full range 4:4:4, the case where the
+// hardware decoded encode was converted into its format, not the reference into the encode's. Skipped
+// without NVDEC or libx265.
+func TestVMAFComputeHardwareDecoded(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	reference := filepath.Join(dir, "reference.mkv")
+	encode := filepath.Join(dir, "encode.mkv")
+	for _, args := range [][]string{
+		{"-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=0.5", "-vf", "format=yuv444p10le,setparams=range=pc",
+			"-color_range", "pc", "-c:v", "ffv1", reference},
+		{"-i", reference, "-vf", "scale=out_range=tv,format=yuv420p10le", "-c:v", "libx265", "-qp", "32",
+			"-x265-params", "log-level=error", encode},
+	} {
+		if output, err := exec.CommandContext(ctx, FFMPEGBinary, append([]string{"-loglevel", "error", "-nostdin", "-y"}, args...)...).CombinedOutput(); err != nil {
+			t.Skipf("can not make the clips (libx265 needed): %s\n%s", err, output)
+		}
+	}
+	if output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-hwaccel", "cuda",
+		"-hwaccel_output_format", "cuda", "-i", encode, "-f", "null", "-").CombinedOutput(); err != nil {
+		t.Skipf("NVDEC does not decode the encode here: %s\n%s", err, output)
+	}
+	compute := func(nvdec bool) []float64 {
+		report, err := VMAFCompute(ctx, VMAFComputeConfig{
+			ReferencePath:   reference,
+			DistortedPath:   encode,
+			InputFrameRate:  "24",
+			ReportPath:      filepath.Join(dir, "report.json"),
+			Model:           VMAFModelFHD,
+			ModelCAMBI:      true,
+			Measures:        VMAFMeasures{Fidelity: true},
+			HWDecoderConfig: HWDecoderConfig{NVDec: nvdec},
+		})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+		}
+		if err != nil {
+			t.Fatalf("VMAF (NVDEC %t): %s", nvdec, err)
+		}
+		scores := make([]float64, len(report.Frames))
+		for i, frame := range report.Frames {
+			scores[i] = frame.Fidelity
+		}
+		return scores
+	}
+	if software, nvdec := compute(false), compute(true); !slices.Equal(nvdec, software) {
+		t.Errorf("decoded by NVDEC, the encode scores\n%v\ndecoded in software\n%v", nvdec, software)
+	}
+}
