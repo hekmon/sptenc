@@ -240,7 +240,7 @@ func segmentFilterFlag(category string) cli.Flag {
 const rgbMatrixFlagName = "rgb-matrix"
 
 // rgbMatrixFlag returns the flag forcing the matrix an RGB source is converted to YUV with. The
-// commands reading a source include it: master, split, encode, batchsearch, thresholds.
+// commands reading a source include it: master, split, encode, batchsearch, thresholds, vmaf.
 // If category is non-empty, the flag is grouped under that category in help output.
 func rgbMatrixFlag(category string) cli.Flag {
 	matrices := fmt.Sprintf("%s, %s or %s (BT.601)", ffmpeg.YUVMatrixBT709, ffmpeg.YUVMatrixBT2020NC, ffmpeg.YUVMatrixBT601)

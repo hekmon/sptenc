@@ -68,21 +68,26 @@ func checkSourceVideo(stats ffmpeg.FFProbeStats) (videoStream *ffmpeg.FFProbeBin
 	return
 }
 
-// sourceYUVMatrix returns the matrix an RGB source is converted to YUV with, and says so: the one
-// forced with the RGB matrix flag, the one its primaries call for otherwise (see
-// ffmpeg.YUVMatrix). A source declaring other primaries, or none, is refused unless the flag is
-// set: a guessed matrix would be declared as a fact by the master and every encode of it. The
-// matrix is empty for a source that is not RGB, which no step converts.
+// sourceYUVMatrix returns the matrix an RGB source is converted to YUV with, and says so (see
+// rgbInputMatrix), the empty matrix for a source that is not RGB, which no step converts.
 func sourceYUVMatrix(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBinaryStream) (matrix ffmpeg.YUVMatrix, err error) {
-	forced := ffmpeg.YUVMatrix(cmd.String(rgbMatrixFlagName))
 	if !ffmpeg.IsRGBPixelFormat(stream.PixFmt) {
-		if forced != "" {
+		if cmd.String(rgbMatrixFlagName) != "" {
 			fmt.Fprintf(out, "WARNING: --%s has no effect: the source is not RGB (%s)\n", rgbMatrixFlagName, stream.PixFmt)
 		}
 		return
 	}
+	return rgbInputMatrix(cmd, out, stream, "source")
+}
+
+// rgbInputMatrix returns the matrix an RGB input, named what in the messages, is converted to YUV
+// with, and says so: the one forced with the RGB matrix flag, the one its primaries call for
+// otherwise (see ffmpeg.YUVMatrix). An input declaring other primaries, or none, is refused unless
+// the flag is set: a guessed matrix would be declared as a fact by the master and every encode of
+// it.
+func rgbInputMatrix(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBinaryStream, what string) (matrix ffmpeg.YUVMatrix, err error) {
 	var origin string
-	if forced != "" {
+	if forced := ffmpeg.YUVMatrix(cmd.String(rgbMatrixFlagName)); forced != "" {
 		matrix, origin = forced, "forced by --"+rgbMatrixFlagName
 	} else {
 		primaries := stream.ColorPrimaries
@@ -91,14 +96,36 @@ func sourceYUVMatrix(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBina
 		}
 		var known bool
 		if matrix, known = ffmpeg.YUVMatrixFromPrimaries(stream.ColorPrimaries); !known {
-			err = fmt.Errorf("the source is RGB (%s) with %s primaries: sptenc can not tell which matrix to convert it to YUV with, set it with --%s (%s, %s or %s)",
-				stream.PixFmt, primaries, rgbMatrixFlagName, ffmpeg.YUVMatrixBT709, ffmpeg.YUVMatrixBT2020NC, ffmpeg.YUVMatrixBT601)
+			err = fmt.Errorf("the %s is RGB (%s) with %s primaries: sptenc can not tell which matrix to convert it to YUV with, set it with --%s (%s, %s or %s)",
+				what, stream.PixFmt, primaries, rgbMatrixFlagName, ffmpeg.YUVMatrixBT709, ffmpeg.YUVMatrixBT2020NC, ffmpeg.YUVMatrixBT601)
 			return
 		}
 		origin = "of its " + primaries + " primaries"
 	}
-	fmt.Fprintf(out, "RGB source (%s): converted to YUV with the %s matrix %s, in limited range with left chroma siting (see MANUAL.md, RGB sources)\n",
-		stream.PixFmt, matrix, origin)
+	fmt.Fprintf(out, "RGB %s (%s): converted to YUV with the %s matrix %s, in limited range with left chroma siting (see MANUAL.md, RGB sources)\n",
+		what, stream.PixFmt, matrix, origin)
+	return
+}
+
+// vmafRGBMatrices returns the matrices the RGB inputs of the vmaf command are converted to YUV with,
+// empty for a YUV one, and says so: each is converted as encode converts an RGB source (see
+// rgbInputMatrix), so that the vmaf command scores an encode against its RGB source as encode
+// scored it.
+func vmafRGBMatrices(cmd *cli.Command, out io.Writer, reference, distorted *ffmpeg.FFProbeBinaryStream) (
+	referenceMatrix, distortedMatrix ffmpeg.YUVMatrix, err error) {
+	referenceRGB, distortedRGB := ffmpeg.IsRGBPixelFormat(reference.PixFmt), ffmpeg.IsRGBPixelFormat(distorted.PixFmt)
+	if !referenceRGB && !distortedRGB && cmd.String(rgbMatrixFlagName) != "" {
+		fmt.Fprintf(out, "WARNING: --%s has no effect: neither the reference (%s) nor the distorted video (%s) is RGB\n",
+			rgbMatrixFlagName, reference.PixFmt, distorted.PixFmt)
+	}
+	if referenceRGB {
+		if referenceMatrix, err = rgbInputMatrix(cmd, out, reference, "reference"); err != nil {
+			return
+		}
+	}
+	if distortedRGB {
+		distortedMatrix, err = rgbInputMatrix(cmd, out, distorted, "distorted video")
+	}
 	return
 }
 

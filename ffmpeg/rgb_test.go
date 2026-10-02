@@ -124,10 +124,11 @@ func TestFFV1VideoMasterRGB(t *testing.T) {
 // TestVMAFComputeRGBReference checks the final VMAF of an RGB source: the source must be scored as
 // its master, the very pictures every encode is made of. Its master scores 100 against it on every
 // frame (the RGB master against its own BT.709 conversion), and a distorted copy of the master
-// scores frame by frame what it scores against the master. Left to ffmpeg, the RGB reference is
+// scores frame by frame what it scores against the master. Left to ffmpeg, the RGB reference was
 // converted with the matrix the distorted video declares but with the chroma sited in the center:
-// the scores of the distorted copy then differed from those against the master by up to 1.04 (a
-// real libx265 encode of a 1280x720 RGB clip: from -1.08 to +0.71 per frame).
+// the scores of the distorted copy differed from those against the master by up to 1.04 (a real
+// libx265 encode of a 1280x720 RGB clip: from -1.08 to +0.71 per frame). Now that both inputs
+// declare the same matrix (see vmafSameMatrix), ffmpeg would convert it with BT.601's.
 func TestVMAFComputeRGBReference(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -212,5 +213,58 @@ func TestScenesDetectionRGB(t *testing.T) {
 	}
 	if onSource := detect(source, YUVMatrixBT709); !slices.Equal(onSource, onMaster) {
 		t.Errorf("the source scores %+v, its master %+v", onSource, onMaster)
+	}
+}
+
+// TestVMAFComputeSameMatrix checks that VMAF compares pictures as they are, whatever matrix each
+// input declares: the master of an RGB source against a copy declaring no matrix scores 100 on
+// every frame (77.3 harmonic mean when ffmpeg converted one into the matrix of the other), and so
+// do the RGB source, as its master's conversion makes it, against that copy, and the master against
+// the RGB source given as the distorted video.
+func TestVMAFComputeSameMatrix(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source := rgbSource(t, ctx, dir)
+	master := filepath.Join(dir, "master.mkv")
+	if err := FFV1VideoMaster(ctx, FFV1VideoMasterConfig{InputFilePath: source, RGBToYUV: YUVMatrixBT709, OutputFilePath: master}); err != nil {
+		t.Fatalf("master: %s", err)
+	}
+	undeclared := filepath.Join(dir, "undeclared.mkv")
+	if output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y", "-i", master,
+		"-c", "copy", "-colorspace", "unknown", undeclared).CombinedOutput(); err != nil {
+		t.Fatalf("failed to remove the matrix of the master: %s\n%s", err, output)
+	}
+	if video := probeVideo(t, ctx, undeclared); video.ColorSpace != "" { // ffprobe leaves an unspecified one out
+		t.Fatalf("the copy of the master still declares the %s matrix", video.ColorSpace)
+	}
+	for _, tc := range []struct {
+		name                                 string
+		reference, distorted                 string
+		referenceRGBToYUV, distortedRGBToYUV YUVMatrix
+	}{
+		{"master against a copy declaring no matrix", master, undeclared, "", ""},
+		{"RGB source against a copy of its master declaring no matrix", source, undeclared, YUVMatrixBT709, ""},
+		{"master against its RGB source", master, source, "", YUVMatrixBT709},
+	} {
+		report, err := VMAFCompute(ctx, VMAFComputeConfig{
+			ReferencePath:     tc.reference,
+			ReferenceRGBToYUV: tc.referenceRGBToYUV,
+			DistortedPath:     tc.distorted,
+			DistortedRGBToYUV: tc.distortedRGBToYUV,
+			InputFrameRate:    "24",
+			ReportPath:        filepath.Join(dir, "report.json"),
+			Model:             VMAFModelFHD,
+			ModelCAMBI:        true,
+			Measures:          VMAFMeasures{Fidelity: true},
+		})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+		}
+		if err != nil {
+			t.Fatalf("%s: %s", tc.name, err)
+		}
+		if len(report.Frames) != 12 || report.Pooled.Fidelity.Min != 100 {
+			t.Errorf("%s: want 100 on 12 frames, got %+v on %d frames", tc.name, report.Pooled.Fidelity, len(report.Frames))
+		}
 	}
 }

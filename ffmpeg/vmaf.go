@@ -543,11 +543,14 @@ type VMAFComputeConfig struct {
 	ReferencePath  string // Path to the reference (original) video.
 	DistortedPath  string // Path to the distorted (encoded) video.
 	InputFrameRate string // Frame rate of the input videos (e.g. "24" or "24000/1001").
-	// ReferenceRGBToYUV is the matrix an RGB reference is converted with (see YUVMatrix), empty for
-	// a YUV one: the encodes of an RGB source are scored against the very pictures of its master.
-	// Left to ffmpeg, the reference is converted with the matrix the distorted video declares, and
-	// with BT.601 when it declares none.
+	// ReferenceRGBToYUV and DistortedRGBToYUV are the matrices an RGB input is converted with (see
+	// YUVMatrix), empty for a YUV one: the encodes of an RGB source are scored against the very
+	// pictures of its master. Left to ffmpeg, an RGB input was converted with the matrix the other
+	// one declares, and with BT.601 when it declares none. An RGB input must be given one: once
+	// both inputs declare the same matrix (see vmafSameMatrix), ffmpeg would convert it with
+	// BT.601's.
 	ReferenceRGBToYUV YUVMatrix
+	DistortedRGBToYUV YUVMatrix
 	// VMAF generation
 	ReportPath string       // Path where the JSON VMAF report will be written.
 	Model      VMAFModel    // Model to score with (see SelectVMAFModel).
@@ -588,6 +591,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	}
 	if config.ReferenceRGBToYUV != "" && !config.ReferenceRGBToYUV.Valid() {
 		err = fmt.Errorf("invalid matrix %q to convert the RGB reference to YUV with", config.ReferenceRGBToYUV)
+		return
+	}
+	if config.DistortedRGBToYUV != "" && !config.DistortedRGBToYUV.Valid() {
+		err = fmt.Errorf("invalid matrix %q to convert the RGB distorted video to YUV with", config.DistortedRGBToYUV)
 		return
 	}
 	// Apply defaults
@@ -631,14 +638,17 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.ReferencePath,
 	)
 	//// vmaf filter
-	referenceFilters := "setpts=PTS-STARTPTS"
-	if config.ReferenceRGBToYUV != "" {
-		referenceFilters += "," + RGBToYUVFilter(config.ReferenceRGBToYUV)
+	inputFilters := func(rgbToYUV YUVMatrix) string {
+		filters := "setpts=PTS-STARTPTS"
+		if rgbToYUV != "" {
+			filters += "," + RGBToYUVFilter(rgbToYUV)
+		}
+		return filters + "," + vmafSameMatrix
 	}
 	args = append(args,
 		"-filter_complex",
-		"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]"+referenceFilters+"[reference];[distorted][reference]"+
-			pass.filter(config.ReportPath, NbThreadsToUse),
+		"[0:v]"+inputFilters(config.DistortedRGBToYUV)+"[distorted];[1:v]"+inputFilters(config.ReferenceRGBToYUV)+
+			"[reference];[distorted][reference]"+pass.filter(config.ReportPath, NbThreadsToUse),
 	)
 	//// no ffmpeg output
 	args = append(args, "-f", "null", "-")
@@ -686,6 +696,36 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	// Parse report
 	return readVMAFReport(config.ReportPath, pass)
 }
+
+// vmafSameMatrix gives both inputs of libvmaf the same matrix, an unspecified one, for ffmpeg not
+// to convert either into the matrix of the other: VMAF compares the pictures as they are decoded.
+//
+// # WHY
+//
+// The libvmaf filter takes its two inputs in one pixel format, one range and one matrix, and ffmpeg
+// converts an input declaring another matrix than the other's (libavfilter negotiates the matrix
+// since ffmpeg 7.0). Two files of the very same pictures, one declaring BT.709 and the other no
+// matrix (or BT.601's), scored a harmonic mean of fidelity of 77.3: ffmpeg converted the BT.709 one
+// into the other's matrix, BT.601's coefficients either way (swscale computes an unspecified matrix
+// with them). Relabelled, they score 100.
+// The matrix a YUV file declares is a label on its pictures: no step of sptenc converts them into
+// another matrix (the encodes are made of the very pictures of the master), and an encode or a file
+// declaring another matrix, or none, does not hold other pictures for it. Converting it would score
+// a conversion sptenc never made.
+//
+// # WHY NOT THE RANGE
+//
+// ffmpeg still converts an input to the range of the other: a full range source is converted to
+// limited range when its master is written, and the final VMAF scores its encodes against it once
+// brought to their range. The scores of a full range 4:4:4 source against its encode are the same,
+// frame by frame, with and without the relabelling.
+//
+// # EDGE CASES
+//
+//   - An RGB input is converted to YUV first (see VMAFComputeConfig.ReferenceRGBToYUV): an RGB
+//     picture needs a matrix to become YUV, and relabelled, the matrix ffmpeg would pick is the
+//     unspecified one, BT.601's coefficients.
+const vmafSameMatrix = "setparams=colorspace=unknown"
 
 // appendHWAccelArgs appends the appropriate -hwaccel flags for the given decoder config.
 func appendHWAccelArgs(args []string, dec HWDecoderConfig) []string {

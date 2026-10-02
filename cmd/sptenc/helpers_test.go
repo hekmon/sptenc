@@ -229,6 +229,60 @@ func TestSourceYUVMatrix(t *testing.T) {
 	}
 }
 
+// TestVMAFRGBMatrices parses the RGB matrix flag of the vmaf command for real: each RGB input gets
+// the matrix encode would give it, a YUV one none.
+func TestVMAFRGBMatrices(t *testing.T) {
+	rgb := &ffmpeg.FFProbeBinaryStream{PixFmt: "gbrp16le", ColorPrimaries: "bt709"}
+	rgb2020 := &ffmpeg.FFProbeBinaryStream{PixFmt: "gbrp10le", ColorPrimaries: "bt2020"}
+	rgbUnknown := &ffmpeg.FFProbeBinaryStream{PixFmt: "rgb48le"}
+	yuv := &ffmpeg.FFProbeBinaryStream{PixFmt: "yuv420p10le", ColorPrimaries: "bt709", ColorSpace: "bt709"}
+	for _, tc := range []struct {
+		name                 string
+		reference, distorted *ffmpeg.FFProbeBinaryStream
+		args                 []string
+		wantReference        ffmpeg.YUVMatrix
+		wantDistorted        ffmpeg.YUVMatrix
+		refusal, says        string
+	}{
+		{"YUV inputs", yuv, yuv, nil, "", "", "", ""},
+		{"YUV inputs, flag set", yuv, yuv, []string{"--rgb-matrix", "bt709"}, "", "", "",
+			"WARNING: --rgb-matrix has no effect: neither the reference (yuv420p10le) nor the distorted video (yuv420p10le) is RGB"},
+		{"RGB reference", rgb, yuv, nil, ffmpeg.YUVMatrixBT709, "", "",
+			"RGB reference (gbrp16le): converted to YUV with the bt709 matrix of its bt709 primaries"},
+		{"RGB distorted video", yuv, rgb2020, nil, "", ffmpeg.YUVMatrixBT2020NC, "",
+			"RGB distorted video (gbrp10le): converted to YUV with the bt2020nc matrix of its bt2020 primaries"},
+		{"RGB inputs", rgb, rgb, nil, ffmpeg.YUVMatrixBT709, ffmpeg.YUVMatrixBT709, "", ""},
+		{"RGB reference without primaries", rgbUnknown, yuv, nil, "", "", "the reference is RGB (rgb48le) with unknown primaries", ""},
+		{"RGB distorted video without primaries", yuv, rgbUnknown, nil, "", "", "the distorted video is RGB (rgb48le) with unknown primaries", ""},
+		{"RGB inputs, flag set", rgbUnknown, rgb, []string{"--rgb-matrix", "bt470bg"}, ffmpeg.YUVMatrixBT601, ffmpeg.YUVMatrixBT601, "",
+			"with the bt470bg matrix forced by --rgb-matrix"},
+	} {
+		var (
+			referenceMatrix, distortedMatrix ffmpeg.YUVMatrix
+			out                              strings.Builder
+		)
+		cmd := &cli.Command{
+			Name:  "test",
+			Flags: []cli.Flag{rgbMatrixFlag("")},
+			Action: func(ctx context.Context, cmd *cli.Command) (err error) {
+				referenceMatrix, distortedMatrix, err = vmafRGBMatrices(cmd, &out, tc.reference, tc.distorted)
+				return
+			},
+		}
+		err := cmd.Run(context.Background(), append([]string{"test"}, tc.args...))
+		switch {
+		case tc.refusal != "" && (err == nil || !strings.Contains(err.Error(), tc.refusal)):
+			t.Errorf("%s: want the refusal %q, got %v", tc.name, tc.refusal, err)
+		case tc.refusal == "" && err != nil:
+			t.Errorf("%s: %s", tc.name, err)
+		case referenceMatrix != tc.wantReference || distortedMatrix != tc.wantDistorted:
+			t.Errorf("%s: want the matrices %q and %q, got %q and %q", tc.name, tc.wantReference, tc.wantDistorted, referenceMatrix, distortedMatrix)
+		case !strings.Contains(out.String(), tc.says):
+			t.Errorf("%s: expected %q in %q", tc.name, tc.says, out.String())
+		}
+	}
+}
+
 // TestProbePreSplitSegments probes real segments: their durations, and a directory mixing RGB and
 // YUV segments refused, whichever comes first.
 func TestProbePreSplitSegments(t *testing.T) {
