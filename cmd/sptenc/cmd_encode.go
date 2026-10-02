@@ -132,7 +132,7 @@ var encodeCommand = &cli.Command{
 				Category:  "Single Video File",
 				Validator: validateSceneThreshold,
 			},
-
+			rgbMatrixFlag("Single Video File"),
 			&cli.StringFlag{
 				Name:     originalFileFlagName,
 				Aliases:  []string{"f"},
@@ -326,7 +326,8 @@ var encodeCommand = &cli.Command{
 			totalDuration     time.Duration
 			videoStream       *ffmpeg.FFProbeBinaryStream
 			sourceTotalFrames int
-			sourceFrameRate   string // see core.QPSearchConfig.SourceFrameRate
+			sourceFrameRate   string           // see core.QPSearchConfig.SourceFrameRate
+			sourceRGBToYUV    ffmpeg.YUVMatrix // see sourceYUVMatrix: a file only, segments are taken as they are
 			setup             vmafSetup
 		)
 		if !inputInfos.IsDir() {
@@ -351,6 +352,9 @@ var encodeCommand = &cli.Command{
 			if videoStream, err = checkSourceVideo(sourceStats); err != nil {
 				return
 			}
+			if sourceRGBToYUV, err = sourceYUVMatrix(cmd, bypass, videoStream); err != nil {
+				return
+			}
 			sourceFrameRate = videoStream.RFrameRate
 			totalDuration = sourceStats.Format.Duration
 			// The VMAF model of the run and how it scores, checked on pictures of this size:
@@ -364,8 +368,10 @@ var encodeCommand = &cli.Command{
 			)
 			var scenes []ffmpeg.Scene
 			start := time.Now()
+			scenesConfig := decoderCfg.ToScenesDetectionConfig()
+			scenesConfig.RGBToYUV = sourceRGBToYUV
 			if scenes, err = liveDetectScenes(ctx, inputPath, cmd.Float64(minThresholdFlagName), totalDuration,
-				cmd.Bool(debugFlagName), decoderCfg.ToScenesDetectionConfig()); err != nil {
+				cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
@@ -385,7 +391,7 @@ var encodeCommand = &cli.Command{
 			}
 			// The master, written cut into its segments: see createMasterSegments
 			if sourceTotalFrames, err = createMasterSegments(ctx, inputPath, workingDir, scenes,
-				cmd.Bool(debugFlagName), decoderCfg); err != nil {
+				cmd.Bool(debugFlagName), decoderCfg, sourceRGBToYUV); err != nil {
 				return fmt.Errorf("failed to create the master segments: %w", err)
 			}
 			// Build segment paths directly from known naming convention rather than
@@ -544,7 +550,7 @@ var encodeCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFStats, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, setup, cmd.Bool(debugFlagName), hwDecoder,
+			results.TotalSegmentsFrames, sourceRGBToYUV, setup, cmd.Bool(debugFlagName), hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)

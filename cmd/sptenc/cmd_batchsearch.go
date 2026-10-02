@@ -226,7 +226,7 @@ var batchsearchCommand = &cli.Command{
 			},
 		}
 		flags = append(flags, thresholdSearchFlags()...)
-		flags = append(flags, segmentFilterFlag(thresholdCategoryName))
+		flags = append(flags, segmentFilterFlag(thresholdCategoryName), rgbMatrixFlag(""))
 		flags = append(flags,
 			&cli.IntFlag{
 				Name:     strikesFlagName,
@@ -451,6 +451,10 @@ var batchsearchCommand = &cli.Command{
 		if err != nil {
 			return err
 		}
+		sourceRGBToYUV, err := sourceYUVMatrix(cmd, bypass, videoStream)
+		if err != nil {
+			return err
+		}
 		totalDuration := sourceStats.Format.Duration
 		// The VMAF model of the run (search and final encode alike), now that the resolution is
 		// known, and whether libvmaf scores pictures of this size with it: better now than after
@@ -487,8 +491,10 @@ var batchsearchCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
+		scenesConfig := decoderCfg.ToScenesDetectionConfig()
+		scenesConfig.RGBToYUV = sourceRGBToYUV
 		scenes, err := liveDetectScenes(ctx, inputPath, cmd.Float64(minThresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
-			decoderCfg.ToScenesDetectionConfig(),
+			scenesConfig,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
@@ -513,7 +519,7 @@ var batchsearchCommand = &cli.Command{
 
 		// Step 2 - Create the master for encoding
 		masterFile, sourceTotalFrames, _, err := createMaster(ctx, inputPath, filepath.Join(workingDir, "master.mkv"),
-			cmd.Bool(debugFlagName), decoderCfg)
+			cmd.Bool(debugFlagName), decoderCfg, sourceRGBToYUV)
 		if err != nil {
 			return fmt.Errorf("failed to create the master file: %w", err)
 		}
@@ -737,7 +743,7 @@ var batchsearchCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Computing final VMAF...")
 		start = time.Now()
 		finalVMAFStats, err := liveFinalVMAF(ctx, vmafSource, encodedSegmentsMerged, sourceStats.VideoTrack(),
-			results.TotalSegmentsFrames, setup, cmd.Bool(debugFlagName), hwDecoder,
+			results.TotalSegmentsFrames, sourceRGBToYUV, setup, cmd.Bool(debugFlagName), hwDecoder,
 		)
 		if err != nil {
 			err = fmt.Errorf("failed to compute final vmaf: %w", err)

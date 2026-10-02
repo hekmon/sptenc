@@ -63,6 +63,11 @@ type ScenesDetectionConfig struct {
 	// Config
 	Path      string
 	Threshold float64 // https://ffmpeg.org/ffmpeg-filters.html#scdet-1
+	// RGBToYUV is the matrix an RGB input is converted with (see YUVMatrix), empty for a YUV one:
+	// scdet then reads the luma of the master, and scores the scene changes as it does on the
+	// master (on a test clip, the implicit conversion scored a cut 22.275 where the master scores
+	// it 24.775).
+	RGBToYUV YUVMatrix
 	// Hardware decode (caller decides based on codec compatibility)
 	NVDec           bool   // use NVDEC for hardware-accelerated decoding
 	NVDevice        int    // NVIDIA GPU index, see CUDADefaultDevice
@@ -87,6 +92,10 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	}
 	if config.Threshold < SceneThresholdMin || config.Threshold > SceneThresholdMax {
 		err = fmt.Errorf("scene detection threshold must be between %d and %d", SceneThresholdMin, SceneThresholdMax)
+		return
+	}
+	if config.RGBToYUV != "" && !config.RGBToYUV.Valid() {
+		err = fmt.Errorf("invalid matrix %q to convert RGB to YUV with", config.RGBToYUV)
 		return
 	}
 	// Ignore the hardware decoders incompatible with the input codec
@@ -131,18 +140,23 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	} else if config.VideoToolboxDec {
 		args = append(args, "-hwaccel", "videotoolbox")
 	}
+	var filters []string
+	if config.RGBToYUV != "" {
+		filters = append(filters, RGBToYUVFilter(config.RGBToYUV))
+	}
+	filters = append(filters,
+		// make times relative to the first video frame: the video stream does not always
+		// start at 0 within its container, and a first segment longer than it really is
+		// would mislead the minimum segment length
+		"setpts=PTS-STARTPTS",
+		"scdet=t="+strconv.FormatFloat(config.Threshold, 'f', -1, float64Precision),
+		// scdet does not report frame indexes: have the frames it flagged printed by the
+		// metadata filter, which does (see scdetProgress)
+		"metadata=mode=print:key="+scdetTimeKey,
+	)
 	args = append(args,
 		"-i", config.Path,
-		"-vf", strings.Join([]string{
-			// make times relative to the first video frame: the video stream does not always
-			// start at 0 within its container, and a first segment longer than it really is
-			// would mislead the minimum segment length
-			"setpts=PTS-STARTPTS",
-			"scdet=t=" + strconv.FormatFloat(config.Threshold, 'f', -1, float64Precision),
-			// scdet does not report frame indexes: have the frames it flagged printed by the
-			// metadata filter, which does (see scdetProgress)
-			"metadata=mode=print:key=" + scdetTimeKey,
-		}, ","),
+		"-vf", strings.Join(filters, ","),
 		"-f", "null", "-",
 	)
 	if config.Debug != nil {

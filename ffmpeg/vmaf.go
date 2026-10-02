@@ -543,6 +543,11 @@ type VMAFComputeConfig struct {
 	ReferencePath  string // Path to the reference (original) video.
 	DistortedPath  string // Path to the distorted (encoded) video.
 	InputFrameRate string // Frame rate of the input videos (e.g. "24" or "24000/1001").
+	// ReferenceRGBToYUV is the matrix an RGB reference is converted with (see YUVMatrix), empty for
+	// a YUV one: the encodes of an RGB source are scored against the very pictures of its master.
+	// Left to ffmpeg, the reference is converted with the matrix the distorted video declares, and
+	// with BT.601 when it declares none.
+	ReferenceRGBToYUV YUVMatrix
 	// VMAF generation
 	ReportPath string       // Path where the JSON VMAF report will be written.
 	Model      VMAFModel    // Model to score with (see SelectVMAFModel).
@@ -579,6 +584,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	}
 	pass := vmafPass{model: config.Model, modelCAMBI: config.ModelCAMBI, measures: config.Measures}
 	if err = pass.validate(); err != nil {
+		return
+	}
+	if config.ReferenceRGBToYUV != "" && !config.ReferenceRGBToYUV.Valid() {
+		err = fmt.Errorf("invalid matrix %q to convert the RGB reference to YUV with", config.ReferenceRGBToYUV)
 		return
 	}
 	// Apply defaults
@@ -622,9 +631,13 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.ReferencePath,
 	)
 	//// vmaf filter
+	referenceFilters := "setpts=PTS-STARTPTS"
+	if config.ReferenceRGBToYUV != "" {
+		referenceFilters += "," + RGBToYUVFilter(config.ReferenceRGBToYUV)
+	}
 	args = append(args,
 		"-filter_complex",
-		"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]setpts=PTS-STARTPTS[reference];[distorted][reference]"+
+		"[0:v]setpts=PTS-STARTPTS[distorted];[1:v]"+referenceFilters+"[reference];[distorted][reference]"+
 			pass.filter(config.ReportPath, NbThreadsToUse),
 	)
 	//// no ffmpeg output

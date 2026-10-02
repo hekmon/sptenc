@@ -74,7 +74,7 @@ var thresholdsCommand = &cli.Command{
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{}
 		flags = append(flags, thresholdSearchFlags()...)
-		flags = append(flags, segmentFilterFlag(thresholdCategoryName))
+		flags = append(flags, segmentFilterFlag(thresholdCategoryName), rgbMatrixFlag(""))
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
 	}(),
@@ -160,10 +160,16 @@ var thresholdsCommand = &cli.Command{
 		if videoStream == nil {
 			return errors.New("no video stream found in source")
 		}
+		rgbToYUV, err := sourceYUVMatrix(cmd, bypass, videoStream)
+		if err != nil {
+			return err
+		}
 		requestedDecoder, _ := hwDecodeFlags(cmd) // validated in Before
 		start := time.Now()
+		scenesConfig := requestedDecoder.ToScenesDetectionConfig()
+		scenesConfig.RGBToYUV = rgbToYUV
 		scenes, err := liveDetectScenes(ctx, cmd.StringArg("inputfile"), cmd.Float64(minThresholdFlagName),
-			stats.Format.Duration, cmd.Bool(debugFlagName), requestedDecoder.ToScenesDetectionConfig())
+			stats.Format.Duration, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}

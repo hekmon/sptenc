@@ -162,3 +162,65 @@ func TestSetupVMAF(t *testing.T) {
 		}
 	}
 }
+
+// TestSourceYUVMatrix parses the RGB matrix flag for real: the matrix an RGB source is converted
+// with, from its primaries or the flag, the refusal of primaries calling for none, and nothing for a
+// source that is not RGB.
+func TestSourceYUVMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name, pixFmt, primaries string
+		args                    []string
+		want                    ffmpeg.YUVMatrix
+		refused                 bool
+		says                    string
+	}{
+		{"YUV", "yuv420p10le", "bt709", nil, "", false, ""},
+		{"YUV, flag set", "yuv420p", "bt709", []string{"--rgb-matrix", "bt2020nc"}, "", false,
+			"WARNING: --rgb-matrix has no effect: the source is not RGB (yuv420p)"},
+		{"RGB, BT.709 primaries", "gbrp16le", "bt709", nil, ffmpeg.YUVMatrixBT709, false,
+			"RGB source (gbrp16le): converted to YUV with the bt709 matrix of its bt709 primaries"},
+		{"RGB, BT.2020 primaries", "gbrp10le", "bt2020", nil, ffmpeg.YUVMatrixBT2020NC, false,
+			"with the bt2020nc matrix of its bt2020 primaries"},
+		{"RGB, no primaries", "rgb48le", "", nil, "", true, ""},
+		{"RGB, unknown primaries", "bgr0", "unknown", nil, "", true, ""},
+		{"RGB, SD primaries", "gbrp", "smpte170m", nil, "", true, ""},
+		{"RGB, no primaries, flag set", "gbrp", "", []string{"--rgb-matrix", "bt470bg"}, ffmpeg.YUVMatrixBT601, false,
+			"with the bt470bg matrix forced by --rgb-matrix"},
+		{"RGB, flag over the primaries", "gbrp16le", "bt709", []string{"--rgb-matrix", "bt2020nc"}, ffmpeg.YUVMatrixBT2020NC, false,
+			"with the bt2020nc matrix forced by --rgb-matrix"},
+	} {
+		var (
+			matrix ffmpeg.YUVMatrix
+			out    strings.Builder
+		)
+		cmd := &cli.Command{
+			Name:  "test",
+			Flags: []cli.Flag{rgbMatrixFlag("")},
+			Action: func(ctx context.Context, cmd *cli.Command) (err error) {
+				matrix, err = sourceYUVMatrix(cmd, &out, &ffmpeg.FFProbeBinaryStream{PixFmt: tc.pixFmt, ColorPrimaries: tc.primaries})
+				return
+			},
+		}
+		err := cmd.Run(context.Background(), append([]string{"test"}, tc.args...))
+		switch {
+		case tc.refused && err == nil:
+			t.Errorf("%s: should be refused, got the %q matrix", tc.name, matrix)
+		case tc.refused && !strings.Contains(err.Error(), "--rgb-matrix"):
+			t.Errorf("%s: the refusal should point to --rgb-matrix: %s", tc.name, err)
+		case !tc.refused && err != nil:
+			t.Errorf("%s: %s", tc.name, err)
+		case matrix != tc.want:
+			t.Errorf("%s: want the %q matrix, got %q", tc.name, tc.want, matrix)
+		case tc.says == "" && out.Len() > 0:
+			t.Errorf("%s: unexpected output %q", tc.name, out.String())
+		case !strings.Contains(out.String(), tc.says):
+			t.Errorf("%s: expected %q in %q", tc.name, tc.says, out.String())
+		}
+	}
+	// a value the flag does not take
+	cmd := &cli.Command{Name: "test", Flags: []cli.Flag{rgbMatrixFlag("")}, Writer: io.Discard, ErrWriter: io.Discard,
+		Action: func(context.Context, *cli.Command) error { return nil }}
+	if err := cmd.Run(context.Background(), []string{"test", "--rgb-matrix", "gbr"}); err == nil {
+		t.Error("--rgb-matrix gbr should be refused")
+	}
+}

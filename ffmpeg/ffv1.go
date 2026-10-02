@@ -11,10 +11,15 @@ import (
 	"github.com/hekmon/processpriority"
 )
 
+// masterPixelFormat is the pixel format of the master, and of every encode: 10-bit 4:2:0.
+const masterPixelFormat = "yuv420p10le"
+
 // FFV1VideoMasterConfig holds the configuration for FFV1VideoMaster().
 type FFV1VideoMasterConfig struct {
 	// Input
 	InputFilePath string
+	// RGBToYUV is the matrix an RGB input is converted with (see YUVMatrix), empty for a YUV one.
+	RGBToYUV YUVMatrix
 	// Hardware decode (caller decides based on encoder choice and codec compatibility)
 	NVDec           bool   // use NVDEC for hardware-accelerated decoding
 	NVDevice        int    // NVIDIA GPU index, see CUDADefaultDevice
@@ -41,11 +46,14 @@ type FFV1VideoMasterConfig struct {
 // timestamps (see TestFFV1VideoMasterSegments), only the duration a segment's container declares
 // can end 1 ms later. Only the first video stream is kept; all other streams are dropped.
 // Intra frames only is what lets Segment cut at any frame: see Segment for why the source can
-// not be cut directly.
+// not be cut directly. An RGB input is converted with the matrix of RGBToYUV (see YUVMatrix).
 func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err error) {
 	// Validate inputs
 	if config.InputFilePath == "" {
 		return errors.New("input path cannot be empty")
+	}
+	if config.RGBToYUV != "" && !config.RGBToYUV.Valid() {
+		return fmt.Errorf("invalid matrix %q to convert RGB to YUV with", config.RGBToYUV)
 	}
 	if (config.OutputFilePath == "") == (config.SegmentsDir == "") {
 		return errors.New("exactly one of the output file path and the segments directory must be set")
@@ -92,9 +100,14 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	args = append(args,
 		"-i", config.InputFilePath,
 		"-map", "0:v:0", // we only want the video stream
+	)
+	if config.RGBToYUV != "" {
+		args = append(args, "-vf", RGBToYUVFilter(config.RGBToYUV))
+	}
+	args = append(args,
 		"-c:v", "ffv1", // encoded as ffv1
 		"-g", "1", // with every frame self contained
-		"-pix_fmt", "yuv420p10le", // in 10bits output
+		"-pix_fmt", masterPixelFormat, // in 10bits output
 		"-fps_mode", "passthrough", // preserve original timestamps
 	)
 	if config.SegmentsDir != "" {

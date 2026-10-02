@@ -84,7 +84,7 @@ var splitCommand = &cli.Command{
 				OnlyOnce: true,
 			},
 		}
-		flags = append(flags, segmentFilterFlag(""))
+		flags = append(flags, segmentFilterFlag(""), rgbMatrixFlag(""))
 		// HW dec
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
@@ -180,6 +180,16 @@ var splitCommand = &cli.Command{
 		if videoStream, err = checkSourceVideo(stats); err != nil {
 			return
 		}
+		rgbToYUV, err := sourceYUVMatrix(cmd, bypass, videoStream)
+		if err != nil {
+			return
+		}
+		// A master given is cut as it is, packets copied: RGB segments would reach the encoders,
+		// each converting them to YUV its own way (see ffmpeg.YUVMatrix)
+		if rgbToYUV != "" && cmd.Bool(masterFlagName) && !cmd.Bool(listScenesFlagName) {
+			return fmt.Errorf("the master given is RGB (%s), and its segments would be too: split the source itself, or make its master with the master command, which converts it to YUV (see MANUAL.md, RGB sources)",
+				videoStream.PixFmt)
+		}
 		duration := stats.Format.Duration
 		action := "Splitting"
 		if cmd.Bool(listScenesFlagName) {
@@ -213,8 +223,10 @@ var splitCommand = &cli.Command{
 			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
 		)
 		start := time.Now()
+		scenesConfig := decoderCfg.ToScenesDetectionConfig()
+		scenesConfig.RGBToYUV = rgbToYUV
 		scenes, err := liveDetectScenes(ctx, inputFilePath, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName),
-			decoderCfg.ToScenesDetectionConfig())
+			scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}
@@ -244,7 +256,7 @@ var splitCommand = &cli.Command{
 		outputDir := cmd.StringArg("outputdir")
 		if !cmd.Bool(masterFlagName) {
 			// The master, written cut into its segments: see createMasterSegments
-			if _, err = createMasterSegments(ctx, inputFilePath, outputDir, scenes, cmd.Bool(debugFlagName), decoderCfg); err != nil {
+			if _, err = createMasterSegments(ctx, inputFilePath, outputDir, scenes, cmd.Bool(debugFlagName), decoderCfg, rgbToYUV); err != nil {
 				return fmt.Errorf("failed to create the master segments: %w", err)
 			}
 			return

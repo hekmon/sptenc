@@ -40,9 +40,12 @@ var masterCommand = &cli.Command{
 		"ones, it holds every sample of the original without loss (8-bit values are shifted to 10 bits).\n" +
 		"Other sources are converted at this step: 4:2:2 and 4:4:4 ones get their chroma subsampled (luma\n" +
 		"stays exact), sources deeper than 10 bits are reduced to 10 bits, and full range sources are\n" +
-		"converted to limited range (without loss from 8 bits, with a slight loss from 10 bits).",
+		"converted to limited range (without loss from 8 bits, with a slight loss from 10 bits).\n" +
+		"RGB sources are converted to YUV with the matrix of their primaries (bt709 for BT.709 ones,\n" +
+		"bt2020nc for BT.2020 ones) or the one --" + rgbMatrixFlagName + " sets: a source declaring other primaries,\n" +
+		"or none, is refused without it (see MANUAL.md, RGB sources).",
 	Flags: func() []cli.Flag {
-		flags := []cli.Flag{}
+		flags := []cli.Flag{rgbMatrixFlag("")}
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
 		return flags
 	}(),
@@ -102,7 +105,12 @@ var masterCommand = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to probe input file: %w", err)
 		}
-		if _, err = checkSourceVideo(sourceStats); err != nil {
+		videoStream, err := checkSourceVideo(sourceStats)
+		if err != nil {
+			return
+		}
+		rgbToYUV, err := sourceYUVMatrix(cmd, os.Stdout, videoStream)
+		if err != nil {
 			return
 		}
 		fmt.Printf("Creating a master of %s (%s)\n",
@@ -123,7 +131,7 @@ var masterCommand = &cli.Command{
 		}
 		// create master
 		var outputFile string
-		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputFilePath, cmd.Bool(debugFlagName), decoderCfg)
+		outputFile, _, _, err = createMaster(ctx, inputFilePath, outputFilePath, cmd.Bool(debugFlagName), decoderCfg, rgbToYUV)
 		if err == nil {
 			fmt.Fprintf(liveprogress.Bypass(), "Master saved to: %s\n", shellescape.Quote(outputFile))
 		}
@@ -132,16 +140,19 @@ var masterCommand = &cli.Command{
 }
 
 // createMaster counts the frames of the source then encodes its video stream to a lossless
-// FFV1 master, both with the hardware decoder of decoderCfg (software decode when none).
-func createMaster(ctx context.Context, inputFilePath, outputFile string, debug bool, decoderCfg ffmpeg.HWDecoderConfig) (
-	outputFileResult string, totalFrames int, duration time.Duration, err error) {
+// FFV1 master, both with the hardware decoder of decoderCfg (software decode when none). An RGB
+// source is converted to YUV with the matrix rgbToYUV (see sourceYUVMatrix).
+func createMaster(ctx context.Context, inputFilePath, outputFile string, debug bool, decoderCfg ffmpeg.HWDecoderConfig,
+	rgbToYUV ffmpeg.YUVMatrix) (outputFileResult string, totalFrames int, duration time.Duration, err error) {
 	if totalFrames, duration, err = countMasterFrames(ctx, inputFilePath, debug, decoderCfg); err != nil {
 		return
 	}
 	// ffv1 encode
 	fmt.Fprintln(liveprogress.Bypass(), "Creating a ffv1 lossless intra frames master...")
 	start := time.Now()
-	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, decoderCfg.ToFFV1MasterConfig()); err != nil {
+	masterConfig := decoderCfg.ToFFV1MasterConfig()
+	masterConfig.RGBToYUV = rgbToYUV
+	if err = liveFFV1Master(ctx, inputFilePath, outputFile, totalFrames, debug, masterConfig); err != nil {
 		err = fmt.Errorf("failed to encode the ffv1 master: %w", err)
 		return
 	}
@@ -170,7 +181,8 @@ func createMaster(ctx context.Context, inputFilePath, outputFile string, debug b
 // createMasterSegments counts the frames of the source then encodes its video stream to the
 // FFV1 master already cut at the scenes, into outputDir: the very segments createMaster then
 // Segment give, same packets and same timestamps (see ffmpeg.TestFFV1VideoMasterSegments),
-// without the master ever being on disk whole. Both with the hardware decoder of decoderCfg.
+// without the master ever being on disk whole. Both with the hardware decoder of decoderCfg, and
+// an RGB source converted to YUV with the matrix rgbToYUV (see sourceYUVMatrix).
 //
 // # WHY THIS EXISTS
 //
@@ -201,13 +213,14 @@ func createMaster(ctx context.Context, inputFilePath, outputFile string, debug b
 //     writes (seen at 24000/1001 and 60000/1001 fps): the frames and their timestamps are the
 //     same, and nothing but the progress bars reads that duration.
 func createMasterSegments(ctx context.Context, inputFilePath, outputDir string, scenes []ffmpeg.Scene, debug bool,
-	decoderCfg ffmpeg.HWDecoderConfig) (totalFrames int, err error) {
+	decoderCfg ffmpeg.HWDecoderConfig, rgbToYUV ffmpeg.YUVMatrix) (totalFrames int, err error) {
 	if totalFrames, _, err = countMasterFrames(ctx, inputFilePath, debug, decoderCfg); err != nil {
 		return
 	}
 	fmt.Fprintln(liveprogress.Bypass(), "Creating the ffv1 lossless intra frames master, cut into its segments...")
 	start := time.Now()
 	masterConfig := decoderCfg.ToFFV1MasterConfig()
+	masterConfig.RGBToYUV = rgbToYUV
 	masterConfig.SegmentsDir = outputDir
 	masterConfig.ScenesFrames = scenesFrames(scenes)
 	if err = liveFFV1Master(ctx, inputFilePath, "", totalFrames, debug, masterConfig); err != nil {

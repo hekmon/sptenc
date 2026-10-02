@@ -68,6 +68,40 @@ func checkSourceVideo(stats ffmpeg.FFProbeStats) (videoStream *ffmpeg.FFProbeBin
 	return
 }
 
+// sourceYUVMatrix returns the matrix an RGB source is converted to YUV with, and says so: the one
+// forced with the RGB matrix flag, the one its primaries call for otherwise (see
+// ffmpeg.YUVMatrix). A source declaring other primaries, or none, is refused unless the flag is
+// set: a guessed matrix would be declared as a fact by the master and every encode of it. The
+// matrix is empty for a source that is not RGB, which no step converts.
+func sourceYUVMatrix(cmd *cli.Command, out io.Writer, stream *ffmpeg.FFProbeBinaryStream) (matrix ffmpeg.YUVMatrix, err error) {
+	forced := ffmpeg.YUVMatrix(cmd.String(rgbMatrixFlagName))
+	if !ffmpeg.IsRGBPixelFormat(stream.PixFmt) {
+		if forced != "" {
+			fmt.Fprintf(out, "WARNING: --%s has no effect: the source is not RGB (%s)\n", rgbMatrixFlagName, stream.PixFmt)
+		}
+		return
+	}
+	var origin string
+	if forced != "" {
+		matrix, origin = forced, "forced by --"+rgbMatrixFlagName
+	} else {
+		primaries := stream.ColorPrimaries
+		if primaries == "" {
+			primaries = "unknown"
+		}
+		var known bool
+		if matrix, known = ffmpeg.YUVMatrixFromPrimaries(stream.ColorPrimaries); !known {
+			err = fmt.Errorf("the source is RGB (%s) with %s primaries: sptenc can not tell which matrix to convert it to YUV with, set it with --%s (%s, %s or %s)",
+				stream.PixFmt, primaries, rgbMatrixFlagName, ffmpeg.YUVMatrixBT709, ffmpeg.YUVMatrixBT2020NC, ffmpeg.YUVMatrixBT601)
+			return
+		}
+		origin = "of its " + primaries + " primaries"
+	}
+	fmt.Fprintf(out, "RGB source (%s): converted to YUV with the %s matrix %s, in limited range with left chroma siting (see MANUAL.md, RGB sources)\n",
+		stream.PixFmt, matrix, origin)
+	return
+}
+
 // resolveVMAFModel returns the VMAF model of a run and tells the user which one and why: the
 // one forced with the model flag, warned about when it is made for another display than the
 // one of the source resolution (it is the point of forcing it: a 1440p source judged as 4K, 4K
