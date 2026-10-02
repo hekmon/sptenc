@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
 
-version=$(git describe --tags --always --dirty)
+# set by each crosscompile, and the same for all the binaries of a run: names the sums file
+version=""
 
 crosscompile () {
-    if [ "$1" == "windows" ]; then
-        name='sptenc.exe'
+    local name
+    if [ "$2" == "windows" ]; then
+        name="$1.exe"
     else
-        name='sptenc'
+        name="$1"
     fi
-    # -trimpath: no local paths (home directory, user name) within the released binaries
-    GOOS="$1" GOARCH="$2" go build -trimpath -ldflags="-s" -o "$name" ./cmd/sptenc
-    zip -9 "sptenc_${version}_${1}_${2}.zip" "$name"
+    echo "Compiling ${1} for ${2}/${3}..."
+    # no cgo: static binaries, independent of the libc of the machine building them
+    CGO_ENABLED=0 GOOS="$2" GOARCH="$3" go build -trimpath -ldflags="-s" -o "$name" "./cmd/${1}"
+    # the version Go stamped, which --version reports (a tag, or a pseudo-version, "+dirty" for
+    # uncommitted changes), rather than git describe, which only agrees with it on a clean tag
+    version=$(go version -m "$name" | awk '$1 == "mod" { print $3 }')
+    zip -9 "${1}_${version}_${2}_${3}.zip" "$name"
     rm "$name"
+    echo
 }
 
-crosscompile 'windows' 'amd64'
-crosscompile 'windows' 'arm64'
-crosscompile 'linux' 'amd64'
-crosscompile 'linux' 'arm64'
-crosscompile 'darwin' 'arm64'
+crosscompile 'sptenc' 'windows' 'amd64'
+crosscompile 'sptenc' 'windows' 'arm64'
+crosscompile 'sptenc' 'linux' 'amd64'
+crosscompile 'sptenc' 'linux' 'arm64'
+crosscompile 'sptenc' 'darwin' 'arm64'
