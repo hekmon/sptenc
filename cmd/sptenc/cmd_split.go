@@ -180,15 +180,11 @@ var splitCommand = &cli.Command{
 		if videoStream, err = checkSourceVideo(stats); err != nil {
 			return
 		}
+		// The conversion of an RGB input, for its scene detection and its master. A master given
+		// is cut as it is: encode converts its RGB segments (see convertRGBSegments)
 		rgbToYUV, err := sourceYUVMatrix(cmd, bypass, videoStream)
 		if err != nil {
 			return
-		}
-		// A master given is cut as it is, packets copied: RGB segments would reach the encoders,
-		// each converting them to YUV its own way (see ffmpeg.YUVMatrix)
-		if rgbToYUV != "" && cmd.Bool(masterFlagName) && !cmd.Bool(listScenesFlagName) {
-			return fmt.Errorf("the master given is RGB (%s), and its segments would be too: split the source itself, or make its master with the master command, which converts it to YUV (see MANUAL.md, RGB sources)",
-				videoStream.PixFmt)
 		}
 		duration := stats.Format.Duration
 		action := "Splitting"

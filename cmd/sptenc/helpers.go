@@ -437,15 +437,43 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 	return
 }
 
-// getSegmentsTotalDuration calculates the total duration of all segment files
-func getSegmentsTotalDuration(ctx context.Context, segmentPaths []string, debug bool) (totalDuration time.Duration, err error) {
-	var stats ffmpeg.FFProbeStats
-	for _, path := range segmentPaths {
+// probePreSplitSegments probes every segment of a pre-split directory and returns their durations.
+// Segments must all hold RGB pictures, which encode converts to YUV before the search (see
+// convertRGBSegments), or all YUV ones: the kind of the first one is the kind of the directory.
+//
+// # WHY A MIX IS REFUSED
+//
+// The segments of a directory are the scenes of one video, made by one tool: a mix is a mistake,
+// the YUV segments of one source next to the RGB ones of an upscale for instance. Converting the
+// RGB ones would give their encodes a matrix the YUV ones may not have, in one output declaring a
+// single matrix.
+func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug bool) (durations []time.Duration, err error) {
+	var (
+		stats ffmpeg.FFProbeStats
+		rgb   bool // the kind of the first segment
+	)
+	durations = make([]time.Duration, len(segmentPaths))
+	for i, path := range segmentPaths {
 		if stats, err = getStreamsInfos(ctx, path, debug); err != nil {
 			err = fmt.Errorf("failed to get stream info for segment %s: %w", path, err)
 			return
 		}
-		totalDuration += stats.Format.Duration
+		video := stats.VideoTrack()
+		segmentRGB := video != nil && ffmpeg.IsRGBPixelFormat(video.PixFmt)
+		if i == 0 {
+			rgb = segmentRGB
+		} else if segmentRGB != rgb {
+			kind := func(rgb bool) string {
+				if rgb {
+					return "RGB"
+				}
+				return "YUV"
+			}
+			err = fmt.Errorf("segment %s holds %s pictures where %s holds %s ones: the segments of a directory must all be RGB, or all YUV",
+				shellescape.Quote(filepath.Base(path)), kind(segmentRGB), shellescape.Quote(filepath.Base(segmentPaths[0])), kind(rgb))
+			return
+		}
+		durations[i] = stats.Format.Duration
 	}
 	return
 }

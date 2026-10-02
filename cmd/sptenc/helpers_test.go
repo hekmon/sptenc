@@ -5,9 +5,13 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
@@ -223,4 +227,82 @@ func TestSourceYUVMatrix(t *testing.T) {
 	if err := cmd.Run(context.Background(), []string{"test", "--rgb-matrix", "gbr"}); err == nil {
 		t.Error("--rgb-matrix gbr should be refused")
 	}
+}
+
+// TestProbePreSplitSegments probes real segments: their durations, and a directory mixing RGB and
+// YUV segments refused, whichever comes first.
+func TestProbePreSplitSegments(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	yuv1, yuv2 := testSegment(t, ctx, dir, "seg_01.mkv", "yuv420p10le"), testSegment(t, ctx, dir, "seg_02.mkv", "yuv420p")
+	rgb1, rgb2 := testSegment(t, ctx, dir, "seg_03.mkv", "gbrp10le"), testSegment(t, ctx, dir, "seg_04.mkv", "gbrp16le")
+	for _, segments := range [][]string{{yuv1, yuv2}, {rgb1, rgb2}} {
+		durations, err := probePreSplitSegments(ctx, segments, false)
+		if err != nil {
+			t.Fatalf("%v: %s", segments, err)
+		}
+		if want := []time.Duration{500 * time.Millisecond, 500 * time.Millisecond}; !slices.Equal(durations, want) {
+			t.Errorf("%v: want the durations %v, got %v", segments, want, durations)
+		}
+	}
+	for _, tc := range []struct {
+		segments []string
+		refusal  string
+	}{
+		{[]string{yuv1, rgb1}, "segment seg_03.mkv holds RGB pictures where seg_01.mkv holds YUV ones"},
+		{[]string{rgb1, rgb2, yuv2}, "segment seg_02.mkv holds YUV pictures where seg_03.mkv holds RGB ones"},
+	} {
+		if _, err := probePreSplitSegments(ctx, tc.segments, false); err == nil || !strings.Contains(err.Error(), tc.refusal) {
+			t.Errorf("want %q, got %v", tc.refusal, err)
+		}
+	}
+}
+
+// TestConvertRGBSegments converts real RGB segments: their masters are named as the segments of a
+// source, hold their frames, and declare the matrix they were converted with.
+func TestConvertRGBSegments(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	segments := []string{testSegment(t, ctx, dir, "upscaled_a.mkv", "gbrp16le"), testSegment(t, ctx, dir, "upscaled_b.mkv", "gbrp10le")}
+	out := filepath.Join(dir, "work")
+	if err := os.Mkdir(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	masters, err := convertRGBSegments(ctx, segments, []time.Duration{500 * time.Millisecond, 500 * time.Millisecond}, out,
+		ffmpeg.YUVMatrixBT709, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{filepath.Join(out, "seg_000000.mkv"), filepath.Join(out, "seg_000001.mkv")}; !slices.Equal(masters, want) {
+		t.Fatalf("want the masters %v, got %v", want, masters)
+	}
+	for _, master := range masters {
+		stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: master, CountPackets: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		video := stats.VideoTrack()
+		if got, want := [4]string{video.PixFmt, video.ColorSpace, video.ColorRange, video.ChromaLocation},
+			[4]string{"yuv420p10le", "bt709", "tv", "left"}; got != want || video.NbReadPackets != 12 {
+			t.Errorf("%s: want %v and 12 frames, got %v and %d", master, want, got, video.NbReadPackets)
+		}
+	}
+}
+
+// testSegment writes a segment of 12 frames (0.5 s at 24 fps) in the pixel format given, declaring
+// BT.709 primaries, as an upscaler of a BT.709 source does.
+func testSegment(t *testing.T, ctx context.Context, dir, name, pixFmt string) string {
+	t.Helper()
+	for _, bin := range []string{ffmpeg.FFMPEGBinary, ffmpeg.FFProbeBinary} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not found: %s", bin, err)
+		}
+	}
+	path := filepath.Join(dir, name)
+	if output, err := exec.CommandContext(ctx, ffmpeg.FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24:duration=0.5", "-pix_fmt", pixFmt,
+		"-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "ffv1", path).CombinedOutput(); err != nil {
+		t.Fatalf("failed to create %s: %s\n%s", name, err, output)
+	}
+	return path
 }

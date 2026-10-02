@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
 
+	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/muesli/termenv"
@@ -196,6 +198,60 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
 /*
  * Split
  */
+
+// liveConvertRGBSegments writes the YUV master of every RGB segment of a pre-split directory (see
+// convertRGBSegments), one after the other, with one bar over their total duration.
+func liveConvertRGBSegments(ctx context.Context, segments, masters []string, durations []time.Duration,
+	rgbToYUV ffmpeg.YUVMatrix, debug bool) (err error) {
+	var total time.Duration
+	for _, duration := range durations {
+		total += duration
+	}
+	var (
+		done         time.Duration // the segments converted already
+		current      int
+		currentStats ffmpeg.ProgressStats
+	)
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(uint64(total)),
+		liveprogress.WithRunes(fileProgressRunes),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return " Converting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | segment %d/%d | speed: %sx", current+1, len(segments), formatSpeed(currentStats.Speed))
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	for current = range segments {
+		if err = ffmpeg.FFV1VideoMaster(ctx, ffmpeg.FFV1VideoMasterConfig{
+			InputFilePath:  segments[current],
+			RGBToYUV:       rgbToYUV,
+			OutputFilePath: masters[current],
+			Debug: func(s string) {
+				if debug {
+					fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+				}
+			},
+			RuntimeError: func(err error) {
+				fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+			},
+			StatsReport: func(stats ffmpeg.ProgressStats) {
+				currentStats = stats
+				bar.CurrentSet(uint64(done + stats.Time))
+			},
+		}); err != nil {
+			return fmt.Errorf("segment %s: %w", shellescape.Quote(filepath.Base(segments[current])), err)
+		}
+		done += durations[current]
+		bar.CurrentSet(uint64(done))
+	}
+	return
+}
 
 func liveDetectScenes(ctx context.Context, path string, threshold float64, totalDuration time.Duration, debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
 	// live progress

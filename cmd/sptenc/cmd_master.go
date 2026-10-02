@@ -245,6 +245,56 @@ func createMasterSegments(ctx context.Context, inputFilePath, outputDir string, 
 	return
 }
 
+// convertRGBSegments writes the master of every segment of a pre-split directory holding RGB
+// pictures into outputDir, converted to YUV with the matrix rgbToYUV (see sourceYUVMatrix), and
+// returns their paths, named as createMasterSegments names the segments of a source: the segments
+// the search and the final VMAF work on. durations are those of the segments, for the progress.
+//
+// # WHY THIS EXISTS
+//
+// sptenc converts an RGB source to YUV once, with a matrix it states, when it writes its master
+// (see ffmpeg.YUVMatrix). A pre-split directory has no master: its segments reached the encoders as
+// they were, and each encoder converted RGB ones its own way, with BT.601's matrix (measured with
+// libx265 and hevc_nvenc), into an output declaring no matrix, whose colors shift when read with
+// BT.709's. Splitting a source, upscaling its segments, which upscalers deliver in RGB, then
+// encoding them, is a workflow pre-split directories are made for: their segments get the master a
+// source gets.
+//
+// # WHY NOT CONVERT AT EVERY STEP
+//
+// The conversion would go into the path of every encoder and into the reference of every VMAF
+// pass, each one a place to get it wrong. Converted once, the encoders, the search and the final
+// VMAF read the very same pictures, as with a source. The masters take room in outputDir, as the
+// master of a source does.
+//
+// # EDGE CASES
+//
+//   - The segments are decoded by the CPU: upscalers deliver lossless RGB, such as FFV1, which no
+//     GPU decodes.
+func convertRGBSegments(ctx context.Context, segmentsPaths []string, durations []time.Duration, outputDir string,
+	rgbToYUV ffmpeg.YUVMatrix, debug bool) (masters []string, err error) {
+	fmt.Fprintf(liveprogress.Bypass(), "Writing the YUV masters of the %d RGB segments...\n", len(segmentsPaths))
+	start := time.Now()
+	masters = make([]string, len(segmentsPaths))
+	for i := range segmentsPaths {
+		masters[i] = filepath.Join(outputDir, fmt.Sprintf(ffmpeg.SegmentOutputFormat, i))
+	}
+	if err = liveConvertRGBSegments(ctx, segmentsPaths, masters, durations, rgbToYUV, debug); err != nil {
+		return nil, fmt.Errorf("failed to convert the RGB segments: %w", err)
+	}
+	var size int64
+	for _, master := range masters {
+		var fileInfos os.FileInfo
+		if fileInfos, err = os.Stat(master); err != nil {
+			return nil, fmt.Errorf("failed to stat segment master: %w", err)
+		}
+		size += fileInfos.Size()
+	}
+	fmt.Fprintf(liveprogress.Bypass(), "\tMasters written in %s (%s)\n", time.Since(start).Round(time.Second),
+		cunits.ImportInBytes(float64(size)))
+	return
+}
+
 // countMasterFrames counts the frames of the source a master is made from, and rejects it when
 // they do not last the same time, with the hardware decoder of decoderCfg.
 func countMasterFrames(ctx context.Context, inputFilePath string, debug bool, decoderCfg ffmpeg.HWDecoderConfig) (

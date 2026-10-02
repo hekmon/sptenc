@@ -38,7 +38,9 @@ var encodeCommand = &cli.Command{
 		"    scene-aligned segments, and encodes each one (one-shot process).\n" +
 		"  * Directory of pre-split video files: every file is treated as an already-segmented scene.\n" +
 		"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n" +
-		"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate.\n\n" +
+		"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate,\n" +
+		"    and be all RGB or all YUV: RGB ones, an upscaler's for instance, are converted to YUV first,\n" +
+		"    as the master of an RGB file is (see MANUAL.md, RGB sources).\n\n" +
 		"SCENE DETECTION\n" +
 		"Use 'split --" + listScenesFlagName + "' to preview the actual scene list (frame, time, duration, score)\n" +
 		"for a given threshold, the thresholds command to inspect candidate thresholds and their\n" +
@@ -132,7 +134,7 @@ var encodeCommand = &cli.Command{
 				Category:  "Single Video File",
 				Validator: validateSceneThreshold,
 			},
-			rgbMatrixFlag("Single Video File"),
+			rgbMatrixFlag(""),
 			&cli.StringFlag{
 				Name:     originalFileFlagName,
 				Aliases:  []string{"f"},
@@ -327,7 +329,9 @@ var encodeCommand = &cli.Command{
 			videoStream       *ffmpeg.FFProbeBinaryStream
 			sourceTotalFrames int
 			sourceFrameRate   string           // see core.QPSearchConfig.SourceFrameRate
-			sourceRGBToYUV    ffmpeg.YUVMatrix // see sourceYUVMatrix: a file only, segments are taken as they are
+			sourceRGBToYUV    ffmpeg.YUVMatrix // see sourceYUVMatrix: the file's, converted by the final VMAF too
+			segmentsDurations []time.Duration  // the segments of a directory
+			segmentsRGBToYUV  ffmpeg.YUVMatrix // the RGB segments of a directory, see convertRGBSegments
 			setup             vmafSetup
 		)
 		if !inputInfos.IsDir() {
@@ -440,13 +444,23 @@ var encodeCommand = &cli.Command{
 					}
 				}
 			}
-			// Calculate total duration of all segments for accurate progress bar
+			// Calculate total duration of all segments for accurate progress bar, refusing a mix of
+			// RGB and YUV segments (see probePreSplitSegments)
 			fmt.Fprintln(bypass, "Calculating total duration of segments...")
-			if totalDuration, err = getSegmentsTotalDuration(ctx, segmentsPaths, cmd.Bool(debugFlagName)); err != nil {
-				err = fmt.Errorf("Failed to calculate total duration: %w", err)
+			if segmentsDurations, err = probePreSplitSegments(ctx, segmentsPaths, cmd.Bool(debugFlagName)); err != nil {
 				return
 			}
+			for _, duration := range segmentsDurations {
+				totalDuration += duration
+			}
 			fmt.Fprintf(bypass, "\tTotal duration of segments: %s\n", totalDuration)
+			// The matrix RGB segments are converted with, said before anything long: the first
+			// segment stands for the others, all of its kind (see probePreSplitSegments)
+			if firstSegment := sourceStats.VideoTrack(); firstSegment != nil {
+				if segmentsRGBToYUV, err = sourceYUVMatrix(cmd, bypass, firstSegment); err != nil {
+					return
+				}
+			}
 		}
 		// Validate the video stream (both kinds of input end up here: the first segment stands
 		// for the others with a directory)
@@ -463,6 +477,14 @@ var encodeCommand = &cli.Command{
 		encoderAdapter.VMAFModel = setup.model
 		encoderAdapter.VMAFModelCAMBI = setup.modelCAMBI
 		encoderAdapter.VMAFScore = setup.score
+		// The RGB segments of a directory get the master a source gets (see convertRGBSegments):
+		// the search and the final VMAF work on those
+		if segmentsRGBToYUV != "" {
+			if segmentsPaths, err = convertRGBSegments(ctx, segmentsPaths, segmentsDurations, workingDir,
+				segmentsRGBToYUV, cmd.Bool(debugFlagName)); err != nil {
+				return
+			}
+		}
 
 		// Get the stats cache (after probing so we know the VMAF model)
 		qpMin, qpMax, qpFound := encoderAdapter.QPRange()
