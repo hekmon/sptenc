@@ -129,6 +129,105 @@ func vmafRGBMatrices(cmd *cli.Command, out io.Writer, reference, distorted *ffmp
 	return
 }
 
+// vmafColorWarnings returns the warnings of the vmaf command about the colors its inputs declare,
+// an RGB one counting as converted (see vmafRGBMatrices): a matrix, primaries or a transfer both
+// declare and that differ, a full range on one side only, and what one declares the other does not.
+//
+// # WHY WARN, AND NOT CONVERT
+//
+// VMAF compares the pictures as they are decoded (see ffmpeg.vmafSameMatrix), and no step converts
+// primaries or a transfer: two files declaring different ones hold the very same pictures when only
+// their labels differ, and other pictures when one was really converted, which VMAF then scores low
+// (BT.601 pictures declaring BT.709 against their RGB source: 70.4). Nothing in the files tells
+// which it is, the user can. The range is converted by ffmpeg, one into the range of the other,
+// which is right when both declare it truly and another picture otherwise: the very same pictures
+// declared limited and full range scored 70.9, declared full range and not at all 85.7 (ffmpeg
+// reads a missing range as limited, and leaves a limited one and a missing one as they are).
+func vmafColorWarnings(reference, distorted *ffmpeg.FFProbeBinaryStream, referenceRGBToYUV, distortedRGBToYUV ffmpeg.YUVMatrix) (warnings []string) {
+	type colors struct {
+		name                                    string
+		converted                               bool // from RGB, by sptenc
+		matrix, colorRange, primaries, transfer string
+	}
+	declared := func(value string) string {
+		if value == "unknown" || value == "reserved" {
+			return ""
+		}
+		return value
+	}
+	of := func(name string, stream *ffmpeg.FFProbeBinaryStream, rgbToYUV ffmpeg.YUVMatrix) (c colors) {
+		c = colors{name: name, matrix: declared(stream.ColorSpace), colorRange: declared(stream.ColorRange),
+			primaries: declared(stream.ColorPrimaries), transfer: declared(stream.ColorTransfer)}
+		if rgbToYUV != "" {
+			c.converted, c.matrix, c.colorRange = true, string(rgbToYUV), "tv"
+		}
+		return
+	}
+	ref, dist := of("the reference", reference, referenceRGBToYUV), of("the distorted video", distorted, distortedRGBToYUV)
+	// The values both declare and that differ
+	if ref.matrix != "" && dist.matrix != "" && ref.matrix != dist.matrix {
+		matrixOf := func(c colors) string {
+			if c.converted {
+				return c.name + " is converted from RGB with the " + c.matrix + " matrix"
+			}
+			return c.name + " declares the " + c.matrix + " matrix"
+		}
+		warnings = append(warnings, fmt.Sprintf("%s, %s: VMAF compares the pictures as they are, neither converted into the matrix of the other (see MANUAL.md, What VMAF sees)",
+			matrixOf(ref), matrixOf(dist)))
+	}
+	if (ref.colorRange == "pc") != (dist.colorRange == "pc") {
+		rangeOf := func(c colors) string {
+			switch {
+			case c.converted:
+				return c.name + " is converted from RGB to limited range"
+			case c.colorRange == "pc":
+				return c.name + " declares full range (pc)"
+			case c.colorRange == "tv":
+				return c.name + " declares limited range (tv)"
+			default:
+				return c.name + " declares no range, which ffmpeg reads as limited"
+			}
+		}
+		warnings = append(warnings, fmt.Sprintf("%s, %s: ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly",
+			rangeOf(ref), rangeOf(dist)))
+	}
+	if ref.primaries != "" && dist.primaries != "" && ref.primaries != dist.primaries {
+		warnings = append(warnings, fmt.Sprintf("%s declares %s primaries, %s %s ones: VMAF compares the pictures as they are, whatever colors each is meant to show",
+			ref.name, ref.primaries, dist.name, dist.primaries))
+	}
+	if ref.transfer != "" && dist.transfer != "" && ref.transfer != dist.transfer {
+		warnings = append(warnings, fmt.Sprintf("%s declares the %s transfer, %s the %s one: VMAF compares the pictures as they are, whatever light each is meant to show",
+			ref.name, ref.transfer, dist.name, dist.transfer))
+	}
+	// What one declares and the other does not
+	for _, pair := range [][2]colors{{dist, ref}, {ref, dist}} {
+		lacking, other := pair[0], pair[1]
+		var names, values []string
+		for _, property := range []struct{ name, lacking, other string }{
+			{"matrix", lacking.matrix, other.matrix},
+			{"primaries", lacking.primaries, other.primaries},
+			{"transfer", lacking.transfer, other.transfer},
+		} {
+			if property.lacking == "" && property.other != "" {
+				names, values = append(names, property.name), append(values, property.other)
+			}
+		}
+		if len(names) > 0 {
+			warnings = append(warnings, fmt.Sprintf("%s declares no %s, where %s declares %s: VMAF compares the pictures as they are, as if it declared the same",
+				lacking.name, joinWords(names, "or"), other.name, joinWords(values, "and")))
+		}
+	}
+	return
+}
+
+// joinWords joins words as a sentence lists them: "a", "a or b", "a, b or c".
+func joinWords(words []string, conjunction string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " " + conjunction + " " + words[len(words)-1]
+}
+
 // resolveVMAFModel returns the VMAF model of a run and tells the user which one and why: the
 // one forced with the model flag, warned about when it is made for another display than the
 // one of the source resolution (it is the point of forcing it: a 1440p source judged as 4K, 4K

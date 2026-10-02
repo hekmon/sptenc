@@ -213,7 +213,7 @@ The libvmaf filter takes its two inputs in one pixel format, one range and one m
 
 Rejected: letting ffmpeg convert, as a color-managed comparison. Nothing in sptenc converts a YUV picture into another matrix: an encode or a file declaring another matrix, or none, holds the same pictures under another label (an encoder may leave the matrix out of its stream), and converting it scores a conversion sptenc never made. ffmpeg also takes a missing matrix for BT.601's, whatever the file. Files really encoded with different matrices are scored as they are, low (BT.601 pictures declaring BT.709 against their RGB source: 70.4).
 
-**Implication:** an RGB input of a VMAF pass must be given its matrix: relabelled, the matrix ffmpeg would convert it with is the unspecified one, BT.601's. `vmaf` converts RGB inputs as `encode` converts an RGB source (`vmafRGBMatrices`).
+**Implication:** an RGB input of a VMAF pass must be given its matrix: relabelled, the matrix ffmpeg would convert it with is the unspecified one, BT.601's. `vmaf` converts RGB inputs as `encode` converts an RGB source (`vmafRGBMatrices`), and warns about what its two files declare differently (`vmafColorWarnings`): matrices, primaries and transfers both declare and that differ, or one declares and not the other (only the user knows whether the pictures differ too), and a full range on one side only, which ffmpeg converts (the same pictures declared limited and full range scored 70.9).
 
 ### Cache isolation
 

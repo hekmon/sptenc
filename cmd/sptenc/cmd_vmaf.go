@@ -35,7 +35,8 @@ var vmafCommand = &cli.Command{
 		"COLORS\n" +
 		"VMAF compares the pictures as they are decoded: a YUV input is not converted into the matrix\n" +
 		"the other one declares. An RGB input is converted to YUV as encode converts an RGB source, with\n" +
-		"the matrix of its primaries or the one --" + rgbMatrixFlagName + " sets (see MANUAL.md, RGB sources).\n\n" +
+		"the matrix of its primaries or the one --" + rgbMatrixFlagName + " sets (see MANUAL.md, RGB sources).\n" +
+		"Matrices, primaries, transfers or ranges the two files declare differently are warned about.\n\n" +
 		"HARDWARE ACCELERATION\n" +
 		"Use --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD), --" + d3d12DecFlagName + " (Windows),\n" +
 		"or --" + videoToolboxDecFlagName + " (macOS) to offload frame decoding to the GPU. This reserves\n" +
@@ -228,10 +229,14 @@ var vmafCommand = &cli.Command{
 			totalFrames = distFrames
 		}
 
-		// RGB inputs are converted to YUV as encode converts an RGB source
+		// RGB inputs are converted to YUV as encode converts an RGB source, and what differs in the
+		// colors both declare is said
 		referenceRGBToYUV, distortedRGBToYUV, err := vmafRGBMatrices(cmd, bypass, videoStream, distVideoStream)
 		if err != nil {
 			return err
+		}
+		for _, warning := range vmafColorWarnings(videoStream, distVideoStream, referenceRGBToYUV, distortedRGBToYUV) {
+			fmt.Fprintf(bypass, "WARNING: %s\n", warning)
 		}
 
 		// Compute VMAF with progress

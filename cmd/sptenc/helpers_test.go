@@ -283,6 +283,50 @@ func TestVMAFRGBMatrices(t *testing.T) {
 	}
 }
 
+// TestVMAFColorWarnings checks what the vmaf command says about the colors its inputs declare: the
+// differences, an RGB input counting as converted, and nothing when they agree.
+func TestVMAFColorWarnings(t *testing.T) {
+	stream := func(pixFmt, matrix, colorRange, primaries, transfer string) *ffmpeg.FFProbeBinaryStream {
+		return &ffmpeg.FFProbeBinaryStream{PixFmt: pixFmt, ColorSpace: matrix, ColorRange: colorRange,
+			ColorPrimaries: primaries, ColorTransfer: transfer}
+	}
+	yuv709 := stream("yuv420p10le", "bt709", "tv", "bt709", "bt709")
+	rgb709 := stream("gbrp16le", "gbr", "pc", "bt709", "bt709")
+	for _, tc := range []struct {
+		name                                 string
+		reference, distorted                 *ffmpeg.FFProbeBinaryStream
+		referenceRGBToYUV, distortedRGBToYUV ffmpeg.YUVMatrix
+		want                                 []string
+	}{
+		{"same colors", yuv709, yuv709, "", "", nil},
+		{"RGB reference converted with the matrix of the distorted video", rgb709, yuv709, ffmpeg.YUVMatrixBT709, "", nil},
+		{"both undeclared", stream("yuv420p", "", "", "", ""), stream("yuv420p", "unknown", "unknown", "unknown", "unknown"), "", "", nil},
+		{"limited range and none", yuv709, stream("yuv420p10le", "bt709", "", "bt709", "bt709"), "", "", nil},
+		{"matrices", yuv709, stream("yuv420p10le", "smpte170m", "tv", "bt709", "bt709"), "", "", []string{
+			"the reference declares the bt709 matrix, the distorted video declares the smpte170m matrix: VMAF compares the pictures as they are, neither converted into the matrix of the other (see MANUAL.md, What VMAF sees)"}},
+		{"RGB reference, another matrix", rgb709, stream("yuv420p10le", "smpte170m", "tv", "bt709", "bt709"), ffmpeg.YUVMatrixBT709, "", []string{
+			"the reference is converted from RGB with the bt709 matrix, the distorted video declares the smpte170m matrix: VMAF compares the pictures as they are, neither converted into the matrix of the other (see MANUAL.md, What VMAF sees)"}},
+		{"ranges", stream("yuv444p10le", "bt709", "pc", "bt709", "bt709"), yuv709, "", "", []string{
+			"the reference declares full range (pc), the distorted video declares limited range (tv): ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly"}},
+		{"full range and none", yuv709, stream("yuv420p10le", "bt709", "", "bt709", "bt709"), "", "", nil},
+		{"none and full range", stream("yuv420p10le", "bt709", "unknown", "bt709", "bt709"), stream("yuv420p10le", "bt709", "pc", "bt709", "bt709"), "", "", []string{
+			"the reference declares no range, which ffmpeg reads as limited, the distorted video declares full range (pc): ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly"}},
+		{"RGB distorted video, full range reference", stream("yuv444p10le", "bt709", "pc", "bt709", "bt709"), rgb709, "", ffmpeg.YUVMatrixBT709, []string{
+			"the reference declares full range (pc), the distorted video is converted from RGB to limited range: ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly"}},
+		{"primaries and transfers", yuv709, stream("yuv420p10le", "bt709", "tv", "bt2020", "smpte2084"), "", "", []string{
+			"the reference declares bt709 primaries, the distorted video bt2020 ones: VMAF compares the pictures as they are, whatever colors each is meant to show",
+			"the reference declares the bt709 transfer, the distorted video the smpte2084 one: VMAF compares the pictures as they are, whatever light each is meant to show"}},
+		{"distorted video declaring nothing", yuv709, stream("yuv420p10le", "", "", "", ""), "", "", []string{
+			"the distorted video declares no matrix, primaries or transfer, where the reference declares bt709, bt709 and bt709: VMAF compares the pictures as they are, as if it declared the same"}},
+		{"reference without matrix", stream("yuv420p10le", "", "tv", "bt709", "bt709"), yuv709, "", "", []string{
+			"the reference declares no matrix, where the distorted video declares bt709: VMAF compares the pictures as they are, as if it declared the same"}},
+	} {
+		if got := vmafColorWarnings(tc.reference, tc.distorted, tc.referenceRGBToYUV, tc.distortedRGBToYUV); !slices.Equal(got, tc.want) {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestProbePreSplitSegments probes real segments: their durations, and a directory mixing RGB and
 // YUV segments refused, whichever comes first.
 func TestProbePreSplitSegments(t *testing.T) {
