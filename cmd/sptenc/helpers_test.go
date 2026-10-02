@@ -229,63 +229,10 @@ func TestSourceYUVMatrix(t *testing.T) {
 	}
 }
 
-// TestVMAFRGBMatrices parses the RGB matrix flag of the vmaf command for real: each RGB input gets
-// the matrix encode would give it, a YUV one none.
-func TestVMAFRGBMatrices(t *testing.T) {
-	rgb := &ffmpeg.FFProbeBinaryStream{PixFmt: "gbrp16le", ColorPrimaries: "bt709"}
-	rgb2020 := &ffmpeg.FFProbeBinaryStream{PixFmt: "gbrp10le", ColorPrimaries: "bt2020"}
-	rgbUnknown := &ffmpeg.FFProbeBinaryStream{PixFmt: "rgb48le"}
-	yuv := &ffmpeg.FFProbeBinaryStream{PixFmt: "yuv420p10le", ColorPrimaries: "bt709", ColorSpace: "bt709"}
-	for _, tc := range []struct {
-		name                 string
-		reference, distorted *ffmpeg.FFProbeBinaryStream
-		args                 []string
-		wantReference        ffmpeg.YUVMatrix
-		wantDistorted        ffmpeg.YUVMatrix
-		refusal, says        string
-	}{
-		{"YUV inputs", yuv, yuv, nil, "", "", "", ""},
-		{"YUV inputs, flag set", yuv, yuv, []string{"--rgb-matrix", "bt709"}, "", "", "",
-			"WARNING: --rgb-matrix has no effect: neither the reference (yuv420p10le) nor the distorted video (yuv420p10le) is RGB"},
-		{"RGB reference", rgb, yuv, nil, ffmpeg.YUVMatrixBT709, "", "",
-			"RGB reference (gbrp16le): converted to YUV with the bt709 matrix of its bt709 primaries"},
-		{"RGB distorted video", yuv, rgb2020, nil, "", ffmpeg.YUVMatrixBT2020NC, "",
-			"RGB distorted video (gbrp10le): converted to YUV with the bt2020nc matrix of its bt2020 primaries"},
-		{"RGB inputs", rgb, rgb, nil, ffmpeg.YUVMatrixBT709, ffmpeg.YUVMatrixBT709, "", ""},
-		{"RGB reference without primaries", rgbUnknown, yuv, nil, "", "", "the reference is RGB (rgb48le) with unknown primaries", ""},
-		{"RGB distorted video without primaries", yuv, rgbUnknown, nil, "", "", "the distorted video is RGB (rgb48le) with unknown primaries", ""},
-		{"RGB inputs, flag set", rgbUnknown, rgb, []string{"--rgb-matrix", "bt470bg"}, ffmpeg.YUVMatrixBT601, ffmpeg.YUVMatrixBT601, "",
-			"with the bt470bg matrix forced by --rgb-matrix"},
-	} {
-		var (
-			referenceMatrix, distortedMatrix ffmpeg.YUVMatrix
-			out                              strings.Builder
-		)
-		cmd := &cli.Command{
-			Name:  "test",
-			Flags: []cli.Flag{rgbMatrixFlag("")},
-			Action: func(ctx context.Context, cmd *cli.Command) (err error) {
-				referenceMatrix, distortedMatrix, err = vmafRGBMatrices(cmd, &out, tc.reference, tc.distorted)
-				return
-			},
-		}
-		err := cmd.Run(context.Background(), append([]string{"test"}, tc.args...))
-		switch {
-		case tc.refusal != "" && (err == nil || !strings.Contains(err.Error(), tc.refusal)):
-			t.Errorf("%s: want the refusal %q, got %v", tc.name, tc.refusal, err)
-		case tc.refusal == "" && err != nil:
-			t.Errorf("%s: %s", tc.name, err)
-		case referenceMatrix != tc.wantReference || distortedMatrix != tc.wantDistorted:
-			t.Errorf("%s: want the matrices %q and %q, got %q and %q", tc.name, tc.wantReference, tc.wantDistorted, referenceMatrix, distortedMatrix)
-		case !strings.Contains(out.String(), tc.says):
-			t.Errorf("%s: expected %q in %q", tc.name, tc.says, out.String())
-		}
-	}
-}
-
-// TestVMAFColorWarnings checks what the vmaf command says about the colors its inputs declare: the
-// differences, an RGB input counting as converted, and nothing when they agree.
-func TestVMAFColorWarnings(t *testing.T) {
+// TestPlanVMAFColors parses the RGB matrix flag of the vmaf command for real, and checks how its
+// inputs are brought to the same colors: the matrix of each RGB input, the filter bringing the
+// reference to the colors of the distorted video, and what is said.
+func TestPlanVMAFColors(t *testing.T) {
 	stream := func(pixFmt, matrix, colorRange, primaries, transfer string) *ffmpeg.FFProbeBinaryStream {
 		return &ffmpeg.FFProbeBinaryStream{PixFmt: pixFmt, ColorSpace: matrix, ColorRange: colorRange,
 			ColorPrimaries: primaries, ColorTransfer: transfer}
@@ -295,34 +242,94 @@ func TestVMAFColorWarnings(t *testing.T) {
 	for _, tc := range []struct {
 		name                                 string
 		reference, distorted                 *ffmpeg.FFProbeBinaryStream
+		args                                 []string
 		referenceRGBToYUV, distortedRGBToYUV ffmpeg.YUVMatrix
-		want                                 []string
+		filter                               string // empty: none, else the exact filter
+		says                                 []string
+		refusal                              string
 	}{
-		{"same colors", yuv709, yuv709, "", "", nil},
-		{"RGB reference converted with the matrix of the distorted video", rgb709, yuv709, ffmpeg.YUVMatrixBT709, "", nil},
-		{"both undeclared", stream("yuv420p", "", "", "", ""), stream("yuv420p", "unknown", "unknown", "unknown", "unknown"), "", "", nil},
-		{"limited range and none", yuv709, stream("yuv420p10le", "bt709", "", "bt709", "bt709"), "", "", nil},
-		{"matrices", yuv709, stream("yuv420p10le", "smpte170m", "tv", "bt709", "bt709"), "", "", []string{
-			"the reference declares the bt709 matrix, the distorted video declares the smpte170m matrix: VMAF compares the pictures as they are, neither converted into the matrix of the other (see MANUAL.md, What VMAF sees)"}},
-		{"RGB reference, another matrix", rgb709, stream("yuv420p10le", "smpte170m", "tv", "bt709", "bt709"), ffmpeg.YUVMatrixBT709, "", []string{
-			"the reference is converted from RGB with the bt709 matrix, the distorted video declares the smpte170m matrix: VMAF compares the pictures as they are, neither converted into the matrix of the other (see MANUAL.md, What VMAF sees)"}},
-		{"ranges", stream("yuv444p10le", "bt709", "pc", "bt709", "bt709"), yuv709, "", "", []string{
-			"the reference declares full range (pc), the distorted video declares limited range (tv): ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly"}},
-		{"full range and none", yuv709, stream("yuv420p10le", "bt709", "", "bt709", "bt709"), "", "", nil},
-		{"none and full range", stream("yuv420p10le", "bt709", "unknown", "bt709", "bt709"), stream("yuv420p10le", "bt709", "pc", "bt709", "bt709"), "", "", []string{
-			"the reference declares no range, which ffmpeg reads as limited, the distorted video declares full range (pc): ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly"}},
-		{"RGB distorted video, full range reference", stream("yuv444p10le", "bt709", "pc", "bt709", "bt709"), rgb709, "", ffmpeg.YUVMatrixBT709, []string{
-			"the reference declares full range (pc), the distorted video is converted from RGB to limited range: ffmpeg converts one into the range of the other before VMAF compares them, which is right only if both declare it truly"}},
-		{"primaries and transfers", yuv709, stream("yuv420p10le", "bt709", "tv", "bt2020", "smpte2084"), "", "", []string{
-			"the reference declares bt709 primaries, the distorted video bt2020 ones: VMAF compares the pictures as they are, whatever colors each is meant to show",
-			"the reference declares the bt709 transfer, the distorted video the smpte2084 one: VMAF compares the pictures as they are, whatever light each is meant to show"}},
-		{"distorted video declaring nothing", yuv709, stream("yuv420p10le", "", "", "", ""), "", "", []string{
-			"the distorted video declares no matrix, primaries or transfer, where the reference declares bt709, bt709 and bt709: VMAF compares the pictures as they are, as if it declared the same"}},
-		{"reference without matrix", stream("yuv420p10le", "", "tv", "bt709", "bt709"), yuv709, "", "", []string{
-			"the reference declares no matrix, where the distorted video declares bt709: VMAF compares the pictures as they are, as if it declared the same"}},
+		{name: "same colors", reference: yuv709, distorted: yuv709},
+		{name: "YUV inputs, flag set", reference: yuv709, distorted: yuv709, args: []string{"--rgb-matrix", "bt709"},
+			says: []string{"--rgb-matrix has no effect: neither the reference (yuv420p10le) nor the distorted video (yuv420p10le) is RGB"}},
+		{name: "RGB reference, the matrix of the distorted video", reference: rgb709, distorted: stream("yuv420p10le", "bt2020nc", "tv", "bt709", "bt709"),
+			referenceRGBToYUV: ffmpeg.YUVMatrixBT2020NC,
+			says:              []string{"RGB reference (gbrp16le): converted to YUV with the bt2020nc matrix declared by the distorted video"}},
+		{name: "RGB reference without primaries, the matrix of the distorted video", reference: stream("rgb48le", "", "", "", ""), distorted: yuv709,
+			referenceRGBToYUV: ffmpeg.YUVMatrixBT709,
+			says:              []string{"the reference declares no primaries or transfer, where the distorted video declares bt709 and bt709"}},
+		{name: "RGB reference without primaries, nor a matrix from the distorted video", reference: stream("rgb48le", "", "", "", ""),
+			distorted: stream("yuv420p", "", "", "", ""), refusal: "the reference is RGB (rgb48le) with unknown primaries"},
+		{name: "RGB distorted video, the matrix of the reference", reference: stream("yuv420p10le", "smpte170m", "tv", "smpte170m", "smpte170m"),
+			distorted: stream("gbrp10le", "", "", "smpte170m", "smpte170m"), distortedRGBToYUV: ffmpeg.YUVMatrixBT601,
+			says: []string{"RGB distorted video (gbrp10le): converted to YUV with the bt470bg matrix declared by the reference"}},
+		{name: "RGB inputs", reference: rgb709, distorted: rgb709, referenceRGBToYUV: ffmpeg.YUVMatrixBT709, distortedRGBToYUV: ffmpeg.YUVMatrixBT709},
+		{name: "RGB inputs, flag set", reference: rgb709, distorted: rgb709, args: []string{"--rgb-matrix", "bt2020nc"},
+			referenceRGBToYUV: ffmpeg.YUVMatrixBT2020NC, distortedRGBToYUV: ffmpeg.YUVMatrixBT2020NC},
+		{name: "matrices", reference: yuv709, distorted: stream("yuv420p10le", "smpte170m", "tv", "bt709", "bt709"),
+			filter: "colorspace=ispace=bt709:irange=tv:iprimaries=bt709:itrc=bt709:space=smpte170m:range=tv:primaries=bt709:trc=bt709",
+			says:   []string{"the reference declares the bt709 matrix, the distorted video the smpte170m matrix: the reference is converted into the matrix of the distorted video"}},
+		{name: "the same matrix and transfer under other names", reference: stream("yuv420p", "bt470bg", "tv", "bt709", "bt709"),
+			distorted: stream("yuv420p", "smpte170m", "tv", "bt709", "bt2020-10")},
+		{name: "primaries and matrices", reference: yuv709, distorted: stream("yuv420p10le", "bt2020nc", "tv", "bt2020", "bt709"),
+			filter: "colorspace=ispace=bt709:irange=tv:iprimaries=bt709:itrc=bt709:space=bt2020nc:range=tv:primaries=bt2020:trc=bt709",
+			says: []string{"converted into the matrix of the distorted video",
+				"the reference declares bt709 primaries, the distorted video bt2020 primaries: the reference is converted into the primaries of the distorted video with ffmpeg's colorspace filter, an indication only"}},
+		{name: "HDR against SDR", reference: stream("yuv420p10le", "bt2020nc", "tv", "bt2020", "smpte2084"), distorted: yuv709,
+			says: []string{"the reference declares the smpte2084 transfer, the distorted video the bt709 transfer: bringing an HDR picture to another takes tone mapping, which sptenc does not do, VMAF compares the pictures as they are, a score that means little",
+				"the reference declares the bt2020nc matrix, the distorted video the bt709 matrix: their transfers can not be brought together, so neither can the rest",
+				"the reference declares bt2020 primaries, the distorted video bt709 primaries: their transfers can not be brought together"}},
+		{name: "HDR primaries", reference: stream("yuv420p10le", "bt2020nc", "tv", "bt2020", "smpte2084"), distorted: stream("yuv420p10le", "bt2020nc", "tv", "smpte432", "smpte2084"),
+			says: []string{"the reference declares bt2020 primaries, the distorted video smpte432 primaries: ffmpeg's colorspace filter does not convert pictures in the smpte2084 transfer"}},
+		{name: "a matrix the filter does not know", reference: stream("yuv420p10le", "ictcp", "tv", "bt2020", "bt709"), distorted: stream("yuv420p10le", "bt2020nc", "tv", "bt2020", "bt709"),
+			says: []string{"the reference declares the ictcp matrix, the distorted video the bt2020nc matrix: ffmpeg's colorspace filter does not convert it"}},
+		{name: "primaries without transfers", reference: stream("yuv420p", "bt709", "tv", "bt709", ""), distorted: stream("yuv420p", "bt709", "tv", "bt470bg", ""),
+			says: []string{"converting primaries takes the transfer of the pictures, which they do not declare"}},
+		{name: "ranges", reference: stream("yuv444p10le", "bt709", "pc", "bt709", "bt709"), distorted: yuv709,
+			says: []string{"the reference declares full range (pc), the distorted video declares limited range (tv): the reference is converted into the range of the distorted video"}},
+		{name: "ranges and matrices", reference: stream("yuv444p10le", "bt709", "pc", "bt709", "bt709"), distorted: stream("yuv420p10le", "smpte170m", "", "bt709", "bt709"),
+			filter: "colorspace=ispace=bt709:irange=pc:iprimaries=bt709:itrc=bt709:space=smpte170m:range=tv:primaries=bt709:trc=bt709",
+			says:   []string{"the distorted video declares no range, which ffmpeg reads as limited"}},
+		{name: "distorted video declaring nothing", reference: yuv709, distorted: stream("yuv420p10le", "", "", "", ""),
+			says: []string{"the distorted video declares no matrix, primaries or transfer, where the reference declares bt709, bt709 and bt709: VMAF compares the pictures as they are, as if it declared the same"}},
 	} {
-		if got := vmafColorWarnings(tc.reference, tc.distorted, tc.referenceRGBToYUV, tc.distortedRGBToYUV); !slices.Equal(got, tc.want) {
-			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		var (
+			plan vmafColors
+			out  strings.Builder
+		)
+		cmd := &cli.Command{
+			Name:  "test",
+			Flags: []cli.Flag{rgbMatrixFlag("")},
+			Action: func(ctx context.Context, cmd *cli.Command) (err error) {
+				plan, err = planVMAFColors(cmd, &out, tc.reference, tc.distorted)
+				return
+			},
+		}
+		err := cmd.Run(context.Background(), append([]string{"test"}, tc.args...))
+		said := out.String() + strings.Join(plan.warnings, "\n")
+		switch {
+		case tc.refusal != "":
+			if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+				t.Errorf("%s: want the refusal %q, got %v", tc.name, tc.refusal, err)
+			}
+			continue
+		case err != nil:
+			t.Errorf("%s: %s", tc.name, err)
+			continue
+		}
+		if plan.referenceRGBToYUV != tc.referenceRGBToYUV || plan.distortedRGBToYUV != tc.distortedRGBToYUV {
+			t.Errorf("%s: want the RGB matrices %q and %q, got %q and %q", tc.name, tc.referenceRGBToYUV, tc.distortedRGBToYUV,
+				plan.referenceRGBToYUV, plan.distortedRGBToYUV)
+		}
+		if plan.referenceColorFilter != tc.filter {
+			t.Errorf("%s: want the filter %q, got %q", tc.name, tc.filter, plan.referenceColorFilter)
+		}
+		if len(tc.says) == 0 && len(plan.warnings) > 0 {
+			t.Errorf("%s: unexpected warnings %q", tc.name, plan.warnings)
+		}
+		for _, says := range tc.says {
+			if !strings.Contains(said, says) {
+				t.Errorf("%s: expected %q in:\n%s", tc.name, says, said)
+			}
 		}
 	}
 }

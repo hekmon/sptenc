@@ -33,10 +33,13 @@ var vmafCommand = &cli.Command{
 		"The VMAF model is selected from the height of the reference (see MANUAL.md, Models):\n" +
 		"--" + vmafModelFlagName + " forces one. libvmaf 3.2.0 or newer is required (VMAF v1 models).\n\n" +
 		"COLORS\n" +
-		"VMAF compares the pictures as they are decoded: a YUV input is not converted into the matrix\n" +
-		"the other one declares. An RGB input is converted to YUV as encode converts an RGB source, with\n" +
-		"the matrix of its primaries or the one --" + rgbMatrixFlagName + " sets (see MANUAL.md, RGB sources).\n" +
-		"Matrices, primaries, transfers or ranges the two files declare differently are warned about.\n\n" +
+		"The distorted video is scored as it is decoded, and the reference is brought to the colors it\n" +
+		"declares, with ffmpeg's colorspace filter: its matrix, primaries and transfer where both files\n" +
+		"declare them and they differ (primaries and transfers an indication only), its range. An RGB\n" +
+		"input is converted to YUV with the matrix the other one declares, else as encode converts an RGB\n" +
+		"source: with the matrix of its primaries, or the one --" + rgbMatrixFlagName + " sets. What is converted,\n" +
+		"what can not be (HDR against SDR) and what only one file declares are warned about (see MANUAL.md,\n" +
+		"What VMAF sees).\n\n" +
 		"HARDWARE ACCELERATION\n" +
 		"Use --" + nvdecFlagName + " (NVIDIA), --" + vaapiDecFlagName + " (Intel/AMD), --" + d3d12DecFlagName + " (Windows),\n" +
 		"or --" + videoToolboxDecFlagName + " (macOS) to offload frame decoding to the GPU. This reserves\n" +
@@ -231,11 +234,11 @@ var vmafCommand = &cli.Command{
 
 		// RGB inputs are converted to YUV as encode converts an RGB source, and what differs in the
 		// colors both declare is said
-		referenceRGBToYUV, distortedRGBToYUV, err := vmafRGBMatrices(cmd, bypass, videoStream, distVideoStream)
+		colors, err := planVMAFColors(cmd, bypass, videoStream, distVideoStream)
 		if err != nil {
 			return err
 		}
-		for _, warning := range vmafColorWarnings(videoStream, distVideoStream, referenceRGBToYUV, distortedRGBToYUV) {
+		for _, warning := range colors.warnings {
 			fmt.Fprintf(bypass, "WARNING: %s\n", warning)
 		}
 
@@ -243,16 +246,17 @@ var vmafCommand = &cli.Command{
 		fmt.Fprintln(bypass, "Computing VMAF...")
 		start = time.Now()
 		report, err := liveVMAF(ctx, ffmpeg.VMAFComputeConfig{
-			ReferencePath:     referencePath,
-			ReferenceRGBToYUV: referenceRGBToYUV,
-			DistortedPath:     distortedPath,
-			DistortedRGBToYUV: distortedRGBToYUV,
-			InputFrameRate:    videoStream.RFrameRate,
-			ReportPath:        filepath.Join(workingDir, "vmaf.json"),
-			Model:             setup.model,
-			ModelCAMBI:        setup.modelCAMBI,
-			Measures:          setup.finalMeasures(),
-			HWDecoderConfig:   decoderCfg,
+			ReferencePath:        referencePath,
+			ReferenceRGBToYUV:    colors.referenceRGBToYUV,
+			ReferenceColorFilter: colors.referenceColorFilter,
+			DistortedPath:        distortedPath,
+			DistortedRGBToYUV:    colors.distortedRGBToYUV,
+			InputFrameRate:       videoStream.RFrameRate,
+			ReportPath:           filepath.Join(workingDir, "vmaf.json"),
+			Model:                setup.model,
+			ModelCAMBI:           setup.modelCAMBI,
+			Measures:             setup.finalMeasures(),
+			HWDecoderConfig:      decoderCfg,
 		}, totalFrames, cmd.Bool(debugFlagName))
 		if err != nil {
 			return fmt.Errorf("failed to compute VMAF: %w", err)

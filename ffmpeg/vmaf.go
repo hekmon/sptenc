@@ -551,6 +551,10 @@ type VMAFComputeConfig struct {
 	// BT.601's.
 	ReferenceRGBToYUV YUVMatrix
 	DistortedRGBToYUV YUVMatrix
+	// ReferenceColorFilter brings the reference to the colors the distorted video declares (see
+	// ColorConversionFilter), applied once it is YUV: empty for none, as the encodes of sptenc
+	// declare the colors of their master.
+	ReferenceColorFilter string
 	// VMAF generation
 	ReportPath string       // Path where the JSON VMAF report will be written.
 	Model      VMAFModel    // Model to score with (see SelectVMAFModel).
@@ -638,16 +642,20 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.ReferencePath,
 	)
 	//// vmaf filter
-	inputFilters := func(rgbToYUV YUVMatrix) string {
+	inputFilters := func(rgbToYUV YUVMatrix, colorFilter string) string {
 		filters := "setpts=PTS-STARTPTS"
 		if rgbToYUV != "" {
 			filters += "," + RGBToYUVFilter(rgbToYUV)
+		}
+		if colorFilter != "" {
+			filters += "," + colorFilter
 		}
 		return filters + "," + vmafSameMatrix
 	}
 	args = append(args,
 		"-filter_complex",
-		"[0:v]"+inputFilters(config.DistortedRGBToYUV)+"[distorted];[1:v]"+inputFilters(config.ReferenceRGBToYUV)+
+		"[0:v]"+inputFilters(config.DistortedRGBToYUV, "")+"[distorted];[1:v]"+
+			inputFilters(config.ReferenceRGBToYUV, config.ReferenceColorFilter)+
 			"[reference];[distorted][reference]"+pass.filter(config.ReportPath, NbThreadsToUse),
 	)
 	//// no ffmpeg output
