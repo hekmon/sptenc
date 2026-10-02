@@ -3,7 +3,8 @@ package ffmpeg
 import "strings"
 
 // YUVMatrix names the matrix an RGB source is converted to YUV with, as ffprobe names the matrix
-// a YUV stream declares (its color_space): the master declares it, and so do its encodes.
+// a YUV stream declares (its color_space): the master declares it, and so do its encodes and the
+// output (see RemuxColorSpace).
 //
 // # WHY AN EXPLICIT CONVERSION
 //

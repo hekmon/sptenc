@@ -529,9 +529,9 @@ func formatPercent(v float64) string {
 }
 
 // verifyColorMetadata probes the output file and warns via liveprogress.Bypass if its
-// container-level color metadata is not what ffmpeg.RemuxSwapVideo writes: the color range of the
-// encoded video when it declares one (see ffmpeg.RemuxColorRange), the values of the source video
-// stream for the rest.
+// container-level color metadata is not what ffmpeg.RemuxSwapVideo writes: the color range and the
+// matrix of the encoded video when it declares them (see ffmpeg.RemuxColorRange and
+// ffmpeg.RemuxColorSpace), the values of the source video stream for the rest.
 func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *ffmpeg.FFProbeBinaryStream, encodedPath string, debug bool) {
 	bypass := liveprogress.Bypass()
 	outputStats, err := getStreamsInfos(ctx, outputPath, debug)
@@ -548,7 +548,7 @@ func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *f
 	if encodedStats, err := getStreamsInfos(ctx, encodedPath, debug); err == nil {
 		encodedStream = encodedStats.VideoTrack()
 	} else {
-		fmt.Fprintf(bypass, "WARNING: could not probe the encoded video for its color range: %s\n", err)
+		fmt.Fprintf(bypass, "WARNING: could not probe the encoded video for its color range and matrix: %s\n", err)
 	}
 	if expectedRange := ffmpeg.RemuxColorRange(sourceStream, encodedStream); expectedRange != "" && outStream.ColorRange != expectedRange {
 		origin := "encoded video"
@@ -557,8 +557,12 @@ func verifyColorMetadata(ctx context.Context, outputPath string, sourceStream *f
 		}
 		fmt.Fprintf(bypass, "WARNING: output color_range (%s) does not match the %s (%s)\n", outStream.ColorRange, origin, expectedRange)
 	}
-	if sourceStream.ColorSpace != "" && outStream.ColorSpace != sourceStream.ColorSpace {
-		fmt.Fprintf(bypass, "WARNING: output colorspace (%s) does not match source (%s)\n", outStream.ColorSpace, sourceStream.ColorSpace)
+	if expectedMatrix := ffmpeg.RemuxColorSpace(sourceStream, encodedStream); expectedMatrix != "" && outStream.ColorSpace != expectedMatrix {
+		origin := "encoded video"
+		if expectedMatrix == sourceStream.ColorSpace {
+			origin = "source" // same value, or the encoded video declares none
+		}
+		fmt.Fprintf(bypass, "WARNING: output colorspace (%s) does not match the %s (%s)\n", outStream.ColorSpace, origin, expectedMatrix)
 	}
 	if sourceStream.ColorTransfer != "" && outStream.ColorTransfer != sourceStream.ColorTransfer {
 		fmt.Fprintf(bypass, "WARNING: output color_trc (%s) does not match source (%s)\n", outStream.ColorTransfer, sourceStream.ColorTransfer)

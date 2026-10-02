@@ -205,7 +205,7 @@ Rejected:
 - Guessing the matrix from the resolution: the master and every encode would declare the guess as a fact.
 - zscale: not in every ffmpeg build (the n9.0.2 static build of the measurements has none), and the master of a source would then depend on the build. swscale's limit is measured: a 16-bit source whose white is 65535 comes out at 943 instead of 940. A YUV file made upstream with zscale is taken as it is.
 
-**Implication:** an RGB source must not reach a step converting it by itself: a new step reading the source as YUV applies `RGBToYUVFilter` with the matrix of the run. `split --master` refuses an RGB file, which it would cut without converting. Not covered yet: the segments of a pre-split directory reach the encoders as they are (RGB ones are converted by each encoder's own path, with BT.601, measured with libx265 and hevc_nvenc), and the remux copies the source's matrix, `gbr` for an RGB source, which ffmpeg's `-colorspace` refuses: the run fails at its very end.
+**Implication:** an RGB source must not reach a step converting it by itself: a new step reading the source as YUV applies `RGBToYUVFilter` with the matrix of the run. `split --master` refuses an RGB file, which it would cut without converting. The output declares the matrix of the encoded video (`ffmpeg.RemuxColorSpace`): the remux used to copy the source's, `gbr` for an RGB source, which ffmpeg's `-colorspace` refused, and every encode and batchsearch of an RGB source failed at its very end. Not covered yet: the segments of a pre-split directory reach the encoders as they are (RGB ones are converted by each encoder's own path, with BT.601, measured with libx265 and hevc_nvenc), and the output then declares no matrix.
 
 ### Cache isolation
 

@@ -73,11 +73,11 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 	// the original file and passing output-side -color_* flags we override the
 	// mapped stream's codecpar with the original's authoritative values. This does
 	// not affect or create bitstream-level SEIs.
-	// The color range is the exception: it is taken from the new video (see RemuxColorRange).
+	// The color range and the matrix are the exception: they are taken from the new video (see
+	// RemuxColorRange and RemuxColorSpace).
 	var (
 		originalVideo  *FFProbeBinaryStream
 		newVideo       *FFProbeBinaryStream
-		colorSpace     string
 		colorTransfer  string
 		colorPrimaries string
 	)
@@ -87,7 +87,6 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 		RuntimeError: config.RuntimeError,
 	}); err == nil {
 		if originalVideo = originalStats.VideoTrack(); originalVideo != nil {
-			colorSpace = originalVideo.ColorSpace
 			colorTransfer = originalVideo.ColorTransfer
 			colorPrimaries = originalVideo.ColorPrimaries
 		}
@@ -101,9 +100,10 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 	}); err == nil {
 		newVideo = newStats.VideoTrack()
 	} else if config.RuntimeError != nil {
-		config.RuntimeError(fmt.Errorf("failed to probe the new video file for its color range: %w", err))
+		config.RuntimeError(fmt.Errorf("failed to probe the new video file for its color range and matrix: %w", err))
 	}
 	colorRange := RemuxColorRange(originalVideo, newVideo)
+	colorSpace := RemuxColorSpace(originalVideo, newVideo)
 	// Prepare
 	args := []string{
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
@@ -137,7 +137,7 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 		args = append(args, "-color_range:v:0", colorRange)
 	}
 	if colorSpace != "" {
-		args = append(args, "-colorspace:v:0", colorSpace)
+		args = append(args, "-colorspace:v:0", colorSpaceOptionValue(colorSpace))
 	}
 	if colorTransfer != "" {
 		args = append(args, "-color_trc:v:0", colorTransfer)
@@ -249,4 +249,59 @@ func RemuxColorRange(originalVideo, newVideo *FFProbeBinaryStream) string {
 		return originalVideo.ColorRange
 	}
 	return ""
+}
+
+// RemuxColorSpace returns the matrix (colorspace) RemuxSwapVideo declares for the video it takes
+// from the new video file, given the video streams of both files (nil when a file has none or could
+// not be probed), as ffprobe names it: the matrix of the new video when it declares one, the
+// original's otherwise, provided both hold the same kind of pictures, RGB or YUV.
+//
+// # WHY THE NEW VIDEO'S MATRIX, NOT THE ORIGINAL'S
+//
+// The matrix tells how to turn the YUV of a stream back into RGB: like the range (see
+// RemuxColorRange), it describes a stream, and the stream is the new video's. An RGB source
+// declares the identity ("gbr" for ffprobe), and its master is converted to YUV with a matrix the
+// master and its encodes declare (see YUVMatrix). Declaring the original's identity over the output
+// declared a YUV video as RGB, and did not get that far: ffmpeg's -colorspace option names the
+// identity "rgb" and refused "gbr", so every encode of an RGB source failed at its last step, the
+// remux, after the whole search (measured with libx265, hevc_nvenc, libsvtav1 and av1_nvenc), and
+// so did batchsearch and the remux command given an RGB original.
+//
+// A YUV source keeps its matrix down to the new video: the master keeps the one of the frames the
+// source decodes to (checked on 8-bit 4:2:0, 10-bit 4:2:0 and full range 10-bit 4:4:4 sources
+// declaring BT.709), and the encodes keep the master's (checked with the four encoders above). The
+// output declares the same matrix as before for those.
+//
+// # EDGE CASES
+//
+//   - The new video declares no matrix: the original's is declared, as before, when both hold the
+//     same kind of pictures, judged by their pixel formats. An RGB original's matrix is never
+//     declared over a YUV video, nor a YUV original's over an RGB one: no matrix then, rather than
+//     a wrong one. A new video that could not be probed counts as YUV, what sptenc encodes.
+//   - ffprobe leaves an unspecified matrix out, "unknown" and "reserved" declare nothing either.
+//   - The identity is returned as ffprobe names it, "gbr": RemuxSwapVideo hands it to ffmpeg as
+//     "rgb" (see colorSpaceOptionValue).
+func RemuxColorSpace(originalVideo, newVideo *FFProbeBinaryStream) string {
+	declared := func(matrix string) bool {
+		return matrix != "" && matrix != "unknown" && matrix != "reserved"
+	}
+	if newVideo != nil && declared(newVideo.ColorSpace) {
+		return newVideo.ColorSpace
+	}
+	newRGB := newVideo != nil && IsRGBPixelFormat(newVideo.PixFmt)
+	if originalVideo != nil && declared(originalVideo.ColorSpace) && IsRGBPixelFormat(originalVideo.PixFmt) == newRGB {
+		return originalVideo.ColorSpace
+	}
+	return ""
+}
+
+// colorSpaceOptionValue returns the value ffmpeg's -colorspace option takes for a matrix as ffprobe
+// names it: the option knows the identity of RGB streams as "rgb", and refuses the "gbr" ffprobe
+// prints. It takes the other names ffprobe prints for a matrix as they are, but "reserved", which
+// RemuxColorSpace never returns (checked with ffmpeg 9.0.2).
+func colorSpaceOptionValue(matrix string) string {
+	if matrix == "gbr" {
+		return "rgb"
+	}
+	return matrix
 }
