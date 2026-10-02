@@ -448,9 +448,10 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 	return
 }
 
-// probePreSplitSegments probes every segment of a pre-split directory and returns their durations.
-// Segments must all hold RGB pictures, which encode converts to YUV before the search (see
-// convertRGBSegments), or all YUV ones: the kind of the first one is the kind of the directory.
+// probePreSplitSegments probes every segment of a pre-split directory and returns their durations,
+// and whether one holds full chroma YUV pictures (see ffmpeg.IsFullChromaYUV), which encode subsamples
+// before the search, as it converts RGB ones (see writeSegmentsMasters). Segments must all hold RGB
+// pictures, or all YUV ones: the kind of the first one is the kind of the directory.
 //
 // # WHY A MIX IS REFUSED
 //
@@ -458,7 +459,7 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 // the YUV segments of one source next to the RGB ones of an upscale for instance. Converting the
 // RGB ones would give their encodes a matrix the YUV ones may not have, in one output declaring a
 // single matrix.
-func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug bool) (durations []time.Duration, err error) {
+func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug bool) (durations []time.Duration, fullChroma bool, err error) {
 	var (
 		stats ffmpeg.FFProbeStats
 		rgb   bool // the kind of the first segment
@@ -484,6 +485,7 @@ func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug boo
 				shellescape.Quote(filepath.Base(path)), kind(segmentRGB), shellescape.Quote(filepath.Base(segmentPaths[0])), kind(rgb))
 			return
 		}
+		fullChroma = fullChroma || video != nil && ffmpeg.IsFullChromaYUV(video.PixFmt)
 		durations[i] = stats.Format.Duration
 	}
 	return

@@ -341,13 +341,17 @@ func TestProbePreSplitSegments(t *testing.T) {
 	dir := t.TempDir()
 	yuv1, yuv2 := testSegment(t, ctx, dir, "seg_01.mkv", "yuv420p10le"), testSegment(t, ctx, dir, "seg_02.mkv", "yuv420p")
 	rgb1, rgb2 := testSegment(t, ctx, dir, "seg_03.mkv", "gbrp10le"), testSegment(t, ctx, dir, "seg_04.mkv", "gbrp16le")
-	for _, segments := range [][]string{{yuv1, yuv2}, {rgb1, rgb2}} {
-		durations, err := probePreSplitSegments(ctx, segments, false)
+	full := testSegment(t, ctx, dir, "seg_05.mkv", "yuv444p10le")
+	for _, tc := range []struct {
+		segments   []string
+		fullChroma bool
+	}{{[]string{yuv1, yuv2}, false}, {[]string{rgb1, rgb2}, false}, {[]string{yuv1, full}, true}} {
+		durations, fullChroma, err := probePreSplitSegments(ctx, tc.segments, false)
 		if err != nil {
-			t.Fatalf("%v: %s", segments, err)
+			t.Fatalf("%v: %s", tc.segments, err)
 		}
-		if want := []time.Duration{500 * time.Millisecond, 500 * time.Millisecond}; !slices.Equal(durations, want) {
-			t.Errorf("%v: want the durations %v, got %v", segments, want, durations)
+		if want := []time.Duration{500 * time.Millisecond, 500 * time.Millisecond}; !slices.Equal(durations, want) || fullChroma != tc.fullChroma {
+			t.Errorf("%v: want the durations %v and full chroma %t, got %v and %t", tc.segments, want, tc.fullChroma, durations, fullChroma)
 		}
 	}
 	for _, tc := range []struct {
@@ -357,7 +361,7 @@ func TestProbePreSplitSegments(t *testing.T) {
 		{[]string{yuv1, rgb1}, "segment seg_03.mkv holds RGB pictures where seg_01.mkv holds YUV ones"},
 		{[]string{rgb1, rgb2, yuv2}, "segment seg_02.mkv holds YUV pictures where seg_03.mkv holds RGB ones"},
 	} {
-		if _, err := probePreSplitSegments(ctx, tc.segments, false); err == nil || !strings.Contains(err.Error(), tc.refusal) {
+		if _, _, err := probePreSplitSegments(ctx, tc.segments, false); err == nil || !strings.Contains(err.Error(), tc.refusal) {
 			t.Errorf("want %q, got %v", tc.refusal, err)
 		}
 	}
@@ -365,7 +369,7 @@ func TestProbePreSplitSegments(t *testing.T) {
 
 // TestConvertRGBSegments converts real RGB segments: their masters are named as the segments of a
 // source, hold their frames, and declare the matrix they were converted with.
-func TestConvertRGBSegments(t *testing.T) {
+func TestWriteSegmentsMasters(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	segments := []string{testSegment(t, ctx, dir, "upscaled_a.mkv", "gbrp16le"), testSegment(t, ctx, dir, "upscaled_b.mkv", "gbrp10le")}
@@ -373,7 +377,7 @@ func TestConvertRGBSegments(t *testing.T) {
 	if err := os.Mkdir(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	masters, err := convertRGBSegments(ctx, segments, []time.Duration{500 * time.Millisecond, 500 * time.Millisecond}, out,
+	masters, err := writeSegmentsMasters(ctx, segments, []time.Duration{500 * time.Millisecond, 500 * time.Millisecond}, out,
 		ffmpeg.YUVMatrixBT709, false)
 	if err != nil {
 		t.Fatal(err)
@@ -391,6 +395,23 @@ func TestConvertRGBSegments(t *testing.T) {
 			[4]string{"yuv420p10le", "bt709", "tv", "left"}; got != want || video.NbReadPackets != 12 {
 			t.Errorf("%s: want %v and 12 frames, got %v and %d", master, want, got, video.NbReadPackets)
 		}
+	}
+	// Full chroma YUV segments: their chroma subsampled with the left siting, their matrix kept
+	full := filepath.Join(dir, "full")
+	if err := os.Mkdir(full, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	masters, err = writeSegmentsMasters(ctx, []string{testSegment(t, ctx, dir, "upscaled_c.mkv", "yuv444p10le")},
+		[]time.Duration{500 * time.Millisecond}, full, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: masters[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if video := stats.VideoTrack(); video.PixFmt != "yuv420p10le" || video.ChromaLocation != "left" {
+		t.Errorf("%s: want yuv420p10le with the left siting, got %s with the %q siting", masters[0], video.PixFmt, video.ChromaLocation)
 	}
 }
 

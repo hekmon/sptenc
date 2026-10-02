@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -266,5 +267,127 @@ func TestVMAFComputeSameMatrix(t *testing.T) {
 		if len(report.Frames) != 12 || report.Pooled.Fidelity.Min != 100 {
 			t.Errorf("%s: want 100 on 12 frames, got %+v on %d frames", tc.name, report.Pooled.Fidelity, len(report.Frames))
 		}
+	}
+}
+
+func TestIsFullChromaYUV(t *testing.T) {
+	for pixFmt, want := range map[string]bool{
+		"yuv444p": true, "yuv444p10le": true, "yuv444p12le": true, "yuv444p16le": true, "yuvj444p": true, "yuva444p10le": true,
+		"yuv440p": true, "yuvj440p": true, "nv24": true, "xv30le": true, "ayuv64le": true,
+		"yuv420p": false, "yuv420p10le": false, "yuv422p10le": false, "yuvj422p": false, "yuv411p": false, "nv12": false,
+		"p010le": false, "gbrp": false, "rgb24": false, "gray": false, "": false,
+	} {
+		if got := IsFullChromaYUV(pixFmt); got != want {
+			t.Errorf("%q: want %t, got %t", pixFmt, want, got)
+		}
+	}
+}
+
+// yuvSource writes a YUV clip of the given pixel format declaring BT.709, from the same saturated
+// pictures as rgbSource.
+func yuvSource(t *testing.T, ctx context.Context, dir, pixFmt string) string {
+	t.Helper()
+	path := filepath.Join(dir, pixFmt+".mkv")
+	if output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y", "-i", rgbSource(t, ctx, dir),
+		"-vf", "scale=out_color_matrix=bt709:out_range=tv,format="+pixFmt, "-colorspace", "bt709", "-color_range", "tv",
+		"-c:v", "ffv1", path).CombinedOutput(); err != nil {
+		t.Fatalf("failed to create the %s source: %s\n%s", pixFmt, err, output)
+	}
+	return path
+}
+
+// framesHash returns the hash of every decoded frame of a file.
+func framesHash(t *testing.T, ctx context.Context, path string) string {
+	t.Helper()
+	output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-i", path, "-f", "framemd5", "-").Output()
+	if err != nil {
+		t.Fatalf("framemd5 of %s: %s", path, err)
+	}
+	var frames []string
+	for _, line := range strings.Split(string(output), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			fields := strings.Split(line, ",")
+			frames = append(frames, strings.TrimSpace(fields[len(fields)-1]))
+		}
+	}
+	return strings.Join(frames, " ")
+}
+
+// TestFFV1VideoMasterFullChroma checks that the master of a 4:4:4 source has its chroma subsampled
+// with the left siting, and declares it, while the masters of 4:2:2 and 4:2:0 sources hold the
+// pictures they always held (the conversion of -pix_fmt alone).
+func TestFFV1VideoMasterFullChroma(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		pixFmt, chroma string // the filters giving the pictures the master must hold
+		siting         string
+	}{
+		{"yuv444p10le", "scale=out_chroma_loc=left,format=yuv420p10le", "left"},
+		{"yuv422p10le", "format=yuv420p10le", ""}, // ffprobe leaves an unspecified siting out
+		{"yuv420p", "format=yuv420p10le", ""},
+	} {
+		source := yuvSource(t, ctx, dir, tc.pixFmt)
+		master := filepath.Join(dir, "master_"+tc.pixFmt+".mkv")
+		if err := FFV1VideoMaster(ctx, FFV1VideoMasterConfig{InputFilePath: source, OutputFilePath: master}); err != nil {
+			t.Fatalf("master of %s: %s", tc.pixFmt, err)
+		}
+		expected := filepath.Join(dir, "expected_"+tc.pixFmt+".mkv")
+		if output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y", "-i", source,
+			"-vf", tc.chroma, "-c:v", "ffv1", expected).CombinedOutput(); err != nil {
+			t.Fatalf("failed to convert %s: %s\n%s", tc.pixFmt, err, output)
+		}
+		if framesHash(t, ctx, master) != framesHash(t, ctx, expected) {
+			t.Errorf("the master of the %s source does not hold the pictures of %q", tc.pixFmt, tc.chroma)
+		}
+		if video := probeVideo(t, ctx, master); video.ChromaLocation != tc.siting {
+			t.Errorf("the master of the %s source declares the %q siting, want %q", tc.pixFmt, video.ChromaLocation, tc.siting)
+		}
+	}
+}
+
+// TestVMAFComputeFullChroma checks the final VMAF of a 4:4:4 source, as TestVMAFComputeRGBReference
+// does for an RGB one: its master scores 100 against it on every frame, and a distorted copy of the
+// master scores what it scores against the master.
+func TestVMAFComputeFullChroma(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source := yuvSource(t, ctx, dir, "yuv444p10le")
+	master := filepath.Join(dir, "master.mkv")
+	if err := FFV1VideoMaster(ctx, FFV1VideoMasterConfig{InputFilePath: source, OutputFilePath: master}); err != nil {
+		t.Fatalf("master: %s", err)
+	}
+	blurred := filepath.Join(dir, "blurred.mkv")
+	if output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y", "-i", master,
+		"-vf", "gblur=sigma=0.8", "-c:v", "ffv1", blurred).CombinedOutput(); err != nil {
+		t.Fatalf("failed to blur the master: %s\n%s", err, output)
+	}
+	compute := func(reference, distorted string) []float64 {
+		report, err := VMAFCompute(ctx, VMAFComputeConfig{
+			ReferencePath:  reference,
+			DistortedPath:  distorted,
+			InputFrameRate: "24",
+			ReportPath:     filepath.Join(dir, "report.json"),
+			Model:          VMAFModelFHD,
+			ModelCAMBI:     true,
+			Measures:       VMAFMeasures{Fidelity: true},
+		})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+		}
+		if err != nil {
+			t.Fatalf("VMAF of %s against %s: %s", distorted, reference, err)
+		}
+		scores := make([]float64, len(report.Frames))
+		for i, frame := range report.Frames {
+			scores[i] = frame.Fidelity
+		}
+		return scores
+	}
+	if scores := compute(source, master); slices.Min(scores) != 100 {
+		t.Errorf("the master scored %v against its 4:4:4 source, want 100 on every frame", scores)
+	}
+	if againstSource, againstMaster := compute(source, blurred), compute(master, blurred); !slices.Equal(againstSource, againstMaster) {
+		t.Errorf("the blurred master scores against the 4:4:4 source:\n%v\nand against the master:\n%v", againstSource, againstMaster)
 	}
 }

@@ -616,6 +616,8 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
+	// The videos of the inputs, as a software decode gives them
+	distortedVideo, referenceVideo := probeVideoStream(ctx, config.DistortedPath), probeVideoStream(ctx, config.ReferencePath)
 	// Hardware-accelerated decoding, when requested and when the codec allows it, the pictures handed
 	// back in the pixel format of a software decode (see softwarePixelFormat)
 	distortedHW := HWDecoderConfig{}
@@ -630,8 +632,16 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 			config.NVDec, config.VAAPIDec, config.D3D12Dec, config.VideoToolboxDec,
 			config.NVDevice, config.VAAPIDevice, config.D3D12Device,
 		)
-		distortedHW, distortedFormat = softwarePixelFormat(ctx, config.DistortedPath, distortedHW)
-		referenceHW, referenceFormat = softwarePixelFormat(ctx, config.ReferencePath, referenceHW)
+		distortedHW, distortedFormat = softwarePixelFormat(distortedHW, distortedVideo)
+		referenceHW, referenceFormat = softwarePixelFormat(referenceHW, referenceVideo)
+	}
+	// A full chroma YUV reference against a 4:2:0 distorted video, a source against its encodes: its
+	// chroma is subsampled as its master's is (see FullChromaToMasterFilter), into the format and the
+	// range of the distorted video
+	var referenceChroma string
+	if config.ReferenceRGBToYUV == "" && referenceVideo != nil && distortedVideo != nil &&
+		IsFullChromaYUV(referenceVideo.PixFmt) && isYUV420(distortedVideo.PixFmt) {
+		referenceChroma = fmt.Sprintf("%s:out_range=%s,format=%s", FullChromaToMasterFilter, declaredRange(distortedVideo), distortedVideo.PixFmt)
 	}
 	//// distorted file first
 	args = appendHWAccelArgs(args, distortedHW)
@@ -646,10 +656,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		"-i", config.ReferencePath,
 	)
 	//// vmaf filter
-	inputFilters := func(pixelFormat string, rgbToYUV YUVMatrix, colorFilter string) string {
+	inputFilters := func(repack string, rgbToYUV YUVMatrix, colorFilter, chromaFilter string) string {
 		filters := "setpts=PTS-STARTPTS"
-		if pixelFormat != "" {
-			filters += ",format=" + pixelFormat
+		if repack != "" {
+			filters += "," + repack
 		}
 		if rgbToYUV != "" {
 			filters += "," + RGBToYUVFilter(rgbToYUV)
@@ -657,12 +667,15 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		if colorFilter != "" {
 			filters += "," + colorFilter
 		}
+		if chromaFilter != "" {
+			filters += "," + chromaFilter
+		}
 		return filters + "," + vmafSameMatrix
 	}
 	args = append(args,
 		"-filter_complex",
-		"[0:v]"+inputFilters(distortedFormat, config.DistortedRGBToYUV, "")+"[distorted];[1:v]"+
-			inputFilters(referenceFormat, config.ReferenceRGBToYUV, config.ReferenceColorFilter)+
+		"[0:v]"+inputFilters(distortedFormat, config.DistortedRGBToYUV, "", "")+"[distorted];[1:v]"+
+			inputFilters(referenceFormat, config.ReferenceRGBToYUV, config.ReferenceColorFilter, referenceChroma)+
 			"[reference];[distorted][reference]"+pass.filter(config.ReportPath, NbThreadsToUse),
 	)
 	//// no ffmpeg output
@@ -742,10 +755,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 //     unspecified one, BT.601's coefficients.
 const vmafSameMatrix = "setparams=colorspace=unknown"
 
-// softwarePixelFormat returns the pixel format a software decode gives the pictures of a file, for
-// an input of a VMAF pass decoded by hardware: dec as it is, and the format its pictures must be
-// handed back in. A file that can not be probed for it is decoded in software (dec disabled). For a
-// file decoded in software, nothing is probed nor returned.
+// softwarePixelFormat returns, for an input of a VMAF pass decoded by hardware, dec as it is and the
+// filter handing its pictures back in the pixel format of a software decode (video, see
+// probeVideoStream), in their own range. An input whose format is unknown is decoded in software
+// (dec disabled). For an input decoded in software, nothing is returned.
 //
 // # WHY
 //
@@ -759,17 +772,40 @@ const vmafSameMatrix = "setparams=colorspace=unknown"
 // brought to 4:4:4 and full range (up to 1.61 from the search on a frame). Repacked into the pixel
 // format of a software decode, which loses nothing, the final VMAF matched the search frame by
 // frame in both cases.
-func softwarePixelFormat(ctx context.Context, path string, dec HWDecoderConfig) (HWDecoderConfig, string) {
+//
+// # WHY THE RANGE IS PINNED
+//
+// The repack is a conversion like any other, whose output range ffmpeg negotiates with the other
+// input: against a full range 4:4:4 reference subsampled by a filter of its own (see
+// FullChromaToMasterFilter), ffmpeg brought the encode to full range, which a software decode, its
+// range fixed by the decoder, never does. The pictures keep the range they were decoded in.
+func softwarePixelFormat(dec HWDecoderConfig, video *FFProbeBinaryStream) (HWDecoderConfig, string) {
 	if !dec.Enabled() {
 		return dec, ""
 	}
-	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: path}); err == nil {
-		if video := stats.VideoTrack(); video != nil && video.PixFmt != "" {
-			return dec, video.PixFmt
-		}
+	if video != nil && video.PixFmt != "" {
+		return dec, fmt.Sprintf("format=pix_fmts=%s:color_ranges=%s", video.PixFmt, declaredRange(video))
 	}
 	dec.NVDec, dec.VAAPIDec, dec.D3D12Dec, dec.VideoToolboxDec = false, false, false, false
 	return dec, ""
+}
+
+// probeVideoStream returns the video of a file as ffprobe gives it, the pictures of a software
+// decode, nil when it can not tell.
+func probeVideoStream(ctx context.Context, path string) *FFProbeBinaryStream {
+	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: path}); err == nil {
+		return stats.VideoTrack()
+	}
+	return nil
+}
+
+// declaredRange returns the range a video declares, limited when it declares none: ffmpeg reads a
+// missing range as limited.
+func declaredRange(video *FFProbeBinaryStream) string {
+	if video.ColorRange == "pc" {
+		return "pc"
+	}
+	return "tv"
 }
 
 // appendHWAccelArgs appends the appropriate -hwaccel flags for the given decoder config.

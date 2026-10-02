@@ -199,9 +199,9 @@ func liveFFV1Master(ctx context.Context, inputFilePath, finalFile string, nbFram
  * Split
  */
 
-// liveConvertRGBSegments writes the YUV master of every RGB segment of a pre-split directory (see
-// convertRGBSegments), one after the other, with one bar over their total duration.
-func liveConvertRGBSegments(ctx context.Context, segments, masters []string, durations []time.Duration,
+// liveSegmentsMasters writes the master of every segment of a pre-split directory (see
+// writeSegmentsMasters), one after the other, with one bar over their total duration.
+func liveSegmentsMasters(ctx context.Context, segments, masters []string, durations []time.Duration,
 	rgbToYUV ffmpeg.YUVMatrix, debug bool) (err error) {
 	var total time.Duration
 	for _, duration := range durations {

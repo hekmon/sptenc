@@ -181,7 +181,7 @@ var splitCommand = &cli.Command{
 			return
 		}
 		// The conversion of an RGB input, for its scene detection and its master. A master given
-		// is cut as it is: encode converts its RGB segments (see convertRGBSegments)
+		// is cut as it is: encode converts its RGB segments (see writeSegmentsMasters)
 		rgbToYUV, err := sourceYUVMatrix(cmd, bypass, videoStream)
 		if err != nil {
 			return

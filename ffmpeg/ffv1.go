@@ -46,7 +46,8 @@ type FFV1VideoMasterConfig struct {
 // timestamps (see TestFFV1VideoMasterSegments), only the duration a segment's container declares
 // can end 1 ms later. Only the first video stream is kept; all other streams are dropped.
 // Intra frames only is what lets Segment cut at any frame: see Segment for why the source can
-// not be cut directly. An RGB input is converted with the matrix of RGBToYUV (see YUVMatrix).
+// not be cut directly. An RGB input is converted with the matrix of RGBToYUV (see YUVMatrix), the
+// chroma of a full chroma YUV input subsampled with the left siting (see FullChromaToMasterFilter).
 func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err error) {
 	// Validate inputs
 	if config.InputFilePath == "" {
@@ -103,6 +104,9 @@ func FFV1VideoMaster(ctx context.Context, config FFV1VideoMasterConfig) (err err
 	)
 	if config.RGBToYUV != "" {
 		args = append(args, "-vf", RGBToYUVFilter(config.RGBToYUV))
+	} else if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: config.InputFilePath}); err == nil &&
+		stats.VideoTrack() != nil && IsFullChromaYUV(stats.VideoTrack().PixFmt) {
+		args = append(args, "-vf", FullChromaToMasterFilter)
 	}
 	args = append(args,
 		"-c:v", "ffv1", // encoded as ffv1

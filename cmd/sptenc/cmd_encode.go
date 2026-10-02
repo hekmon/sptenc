@@ -40,7 +40,7 @@ var encodeCommand = &cli.Command{
 		"    Files are processed in alphabetical order — name them accordingly (e.g. seg_01.mkv,\n" +
 		"    seg_02.mkv) to preserve scene order. All files must have the same codec and frame rate,\n" +
 		"    and be all RGB or all YUV: RGB ones, an upscaler's for instance, are converted to YUV first,\n" +
-		"    as the master of an RGB file is (see MANUAL.md, RGB sources).\n\n" +
+		"    and 4:4:4 ones subsampled to 4:2:0, as the master of a file is (see MANUAL.md, RGB sources).\n\n" +
 		"SCENE DETECTION\n" +
 		"Use 'split --" + listScenesFlagName + "' to preview the actual scene list (frame, time, duration, score)\n" +
 		"for a given threshold, the thresholds command to inspect candidate thresholds and their\n" +
@@ -331,7 +331,8 @@ var encodeCommand = &cli.Command{
 			sourceFrameRate   string           // see core.QPSearchConfig.SourceFrameRate
 			sourceRGBToYUV    ffmpeg.YUVMatrix // see sourceYUVMatrix: the file's, converted by the final VMAF too
 			segmentsDurations []time.Duration  // the segments of a directory
-			segmentsRGBToYUV  ffmpeg.YUVMatrix // the RGB segments of a directory, see convertRGBSegments
+			segmentsRGBToYUV  ffmpeg.YUVMatrix // the RGB segments of a directory, see writeSegmentsMasters
+			segmentsMasters   bool             // the segments of a directory get masters, see writeSegmentsMasters
 			setup             vmafSetup
 		)
 		if !inputInfos.IsDir() {
@@ -447,7 +448,8 @@ var encodeCommand = &cli.Command{
 			// Calculate total duration of all segments for accurate progress bar, refusing a mix of
 			// RGB and YUV segments (see probePreSplitSegments)
 			fmt.Fprintln(bypass, "Calculating total duration of segments...")
-			if segmentsDurations, err = probePreSplitSegments(ctx, segmentsPaths, cmd.Bool(debugFlagName)); err != nil {
+			var fullChroma bool
+			if segmentsDurations, fullChroma, err = probePreSplitSegments(ctx, segmentsPaths, cmd.Bool(debugFlagName)); err != nil {
 				return
 			}
 			for _, duration := range segmentsDurations {
@@ -461,6 +463,7 @@ var encodeCommand = &cli.Command{
 					return
 				}
 			}
+			segmentsMasters = segmentsRGBToYUV != "" || fullChroma
 		}
 		// Validate the video stream (both kinds of input end up here: the first segment stands
 		// for the others with a directory)
@@ -477,10 +480,10 @@ var encodeCommand = &cli.Command{
 		encoderAdapter.VMAFModel = setup.model
 		encoderAdapter.VMAFModelCAMBI = setup.modelCAMBI
 		encoderAdapter.VMAFScore = setup.score
-		// The RGB segments of a directory get the master a source gets (see convertRGBSegments):
-		// the search and the final VMAF work on those
-		if segmentsRGBToYUV != "" {
-			if segmentsPaths, err = convertRGBSegments(ctx, segmentsPaths, segmentsDurations, workingDir,
+		// The RGB or full chroma segments of a directory get the master a source gets (see
+		// writeSegmentsMasters): the search and the final VMAF work on those
+		if segmentsMasters {
+			if segmentsPaths, err = writeSegmentsMasters(ctx, segmentsPaths, segmentsDurations, workingDir,
 				segmentsRGBToYUV, cmd.Bool(debugFlagName)); err != nil {
 				return
 			}

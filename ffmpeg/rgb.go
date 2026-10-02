@@ -119,3 +119,44 @@ func IsRGBPixelFormat(pixFmt string) bool {
 func RGBToYUVFilter(matrix YUVMatrix) string {
 	return "scale=out_color_matrix=" + matrix.scaleName() + ":out_range=tv:out_chroma_loc=left,format=" + masterPixelFormat
 }
+
+// IsFullChromaYUV reports whether ffprobe's pixel format (pix_fmt) holds YUV pictures whose chroma has
+// the horizontal resolution of their luma (4:4:4, 4:4:0): the master subsamples it to 4:2:0 with the
+// left siting (see FullChromaToMasterFilter). The names of ffmpeg 9.0.2's YUV pixel formats with full
+// horizontal chroma (ffprobe -show_pixel_formats, log2_chroma_w 0) all start with one of these
+// prefixes, and no other pixel format does.
+func IsFullChromaYUV(pixFmt string) bool {
+	for _, prefix := range []string{"yuv444", "yuva444", "yuvj444", "yuv440", "yuvj440", "nv24", "nv42", "ayuv", "vuya", "vuyx",
+		"xv30", "xv36", "xv48", "p410", "p412", "p416", "uyva", "vyu444", "v30x"} {
+		if strings.HasPrefix(pixFmt, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// FullChromaToMasterFilter is the filter subsampling the chroma of full chroma YUV pictures (see
+// IsFullChromaYUV) to the 4:2:0 of the master, with the left siting, the matrix kept.
+//
+// # WHY THE LEFT SITING
+//
+// Left unset, swscale sites the chroma it subsamples in the center (libswscale/format.c), and the
+// master declares no siting: HEVC decoders then read it on the left, their default, half a pixel
+// away. Measured on a 1280x720 4:4:4 clip, its chroma upsampled back on the left as those decoders
+// do: 34.4 and 31.2 dB of PSNR against the source on Cb and Cr from a master sited in the center,
+// 35.4 and 32.1 dB from one sited on the left. Sited in the center and declared so, it would come
+// back better still (36.5 and 33.1 dB), but NVENC writes no siting in its stream and AV1 can not
+// declare the center: the left is what HEVC decoders assume and what AV1 can declare.
+//
+// # EDGE CASES
+//
+//   - 4:2:2 sources are not touched: their chroma is subsampled vertically only, at the place of
+//     their own (the default conversion gives the one of an explicit left to left siting).
+//   - 4:1:1 sources are left to swscale, which sites them in the center as well: not handled.
+const FullChromaToMasterFilter = "scale=out_chroma_loc=left"
+
+// isYUV420 reports whether ffprobe's pixel format (pix_fmt) is a planar YUV 4:2:0 one, the format of
+// the master and of every encode.
+func isYUV420(pixFmt string) bool {
+	return strings.HasPrefix(pixFmt, "yuv420") || strings.HasPrefix(pixFmt, "yuvj420") || strings.HasPrefix(pixFmt, "yuva420")
+}
