@@ -332,7 +332,7 @@ sptenc's per-segment QP search converges on the highest valid QP (smallest file)
 
 1. **Smart start** — The first candidate is the mean QP of the segments already done in this run, seeded with the mean of previous runs (see [below](#persistent-stats-from-previous-runs)): the first segment starts from that seed, whose weight then fades as segments complete. Without any previous run, the seed is the midpoint of the encoder's QP range (e.g. QP 26 for libx265's 0–51 range).
 2. **Bracketing** — Steps away from the starting point, one standard deviation further at each encode, to find one valid QP (passes VMAF) and one invalid QP (fails VMAF), closing the search range around the boundary. The standard deviation comes from the same statistics as the mean; without any previous run, it starts at a quarter of the QP range (e.g. 13 for libx265's 0–51 range).
-3. **Interpolation** — Once bracketed, **Fritsch-Butland monotone cubic interpolation** forecasts the VMAF of the untested QPs within the range and picks the next one to encode, walking toward the highest valid QP without blind probing. A forecast only chooses the next encode: every QP kept was encoded and measured, and the next higher one encoded and found failing.
+3. **Interpolation** — Once bracketed, **Fritsch-Butland monotone cubic interpolation** forecasts the VMAF of the untested QPs within the range and picks the next one to encode, walking toward the highest valid QP without blind probing. A forecast only chooses the next encode: every QP kept was encoded and measured, and the next higher one encoded and found failing — unless the kept QP is the encoder's highest, which nothing above it can refute.
 4. **Banding check** — At the QP found, the banding the encoder added is measured once. When a [CAMBI threshold](#fidelity-and-banding) fails, the QPs below are tried one at a time until one passes both.
 
 This typically takes 3 to 5 encodes per segment, under 4 on average at the default on the contents measured (see [BENCHMARKS](BENCHMARKS.md#gates-on-the-two-contents)), where a plain bisection of libx265's 0–51 range takes about 6 whatever the content.
@@ -343,7 +343,7 @@ After each encode job finishes, sptenc stores QP statistics **per encoder, VMAF 
 
 These statistics only seed a search. In the run's own statistics they weigh a single segment, however many files they aggregate, so the file being encoded takes over within a handful of segments: a cache built on other content sets the starting point, it does not hold the search to its mean.
 
-What is at stake is the number of encodes per segment. From a cold cache, the runs measured at the default already averaged under 4, the run's own statistics doing the learning from the first segments on. A segment can not take fewer than two, the QP kept and the next one failing, so what a warm cache can save is bounded by that: it has not been measured yet.
+What is at stake is the number of encodes per segment. From a cold cache, the runs measured at the default already averaged under 4, the run's own statistics doing the learning from the first segments on. A segment takes at least two encodes in the general case, the QP kept and the next one failing (a first candidate already at one end of the encoder's range ends it in one: a passing highest QP, a failing lowest one), so what a warm cache can save is bounded by that: it has not been measured yet.
 
 The cache provides:
 - **Mean QP** — a better-informed starting point than the encoder midpoint

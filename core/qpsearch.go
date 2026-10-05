@@ -633,7 +633,7 @@ func countFrames(ctx context.Context, scb QPSearchCallbacks, config QPSearchConf
 // The QP→VMAF relationship is assumed monotonic (lower QP = higher VMAF). It held across
 // 2+ years of production encoding with the v0 models. The v1 models break it on a source
 // that is banded already: CAMBI rates the encodes less banded than the source, and the
-// score peaks above the lowest QPs (measured on a film segment: 94.06 at QP 4, 93.65 at
+// score peaks above the lowest QPs (measured on a film segment: 94.05 at QP 4, 93.65 at
 // QP 0, 91.80 for the source against itself). A gate above the peak then ends as best
 // effort at qpMin, which scores below the peak. So can a gate between the qpMin score and
 // the peak, when the bracketing steps straight to qpMin, although a QP in between passes.

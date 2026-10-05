@@ -335,13 +335,14 @@ func TestPlanVMAFColors(t *testing.T) {
 }
 
 // TestProbePreSplitSegments probes real segments: their durations, and a directory mixing RGB and
-// YUV segments refused, whichever comes first.
+// YUV segments, or video codecs, refused, whichever comes first.
 func TestProbePreSplitSegments(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	yuv1, yuv2 := testSegment(t, ctx, dir, "seg_01.mkv", "yuv420p10le"), testSegment(t, ctx, dir, "seg_02.mkv", "yuv420p")
 	rgb1, rgb2 := testSegment(t, ctx, dir, "seg_03.mkv", "gbrp10le"), testSegment(t, ctx, dir, "seg_04.mkv", "gbrp16le")
 	full := testSegment(t, ctx, dir, "seg_05.mkv", "yuv444p10le")
+	mpeg4 := testSegment(t, ctx, dir, "seg_06.mkv", "yuv420p", "mpeg4")
 	for _, tc := range []struct {
 		segments   []string
 		fullChroma bool
@@ -360,6 +361,7 @@ func TestProbePreSplitSegments(t *testing.T) {
 	}{
 		{[]string{yuv1, rgb1}, "segment seg_03.mkv holds RGB pictures where seg_01.mkv holds YUV ones"},
 		{[]string{rgb1, rgb2, yuv2}, "segment seg_02.mkv holds YUV pictures where seg_03.mkv holds RGB ones"},
+		{[]string{yuv1, mpeg4}, "segment seg_06.mkv holds mpeg4 video where seg_01.mkv holds ffv1: the segments of a directory must all hold the same codec"},
 	} {
 		if _, _, err := probePreSplitSegments(ctx, tc.segments, false); err == nil || !strings.Contains(err.Error(), tc.refusal) {
 			t.Errorf("want %q, got %v", tc.refusal, err)
@@ -417,17 +419,20 @@ func TestWriteSegmentsMasters(t *testing.T) {
 
 // testSegment writes a segment of 12 frames (0.5 s at 24 fps) in the pixel format given, declaring
 // BT.709 primaries, as an upscaler of a BT.709 source does.
-func testSegment(t *testing.T, ctx context.Context, dir, name, pixFmt string) string {
+func testSegment(t *testing.T, ctx context.Context, dir, name, pixFmt string, codec ...string) string {
 	t.Helper()
 	for _, bin := range []string{ffmpeg.FFMPEGBinary, ffmpeg.FFProbeBinary} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not found: %s", bin, err)
 		}
 	}
+	if len(codec) == 0 {
+		codec = []string{"ffv1"}
+	}
 	path := filepath.Join(dir, name)
 	if output, err := exec.CommandContext(ctx, ffmpeg.FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y",
 		"-f", "lavfi", "-i", "testsrc2=size=64x64:rate=24:duration=0.5", "-pix_fmt", pixFmt,
-		"-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "ffv1", path).CombinedOutput(); err != nil {
+		"-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", codec[0], path).CombinedOutput(); err != nil {
 		t.Fatalf("failed to create %s: %s\n%s", name, err, output)
 	}
 	return path

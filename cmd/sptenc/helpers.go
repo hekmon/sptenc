@@ -47,7 +47,7 @@ func checkMKVPropEdit(ctx context.Context) error {
 // checkSourceVideo returns the video stream sptenc is going to work on, or the reason why it
 // can not: no video stream at all, a variable frame rate or interlaced content.
 //
-// # WHY EVERY COMMAND READING A SOURCE GOES THROUGH IT, NOT ONLY THE ENCODING ONES
+// # WHY SPLIT AND MASTER CHECK THE SOURCE TOO, NOT ONLY THE ENCODING ONES
 //
 // master and split do not compute any VMAF nor encode anything, and did not check anything:
 // they produce what encode takes as input. A master or a set of segments made out of an
@@ -451,7 +451,9 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 // probePreSplitSegments probes every segment of a pre-split directory and returns their durations,
 // and whether one holds full chroma YUV pictures (see ffmpeg.IsFullChromaYUV), which encode subsamples
 // before the search, as it converts RGB ones (see writeSegmentsMasters). Segments must all hold RGB
-// pictures, or all YUV ones: the kind of the first one is the kind of the directory.
+// pictures, or all YUV ones: the kind of the first one is the kind of the directory. They must also
+// all hold the same video codec, as the encode command requires of a pre-split directory: the frame
+// rate is enforced again by the search itself, the codec only here.
 //
 // # WHY A MIX IS REFUSED
 //
@@ -461,8 +463,9 @@ func getSegmentsFromDir(inputDir string) (filePaths []string, err error) {
 // single matrix.
 func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug bool) (durations []time.Duration, fullChroma bool, err error) {
 	var (
-		stats ffmpeg.FFProbeStats
-		rgb   bool // the kind of the first segment
+		stats      ffmpeg.FFProbeStats
+		rgb        bool // the kind of the first segment
+		firstCodec ffmpeg.CodecName
 	)
 	durations = make([]time.Duration, len(segmentPaths))
 	for i, path := range segmentPaths {
@@ -474,6 +477,9 @@ func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug boo
 		segmentRGB := video != nil && ffmpeg.IsRGBPixelFormat(video.PixFmt)
 		if i == 0 {
 			rgb = segmentRGB
+			if video != nil {
+				firstCodec = video.CodecName
+			}
 		} else if segmentRGB != rgb {
 			kind := func(rgb bool) string {
 				if rgb {
@@ -483,6 +489,10 @@ func probePreSplitSegments(ctx context.Context, segmentPaths []string, debug boo
 			}
 			err = fmt.Errorf("segment %s holds %s pictures where %s holds %s ones: the segments of a directory must all be RGB, or all YUV",
 				shellescape.Quote(filepath.Base(path)), kind(segmentRGB), shellescape.Quote(filepath.Base(segmentPaths[0])), kind(rgb))
+			return
+		} else if video != nil && firstCodec != "" && video.CodecName != firstCodec {
+			err = fmt.Errorf("segment %s holds %s video where %s holds %s: the segments of a directory must all hold the same codec",
+				shellescape.Quote(filepath.Base(path)), video.CodecName, shellescape.Quote(filepath.Base(segmentPaths[0])), firstCodec)
 			return
 		}
 		fullChroma = fullChroma || video != nil && ffmpeg.IsFullChromaYUV(video.PixFmt)
