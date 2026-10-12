@@ -888,7 +888,11 @@ func liveVMAF(ctx context.Context, config ffmpeg.VMAFComputeConfig, totalFrames 
 	return ffmpeg.VMAFCompute(ctx, config)
 }
 
-func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, segmentsDurations []time.Duration, frameRate string, totalFrames int, debug bool) (err error) {
+// liveConcat merges the segments of the encode pipeline, each lasting its duration, their video
+// timestamps snapped to the frame grid of frameRate when it is given (see ffmpeg.Concat), and
+// keeps their video alone when videoOnly is set.
+func liveConcat(ctx context.Context, workingDir, outputFile string, segments []string, segmentsDurations []time.Duration, frameRate string,
+	videoOnly bool, totalFrames int, debug bool) (err error) {
 	concatList, err := ffmpeg.GenerateConcatList(workingDir, segments, segmentsDurations)
 	if err != nil {
 		err = fmt.Errorf("failed to generate concat list file: %w", err)
@@ -917,6 +921,7 @@ func liveConcat(ctx context.Context, workingDir, outputFile string, segments []s
 		ConcatListPath: concatList,
 		ConcatUnsafe:   true,
 		OutputPath:     outputFile,
+		VideoOnly:      videoOnly,
 		FrameRate:      frameRate,
 		Debug: func(s string) {
 			if debug {

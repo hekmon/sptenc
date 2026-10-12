@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
@@ -81,5 +82,83 @@ func TestEncoderAdapter_ComputeVMAF(t *testing.T) {
 	if _, _, err := (&EncoderAdapter{VMAFModel: ffmpeg.VMAFModelFHD}).ComputeVMAF(ctx, gradient, steps, stream,
 		core.VMAFMeasures{Score: true}, nil, nil, nil); err == nil {
 		t.Error("an adapter without a score to gate should refuse a score pass")
+	}
+}
+
+// TestEncoderAdapter_EncodeVideoAlone encodes for real, with every encoder that works on the
+// machine, a segment as a user's own split holds them: with audio, its video starting 60 ms
+// after it. The encode must hold the video alone, every frame of it, and start with it: that is
+// what puts the encodes of a pre-split directory on one frame grid whatever their segments
+// hold (see ffmpeg.HEVCLibx265EncodeQP). An encoder that can not encode the video alone here
+// (a GPU or a library the machine does not have) is skipped.
+func TestEncoderAdapter_EncodeVideoAlone(t *testing.T) {
+	for _, bin := range []string{ffmpeg.FFMPEGBinary, ffmpeg.FFProbeBinary} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not found: %s", bin, err)
+		}
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(ctx, ffmpeg.FFMPEGBinary, append([]string{"-loglevel", "error", "-nostdin", "-y"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg %v: %s\n%s", args, err, out)
+		}
+	}
+	const frames = 12
+	videoOnly := filepath.Join(dir, "video.mkv")
+	run("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24000/1001", "-frames:v", "12", "-pix_fmt", "yuv420p10le", "-c:v", "ffv1", videoOnly)
+	audio := filepath.Join(dir, "audio.mkv")
+	run("-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "0.56", "-c:a", "aac", audio)
+	segment := filepath.Join(dir, "segment.mkv")
+	run("-itsoffset", "0.06", "-i", videoOnly, "-i", audio, "-map", "0:v", "-map", "1:a", "-c", "copy", segment)
+	segmentStats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: segment})
+	if err != nil {
+		t.Fatalf("probe: %s", err)
+	}
+	if gap, known := segmentStats.VideoStartInFile(); !known || gap != 60*time.Millisecond || len(segmentStats.Streams) != 2 {
+		t.Fatalf("the segment was expected with 2 streams and its video 60 ms after its start, got %d streams and %s (known: %t)",
+			len(segmentStats.Streams), gap, known)
+	}
+	for _, encoder := range []ffmpeg.Encoder{
+		ffmpeg.HEVCEncoderLibx265, ffmpeg.HEVCEncoderNVEnc, ffmpeg.HEVCEncoderVAAPI, ffmpeg.HEVCEncoderD3D12VA, ffmpeg.HEVCEncoderVideoToolbox,
+		ffmpeg.AV1EncoderLibaom, ffmpeg.AV1EncoderSVTAV1, ffmpeg.AV1EncoderNVEnc, ffmpeg.AV1EncoderVAAPI,
+	} {
+		t.Run(string(encoder), func(t *testing.T) {
+			adapter := &EncoderAdapter{Encoder: encoder, VAAPIRendererPath: ffmpeg.VAAPIDefaultDevice}
+			qpMin, qpMax, found := adapter.QPRange()
+			if !found {
+				t.Fatalf("no QP range for %s", encoder)
+			}
+			qp := (qpMin + qpMax) / 2
+			encode := func(input, name string) (string, error) {
+				stream, err := adapter.ProbeStream(ctx, input, nil, nil)
+				if err != nil {
+					t.Fatalf("probe %s: %s", input, err)
+				}
+				output := filepath.Join(t.TempDir(), name)
+				return output, adapter.Encode(ctx, input, output, qp, stream, nil, nil, nil)
+			}
+			if _, err := encode(videoOnly, "video_only.mkv"); err != nil {
+				t.Skipf("%s does not encode on this machine: %s", encoder, err)
+			}
+			output, err := encode(segment, "segment.mkv")
+			if err != nil {
+				t.Fatalf("encode of the segment with audio: %s", err)
+			}
+			stats, err := ffmpeg.GetStreamsInfos(ctx, ffmpeg.GetStreamsInfosConfig{Path: output, CountPackets: true})
+			if err != nil {
+				t.Fatalf("probe of the encode: %s", err)
+			}
+			if len(stats.Streams) != 1 || stats.VideoTrack() == nil {
+				t.Fatalf("%d streams in the encode, want its video alone", len(stats.Streams))
+			}
+			if got := stats.VideoTrack().NbReadPackets; got != frames {
+				t.Errorf("%d frames in the encode, want %d", got, frames)
+			}
+			if gap, known := stats.VideoStartInFile(); !known || gap != 0 {
+				t.Errorf("the video of the encode starts %s after its file (known: %t), want with it", gap, known)
+			}
+		})
 	}
 }

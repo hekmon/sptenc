@@ -28,7 +28,7 @@ The conversion is ffmpeg's own, which every build has. Its 16-bit white is sligh
 
 ### Pre-segmented Input (Optional)
 
-Instead of letting sptenc split the input automatically, you can provide an already-split directory of segments. Files must be `.mkv` or `.mp4` and are processed in **alphabetical order** — name them accordingly (e.g. `seg_01.mkv`, `seg_02.mkv`) to preserve scene order. All segments must share the same codec and frame rate, and be all RGB or all YUV. RGB segments, such as an upscaler delivers from the segments of a split, are converted to YUV before the search, each into a master of its own, as the master of an RGB source is (see [RGB sources](#rgb-sources)), and so are 4:4:4 ones, their chroma subsampled as a source's.
+Instead of letting sptenc split the input automatically, you can provide an already-split directory of segments. Files must be `.mkv` or `.mp4` and are processed in **alphabetical order** — name them accordingly (e.g. `seg_01.mkv`, `seg_02.mkv`) to preserve scene order. All segments must share the same codec and frame rate, and be all RGB or all YUV. Only their video is read: whatever else they hold, such as the audio a tool kept when cutting them, is ignored, the other streams of the output coming from the original file. RGB segments, such as an upscaler delivers from the segments of a split, are converted to YUV before the search, each into a master of its own, as the master of an RGB source is (see [RGB sources](#rgb-sources)), and so are 4:4:4 ones, their chroma subsampled as a source's.
 
 ```bash
 ./sptenc encode ./gop_dir/ output.mkv --original-file original_with_audio.mkv

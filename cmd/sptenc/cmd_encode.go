@@ -531,7 +531,10 @@ var encodeCommand = &cli.Command{
 				err = fmt.Errorf("failed to compute the source segments durations: %w", err)
 				return
 			}
-			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, segmentsDurations, results.FrameRate, results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
+			// The reference of the final VMAF, and nothing else: the video of the segments alone,
+			// whatever a user's segments hold beside it
+			if err = liveConcat(ctx, workingDir, vmafSource, segmentsPaths, segmentsDurations, results.FrameRate, true,
+				results.TotalSegmentsFrames, cmd.Bool(debugFlagName)); err != nil {
 				err = fmt.Errorf("failed to concat source segments: %w", err)
 				return
 			}
@@ -756,7 +759,10 @@ func processSegments(ctx context.Context, segmentsPaths []string, workingDir str
 		err = fmt.Errorf("failed to compute the encoded segments durations: %w", err)
 		return
 	}
-	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, segmentsDurations, results.FrameRate, results.TotalSegmentsFrames, debug); err != nil {
+	// The encodes hold their video alone, each starting with its file whatever its segment holds
+	// beside its video (see ffmpeg.HEVCLibx265EncodeQP): they are on one frame grid
+	if err = liveConcat(ctx, workingDir, encodedSegmentsMerged, results.EncodedSegmentsPaths, segmentsDurations, results.FrameRate, false,
+		results.TotalSegmentsFrames, debug); err != nil {
 		err = fmt.Errorf("failed to concat encoded segments: %w", err)
 		return
 	}

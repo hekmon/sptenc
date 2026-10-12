@@ -272,9 +272,10 @@ var concatCommand = &cli.Command{
 // # WHY THE CONCAT COMMAND DOES NOT ALWAYS SNAP
 //
 // The snap moves every video frame onto one frame grid, counted from the first video
-// timestamp of the output. The encode pipeline knows its segments are on one: cut from the same
-// master, at the same frame rate, video only. The concat command is given any files, and for
-// two kinds of them the snap corrupts the output instead of fixing it (both measured):
+// timestamp of the output. The encodes of the pipeline are on one: at the same frame rate,
+// their video alone, each starting with it whatever its segment holds (see
+// ffmpeg.HEVCLibx265EncodeQP). The concat command is given any files, and for two kinds of them
+// the snap corrupts the output instead of fixing it (both measured):
 //   - Files at different frame rates have no grid in common: a 23.976 fps file followed by a
 //     25 fps one got frames sharing the same timestamp.
 //   - Files whose videos do not start as long after their file are placed by their first

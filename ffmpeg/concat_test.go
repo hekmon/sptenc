@@ -182,7 +182,9 @@ func abs64(x int64) int64 {
 // its first frame (frames of 41 to 42 ms, no timestamp shared, decode timestamps increasing),
 // and its video where the segments have it against their audio. Counted from 0, the grid gave
 // timestamps shared by two frames with AAC audio in Matroska, and moved the video against its
-// audio by 20 ms in the other two cases (see frameGridSnap).
+// audio by 20 ms in the other two cases (see frameGridSnap). The video only cases are the merges
+// of the encode pipeline: its encodes, which start with their video wherever it starts, and the
+// reference of the final VMAF of a pre-split directory, the video of its segments alone.
 func TestConcatSnap(t *testing.T) {
 	for _, bin := range []string{FFMPEGBinary, FFProbeBinary} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -261,23 +263,35 @@ func TestConcatSnap(t *testing.T) {
 		run("-itsoffset", "0.022", "-i", path, "-i", path, "-map", "0:v", "-map", "1:a", "-c", "copy", late)
 		videoLate = append(videoLate, late)
 	}
+	// a video only file starting 83 ms after 0, as the encode of a segment whose video starts
+	// after its audio does: the encoders number the frames from the timestamp of the first one
+	videoOnlyLate := filepath.Join(dir, "seg_1_videoonly_late.mkv")
+	run("-itsoffset", "0.083", "-i", videoOnly[1], "-c", "copy", videoOnlyLate)
+	if video := probeVideo(t, ctx, videoOnlyLate); video.StartTime != "0.083000" {
+		t.Fatalf("the video only file was expected to start at 0.083 s, got %s", video.StartTime)
+	}
 	for _, tc := range []struct {
 		name      string
 		files     []string
+		videoOnly bool  // ConcatConfig.VideoOnly
 		firstPTS  int64 // of the video, in ms
 		wholeGrid bool  // every frame at the first one plus its time rounded to the millisecond
 	}{
 		// the first frame at 0: what sptenc's own segments give, and what the grid counted from 0 gave
-		{"video only", videoOnly, 0, true},
-		{"FLAC audio", flac, 0, true},
+		{"video only", videoOnly, false, 0, true},
+		{"FLAC audio", flac, false, 0, true},
 		// the first audio packet 21 ms before 0: ffmpeg brings the whole input 21 ms later
-		{"AAC audio in Matroska", aac, 21, true},
+		{"AAC audio in Matroska", aac, false, 21, true},
 		// MP4 holds the timestamps exact: the frames are at 21.333 ms plus their time, rounded once
-		{"AAC audio in MP4", aacMP4, 21, false},
-		{"video 22 ms after its audio", videoLate, 22, true},
+		{"AAC audio in MP4", aacMP4, false, 21, false},
+		{"video 22 ms after its audio", videoLate, false, 22, true},
 		// the same video gap in every file, 0, whatever their audio starts with
-		{"AAC and FLAC audio mixed", []string{aac[0], flac[1], aac[2]}, 21, true},
-		{"FLAC and AAC audio mixed", []string{flac[0], aac[1], flac[2]}, 0, true},
+		{"AAC and FLAC audio mixed", []string{aac[0], flac[1], aac[2]}, false, 21, true},
+		{"FLAC and AAC audio mixed", []string{flac[0], aac[1], flac[2]}, false, 0, true},
+		// a video only file starts with its video, wherever that is: no gap
+		{"video only, a file not starting at 0", []string{videoOnly[0], videoOnlyLate, videoOnly[2]}, false, 0, true},
+		// the video alone kept: the audio still sets where the output starts
+		{"AAC audio, video only output", aac, true, 21, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := t.TempDir()
@@ -286,8 +300,16 @@ func TestConcatSnap(t *testing.T) {
 				t.Fatalf("list: %s", err)
 			}
 			output := filepath.Join(out, "output.mkv")
-			if err := Concat(ctx, ConcatConfig{ConcatListPath: list, ConcatUnsafe: true, OutputPath: output, FrameRate: "24000/1001"}); err != nil {
+			if err := Concat(ctx, ConcatConfig{ConcatListPath: list, ConcatUnsafe: true, OutputPath: output,
+				VideoOnly: tc.videoOnly, FrameRate: "24000/1001"}); err != nil {
 				t.Fatalf("concat: %s", err)
+			}
+			stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: output})
+			if err != nil {
+				t.Fatalf("probe: %s", err)
+			}
+			if tc.videoOnly && (len(stats.Streams) != 1 || stats.VideoTrack() == nil) {
+				t.Errorf("%d streams in the output, want its video alone", len(stats.Streams))
 			}
 			pts, dts := packets(output, "v:0")
 			if len(pts) != totalFrames {
@@ -317,8 +339,8 @@ func TestConcatSnap(t *testing.T) {
 					}
 				}
 			}
-			if len(tc.files) == len(videoOnly) && tc.files[0] == videoOnly[0] {
-				return // no audio
+			if stats.AudioTrack() == nil {
+				return
 			}
 			// within Matroska's millisecond of the segments' own
 			if got, want := videoAfterAudio(output), videoAfterAudio(tc.files[0]); math.Abs(got-want) >= 0.001 {

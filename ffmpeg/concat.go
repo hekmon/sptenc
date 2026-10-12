@@ -112,6 +112,9 @@ type ConcatConfig struct {
 	ConcatListPath ConcatListPath
 	ConcatUnsafe   bool
 	OutputPath     string
+	// VideoOnly keeps the video of the files alone, for a merge nothing reads the other streams
+	// of. Without it, every stream ffmpeg selects by default is copied.
+	VideoOnly bool
 	// FrameRate of the video, as ffprobe writes r_frame_rate ("24000/1001", "25"): the video
 	// timestamps are snapped to its frame grid, see Concat (and frameGridSnap for which rate, and
 	// for what the files must have in common). Empty, they are copied as the demuxer computes
@@ -192,10 +195,11 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 	if config.ConcatUnsafe {
 		args = append(args, "-safe", "0")
 	}
-	args = append(args,
-		"-i", string(config.ConcatListPath),
-		"-c", "copy",
-	)
+	args = append(args, "-i", string(config.ConcatListPath))
+	if config.VideoOnly {
+		args = append(args, "-map", "0:v:0")
+	}
+	args = append(args, "-c", "copy")
 	if snap != "" {
 		args = append(args, "-bsf:v", snap)
 	}
@@ -287,7 +291,15 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 // hold. A first audio packet before 0 is not such a gap: it is the same shift for every file
 // of the output. Segments with AAC and with FLAC audio mixed in one list, in both orders, came
 // out on one grid. The concat command, given any files, checks them (concatSnapFrameRate in
-// cmd/sptenc).
+// cmd/sptenc). The encodes of the pipeline need no check: video only, each starts with its
+// video, whatever the segment it was made from holds (see HEVCLibx265EncodeQP).
+//
+// The segments of a pre-split directory are a user's files, which may not start alike. Their
+// merge is the reference of the final VMAF and nothing else, their video alone
+// (ConcatConfig.VideoOnly): VMAF pairs the frames by their order, and only the frame counter
+// reads its timestamps, to tell of two frames less than half a frame apart, if any. Refusing
+// it the snap as the concat command does was measured on the three segments above: the same
+// line from the counter with and without, and the same output, made from the encodes.
 //
 // # EDGE CASES
 //

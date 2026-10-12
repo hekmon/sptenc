@@ -104,8 +104,7 @@ func AV1LibaomEncodeQP(ctx context.Context, config AV1LibaomEncodeQPConfig) (err
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		"-i", config.Input,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 		"-c:v", "libaom-av1",
 		"-pix_fmt", "yuv420p10le", // force 10-bit output (AV1 main profile covers 8/10bit, unlike HEVC main10)
 		"-cpu-used", strconv.Itoa(config.CPUUsed),
@@ -256,8 +255,7 @@ func AV1SVTAV1EncodeQP(ctx context.Context, config AV1SVTAV1EncodeQPConfig) (err
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		"-i", config.Input,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 		"-c:v", "libsvtav1",
 		"-pix_fmt", "yuv420p10le", // force 10-bit output (wrapper only supports yuv420p/yuv420p10le anyway)
 		"-preset", strconv.Itoa(config.Preset),
@@ -418,8 +416,7 @@ func AV1NVEncEncodeQP(ctx context.Context, config AV1NVEncEncodeQPConfig) (err e
 	}
 	//// flux selection
 	args = append(args,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 	)
 	//// nvenc
 	args = append(args,
@@ -585,8 +582,7 @@ func AV1VAAPIEncodeQP(ctx context.Context, config AV1VAAPIEncodeQPConfig) (err e
 	}
 	// // flux selection
 	args = append(args,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 	)
 	// // vaapi
 	args = append(args,

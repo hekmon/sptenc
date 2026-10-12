@@ -79,6 +79,27 @@ type HEVCLibx265EncodeQPConfig struct {
 // are at the same VMAF depends on the GPU encoder and on the content: 3% smaller than hevc_nvenc,
 // 17% smaller than hevc_vaapi and 23% smaller than hevc_videotoolbox on the one content measured
 // (see MANUAL.md, Encoders).
+//
+// # WHY THE VIDEO ALONE
+//
+// Every encoder function maps the video of its input and nothing else (-map 0:v:0). They used
+// to map every stream and copy the others (-map 0 -c copy), which changed nothing for the
+// segments sptenc cuts, video only, and broke the timing of a user's own: the segments of a
+// pre-split directory may hold audio, their video starting some time after it. An encoder
+// numbers its frames from the timestamp of the first one, counted in frames: with the audio
+// copied beside it, a video starting 60 ms after its file is a frame after it in the encode
+// (42 ms at 23.976 fps), and the concat places a file by its start, its earliest stream's. A
+// source of 107 frames cut in three by ffmpeg's segment muxer with its AAC audio (the videos
+// starting 0, 60 and 55 ms after their files) came out of encode with a frame of 83 ms and 81
+// of its frames a frame late against the original, with libx265, hevc_nvenc, libsvtav1 and
+// av1_nvenc alike; three segments whose second one alone has its video 22 ms after its audio,
+// with a timestamp shared by two frames and 51 frames a frame late. Video only, an encode
+// starts with its video wherever that is, the concat places it by its video, and both outputs
+// hold the video timestamps of the original, frame by frame.
+//
+// Nothing reads the other streams of an encode: the output takes its audio, subtitles and the
+// rest from the original file (see RemuxSwapVideo). The encodes of sptenc's own segments did
+// not change: an encode and a batchsearch gave the same output as before, packet for packet.
 func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) (err error) {
 	// Validate inputs
 	if config.Input == "" {
@@ -107,8 +128,7 @@ func HEVCLibx265EncodeQP(ctx context.Context, config HEVCLibx265EncodeQPConfig) 
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 		"-i", config.Input,
-		"-map", "0", // "-map", "-0:d?",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone, DO NOT map the other streams back: see WHY THE VIDEO ALONE above
 		"-c:v", "libx265",
 		"-profile:v", "main10",
 		"-pix_fmt", "yuv420p10le",
@@ -269,8 +289,7 @@ func HEVCNVEncEncodeQP(ctx context.Context, config HEVCNVEncEncodeQPConfig) (err
 	}
 	//// flux selection
 	args = append(args,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 	)
 	//// nvenc
 	args = append(args,
@@ -449,8 +468,7 @@ func HEVCVAAPIEncodeQP(ctx context.Context, config HEVCVAAPIEncodeQPConfig) (err
 	}
 	//// flux selection
 	args = append(args,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 	)
 	//// vaapi
 	args = append(args,
@@ -618,8 +636,7 @@ func HEVCD3D12VAEncodeQP(ctx context.Context, config HEVCD3D12VAEncodeQPConfig) 
 	}
 	//// flux selection
 	args = append(args,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 	)
 	//// d3d12va
 	args = append(args,
@@ -771,8 +788,7 @@ func HEVCVideoToolboxEncodeQP(ctx context.Context, config HEVCVideoToolboxEncode
 	}
 	//// flux selection
 	args = append(args,
-		"-map", "0",
-		"-c", "copy",
+		"-map", "0:v:0", // the video alone: see HEVCLibx265EncodeQP
 	)
 	//// videotoolbox
 	args = append(args,
