@@ -832,3 +832,53 @@ func TestVMAFComputeHardwareDecoded(t *testing.T) {
 		t.Errorf("decoded by NVDEC, the encode scores\n%v\ndecoded in software\n%v", nvdec, software)
 	}
 }
+
+// TestVMAFComputeNoAudio scores for real a video against a reference holding audio that can not
+// be decoded (every byte of its AC-3 packets damaged): VMAF reads the videos, and the pass used to
+// fail on the audio ffmpeg added to its null output by itself, the audio decoder giving up.
+func TestVMAFComputeNoAudio(t *testing.T) {
+	for _, bin := range []string{FFMPEGBinary, FFProbeBinary} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not found: %s", bin, err)
+		}
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if output, err := exec.CommandContext(ctx, FFMPEGBinary, append([]string{"-loglevel", "error", "-nostdin", "-y"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg %v: %s\n%s", args, err, output)
+		}
+	}
+	video := filepath.Join(dir, "video.mkv")
+	run("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=0.5", "-pix_fmt", "yuv420p10le", "-c:v", "ffv1", video)
+	reference := filepath.Join(dir, "reference.mkv")
+	run("-i", video, "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.5", "-map", "0:v", "-map", "1:a",
+		"-c:v", "copy", "-c:a", "ac3", "-bsf:a", "noise=amount=1", reference)
+	if stats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{Path: reference}); err != nil || stats.AudioTrack() == nil {
+		t.Fatalf("the reference was expected with an audio stream (%v)", err)
+	}
+	report, err := VMAFCompute(ctx, VMAFComputeConfig{
+		ReferencePath:  reference,
+		DistortedPath:  video,
+		InputFrameRate: "24",
+		ReportPath:     filepath.Join(dir, "report.json"),
+		Model:          VMAFModelFHD,
+		ModelCAMBI:     true,
+		Measures:       VMAFMeasures{Fidelity: true},
+	})
+	if errors.Is(err, ErrVMAFModelUnavailable) {
+		t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+	}
+	if err != nil {
+		t.Fatalf("VMAF against a reference whose audio can not be decoded: %s", err)
+	}
+	if len(report.Frames) != 12 {
+		t.Fatalf("expected 12 frames, got %d", len(report.Frames))
+	}
+	for i, frame := range report.Frames {
+		if frame.Fidelity != 100 {
+			t.Errorf("frame %d scores %v against itself, want 100", i, frame.Fidelity)
+		}
+	}
+}

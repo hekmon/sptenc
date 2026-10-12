@@ -678,8 +678,14 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 			inputFilters(referenceFormat, config.ReferenceRGBToYUV, config.ReferenceColorFilter, referenceChroma)+
 			"[reference];[distorted][reference]"+pass.filter(config.ReportPath, NbThreadsToUse),
 	)
-	//// no ffmpeg output
-	args = append(args, "-f", "null", "-")
+	//// no ffmpeg output, and no audio in it. The filter graph names the videos it reads, but
+	// ffmpeg adds an audio stream of the inputs by itself to an output that takes one, and the
+	// null output does: it was decoded to be thrown away. The vmaf command failed on a reference
+	// whose audio can not be decoded (every packet of its AC-3 damaged), the audio decoder giving
+	// up and ffmpeg with it, and the final VMAF of a pre-split directory printed that audio
+	// timestamps did not increase, where its segments' audio met. Subtitles were never added
+	// (checked on a source holding some).
+	args = append(args, "-an", "-f", "null", "-")
 	// Prepare command
 	if config.Debug != nil {
 		config.Debug(fmt.Sprintf("Compute VMAF with: %s", getPrintableCMDLine(FFMPEGBinary, args)))

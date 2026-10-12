@@ -84,6 +84,20 @@ type ScenesDetectionConfig struct {
 
 // ScenesDetection runs ffmpeg with the scdet filter to detect scene changes in a video.
 // It returns a slice of Scene values representing the detected boundaries.
+//
+// # WHY THE FIRST VIDEO STREAM ALONE
+//
+// The command names the stream it reads (-map 0:v:0): the one the master is made of (see
+// FFV1VideoMaster), and nothing else. Without a -map, ffmpeg picks the streams of an output by
+// itself, and picked two it should not have:
+//   - The video it ranks first, which is not always the first one: in a file whose second video
+//     stream is flagged as the default one, the scenes were detected on that stream and the
+//     master made of the first. A clip of five scenes next to a larger video of a single one was
+//     found to hold one scene, and split in one segment.
+//   - An audio stream, since the null output takes one: decoded, and thrown away. A source whose
+//     audio can not be decoded (every packet of its AC-3 damaged) failed here, the audio decoder
+//     giving up and ffmpeg with it: split and encode stopped at their first step, on a stream
+//     they only ever copy. The same source now encodes, its audio copied as it is.
 func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes []Scene, err error) {
 	// Validate inputs
 	if config.Path == "" {
@@ -156,6 +170,7 @@ func ScenesDetection(ctx context.Context, config ScenesDetectionConfig) (scenes 
 	)
 	args = append(args,
 		"-i", config.Path,
+		"-map", "0:v:0", // the video the master is made of, and nothing else: see WHY THE FIRST VIDEO STREAM ALONE
 		"-vf", strings.Join(filters, ","),
 		"-f", "null", "-",
 	)

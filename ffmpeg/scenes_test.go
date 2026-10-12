@@ -1,7 +1,10 @@
 package ffmpeg
 
 import (
+	"context"
 	"io"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,5 +80,59 @@ func TestSegment_InvalidFrames(t *testing.T) {
 				t.Errorf("expected a frames validation error, got %v", err)
 			}
 		})
+	}
+}
+
+// TestScenesDetectionFirstVideoAlone detects for real the scenes of files holding more than
+// their video: the scenes are those of the first video stream, the one the master is made of,
+// whatever stream ffmpeg would pick by itself, and no audio is decoded, a source whose audio can
+// not be decoded having its scenes detected like any other. Both failed before: the scene of the
+// first case was not found, and the detection of the second ended in an error.
+func TestScenesDetectionFirstVideoAlone(t *testing.T) {
+	for _, bin := range []string{FFMPEGBinary, FFProbeBinary} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not found: %s", bin, err)
+		}
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if output, err := exec.CommandContext(ctx, FFMPEGBinary, append([]string{"-loglevel", "error", "-nostdin", "-y"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg %v: %s\n%s", args, err, output)
+		}
+	}
+	// two scenes of 12 frames, with AC-3 audio
+	twoScenes := filepath.Join(dir, "twoscenes.mkv")
+	run("-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=0.5", "-f", "lavfi", "-i", "smptebars=size=320x180:rate=24:duration=0.5",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+		"-filter_complex", "[0:v]format=yuv420p,setsar=1[a];[1:v]format=yuv420p,setsar=1[b];[a][b]concat=n=2:v=1:a=0[v]",
+		"-map", "[v]", "-map", "2:a", "-c:v", "mpeg4", "-q:v", "5", "-c:a", "ac3", twoScenes)
+	// the same next to a larger video of a single scene, flagged as the default one
+	twoVideos := filepath.Join(dir, "twovideos.mkv")
+	run("-i", twoScenes, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24:duration=1", "-map", "0:v:0", "-map", "1:v:0", "-map", "0:a:0",
+		"-c:v:0", "copy", "-c:v:1", "mpeg4", "-q:v:1", "5", "-c:a", "copy", "-disposition:v:0", "0", "-disposition:v:1", "default", twoVideos)
+	// the two scenes with every byte of their audio packets damaged
+	audioDamaged := filepath.Join(dir, "audiodamaged.mkv")
+	run("-i", twoScenes, "-map", "0", "-c", "copy", "-bsf:a", "noise=amount=1", audioDamaged)
+	for _, tc := range []struct{ name, path string }{
+		{"video and audio", twoScenes},
+		{"a second video stream, the default one", twoVideos},
+		{"audio that can not be decoded", audioDamaged},
+	} {
+		scenes, err := ScenesDetection(ctx, ScenesDetectionConfig{Path: tc.path, Threshold: 10})
+		if err != nil {
+			t.Errorf("%s: %s", tc.name, err)
+			continue
+		}
+		if len(scenes) != 1 || scenes[0].Frame != 12 {
+			t.Errorf("%s: want the scene change at frame 12 alone, got %+v", tc.name, scenes)
+		}
+	}
+	// what ffmpeg picks by itself in the second file: its second video, which holds no scene change
+	alone := filepath.Join(dir, "second.mkv")
+	run("-i", twoVideos, "-map", "0:v:1", "-c", "copy", alone)
+	if scenes, err := ScenesDetection(ctx, ScenesDetectionConfig{Path: alone, Threshold: 10}); err != nil || len(scenes) != 0 {
+		t.Fatalf("the second video was expected without a scene change, got %+v (%v)", scenes, err)
 	}
 }
