@@ -24,7 +24,8 @@ var remuxCommand = &cli.Command{
 	Category: "Tooling",
 	Usage:    "Replace the video track of a file with a new one without re-encoding",
 	Description: "Takes the video stream from the new video file and copies all other streams\n" +
-		"(audio, subtitles, data, attachments) from the original file into a new .mkv output.\n\n" +
+		"(audio, subtitles, data, attachments) from the original file into a new .mkv output.\n" +
+		"The new video starts where the original's did against those streams.\n\n" +
 		"This is the post-processing step used by the encode pipeline to graft an encoded video\n" +
 		"back onto its source container.",
 	Flags: []cli.Flag{

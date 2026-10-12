@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -44,7 +45,8 @@ type RemuxSwapVideoConfig struct {
 // RemuxSwapVideo replaces the video stream of OriginalFile with the video from
 // NewVideoFile while copying all other streams (audio, subtitles, data,
 // attachments). If EncodeToFLAC is true, audio is re-encoded to FLAC with
-// maximum compression; otherwise it is copied as-is.
+// maximum compression; otherwise it is copied as-is. The new video starts where
+// the original's did against those streams (see RemuxVideoOffset).
 func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error) {
 	// Validate inputs
 	if config.OriginalFile == "" {
@@ -75,45 +77,54 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 	// not affect or create bitstream-level SEIs.
 	// The color range and the matrix are the exception: they are taken from the new video (see
 	// RemuxColorRange and RemuxColorSpace).
+	// The same two probes tell where the video of each file starts: see RemuxVideoOffset.
 	var (
 		originalVideo  *FFProbeBinaryStream
 		newVideo       *FFProbeBinaryStream
 		colorTransfer  string
 		colorPrimaries string
+		videoOffset    time.Duration
 	)
-	if originalStats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{
+	originalStats, originalErr := GetStreamsInfos(ctx, GetStreamsInfosConfig{
 		Path:         config.OriginalFile,
 		Debug:        config.Debug,
 		RuntimeError: config.RuntimeError,
-	}); err == nil {
+	})
+	if originalErr == nil {
 		if originalVideo = originalStats.VideoTrack(); originalVideo != nil {
 			colorTransfer = originalVideo.ColorTransfer
 			colorPrimaries = originalVideo.ColorPrimaries
 		}
 	} else if config.RuntimeError != nil {
-		config.RuntimeError(fmt.Errorf("failed to probe original file for color metadata: %w", err))
+		config.RuntimeError(fmt.Errorf("failed to probe original file for color metadata and the start of its video: %w", originalErr))
 	}
-	if newStats, err := GetStreamsInfos(ctx, GetStreamsInfosConfig{
+	newStats, newErr := GetStreamsInfos(ctx, GetStreamsInfosConfig{
 		Path:         config.NewVideoFile,
 		Debug:        config.Debug,
 		RuntimeError: config.RuntimeError,
-	}); err == nil {
+	})
+	if newErr == nil {
 		newVideo = newStats.VideoTrack()
 	} else if config.RuntimeError != nil {
-		config.RuntimeError(fmt.Errorf("failed to probe the new video file for its color range and matrix: %w", err))
+		config.RuntimeError(fmt.Errorf("failed to probe the new video file for its color range and matrix, and the start of its video: %w", newErr))
 	}
 	colorRange := RemuxColorRange(originalVideo, newVideo)
 	colorSpace := RemuxColorSpace(originalVideo, newVideo)
+	if originalErr == nil && newErr == nil {
+		videoOffset = RemuxVideoOffset(originalStats, newStats)
+	}
 	// Prepare
 	args := []string{
 		"-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-stats_period",
 		strconv.FormatFloat(float64(StatsPeriod)/float64(time.Second), 'f', -1, 64),
 	}
 	// Inputs
-	args = append(args,
-		"-i", config.OriginalFile,
-		"-i", config.NewVideoFile,
-	)
+	args = append(args, "-i", config.OriginalFile)
+	if videoOffset != 0 {
+		// input option of the new video file: only its streams are moved
+		args = append(args, "-itsoffset", strconv.FormatFloat(videoOffset.Seconds(), 'f', 6, float64Precision))
+	}
+	args = append(args, "-i", config.NewVideoFile)
 	//// stream mapping: video from the encoded merge, everything else from the original
 	args = append(args,
 		"-map", "1:v", // video from encoded merge
@@ -193,6 +204,85 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 		return
 	}
 	return
+}
+
+// RemuxVideoOffset returns the delay RemuxSwapVideo gives the new video file for its video to start
+// where the original's did against the streams kept from the original, given the probes of both
+// files: how long after the start of its file the original's video starts, minus the same for the
+// new video.
+//
+// # WHY THE NEW VIDEO IS DELAYED
+//
+// ffmpeg brings every input file to 0: it takes the start of the file, the one of its earliest
+// stream, off every timestamp of the file. A video starting after its file keeps that gap against
+// the other streams of the same file, and the video of another file does not: the merged encodes
+// are video only, their video landed at 0, next to audio and subtitles whose own video started
+// later. A source whose video starts 123 ms after its audio (a 288 frames clip at 23.976 fps, H.264
+// and AC-3 in Matroska) came out with every frame early against the audio by the whole gap: 122
+// to 123 ms from the remux command given its master, 123 ms from encode, on the file and on a
+// pre-split directory, and from batchsearch. Delayed by the gap (-itsoffset on the new video file
+// alone), the video of those outputs has the timestamps of the source's, frame by frame, and
+// their other streams did not move (checked packet by packet, with two audio tracks and
+// subtitles as well).
+//
+// # WHY THE GAP IS READ THAT WAY
+//
+//   - The start of the video minus the start of the file, not the start of the video alone: a
+//     source moved whole by half a second (audio at 0.500 s, video at 0.623 s) needs 0.123 s, its
+//     file being brought to 0 as any other. Delayed by 0.623 s, its video came out half a second
+//     late.
+//   - Read from the original, not from the master or the segments: the master numbers its frames
+//     at the frame rate and holds the gap rounded to a frame (0.125 s for 0.123 s at 23.976 fps),
+//     and the segments are cut with their timestamps reset.
+//   - Minus the gap of the new video in its own file, which ffmpeg keeps: the remux command is
+//     given any file. An output of sptenc given back as the new video of the same original holds
+//     the gap already (video at 0.123 s, audio at 0): delayed again, its video came out at 0.246 s.
+//     The merged encodes start with their file, and so does a master (0.125 s, video and file).
+//
+// # EDGE CASES
+//
+//   - A source whose audio starts after its video needs nothing: its video starts with its file,
+//     and the audio keeps its own gap, both being timestamps of the original (measured: the
+//     output of such a source was right before the delay existed).
+//   - A file that does not tell where it starts or where its video does (ffprobe's N/A) can not be
+//     compared: no delay, as before.
+//   - The delay is rounded to the millisecond of Matroska apart from the timestamps it is added
+//     to, rounded already: every frame is moved by the same whole number of milliseconds and
+//     lasts what it did. An original whose video starts on a fraction of a millisecond (0.125125 s
+//     in an MP4 file) has its frames within 1 ms of the output's instead of half of one (0.58 ms
+//     at most on 288 frames, 24 of them beyond half a millisecond).
+func RemuxVideoOffset(original, newVideo FFProbeStats) time.Duration {
+	originalGap, known := videoStartInFile(original)
+	if !known {
+		return 0
+	}
+	newGap, known := videoStartInFile(newVideo)
+	if !known {
+		return 0
+	}
+	return originalGap - newGap
+}
+
+// videoStartInFile returns how long after the start of its file the video of a probed file
+// starts, to the microsecond ffprobe prints both with, and whether the probe tells: it does not
+// without a video stream, or when one of the two start times is missing (N/A).
+func videoStartInFile(stats FFProbeStats) (gap time.Duration, known bool) {
+	video := stats.VideoTrack()
+	if video == nil || stats.Format == nil {
+		return 0, false
+	}
+	videoStart, err := strconv.ParseFloat(video.StartTime, float64Precision)
+	if err != nil {
+		return 0, false
+	}
+	fileStart, err := strconv.ParseFloat(stats.Format.StartTime, float64Precision)
+	if err != nil {
+		return 0, false
+	}
+	microseconds := func(seconds float64) time.Duration {
+		return time.Duration(math.Round(seconds*1e6)) * time.Microsecond
+	}
+	return microseconds(videoStart) - microseconds(fileStart), true
 }
 
 // RemuxColorRange returns the color range RemuxSwapVideo declares for the video it takes from the

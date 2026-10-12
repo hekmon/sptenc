@@ -364,7 +364,7 @@ Because a given VMAF target can require very different QP distributions dependin
 
 The output is always Matroska (`.mkv`) because it is the most permissive container for stream copy.
 
-Every stream of the source other than video (audio, subtitles, attachments, data) is copied into the output. When every audio track is 16 or 24-bit little-endian PCM (`pcm_s16le`, `pcm_s24le`, as in MKV remuxes of Blu-ray discs), they are losslessly compressed to FLAC; otherwise audio is copied as is.
+Every stream of the source other than video (audio, subtitles, attachments, data) is copied into the output, and the video keeps the place it had against them: a source whose video starts after its audio keeps that gap. When every audio track is 16 or 24-bit little-endian PCM (`pcm_s16le`, `pcm_s24le`, as in MKV remuxes of Blu-ray discs), they are losslessly compressed to FLAC; otherwise audio is copied as is.
 
 **For small files, shrinking the audio is up to you.** The lossless tracks of a Blu-ray remux can outweigh a video encoded with the [small files profile](#recommended-values). Dropping the tracks you do not need and keeping the lossy core of the others re-encodes nothing. Do it on sptenc's output with mkvmerge, which comes with MKVToolNix: it keeps sptenc's tags and rewrites the statistics of the tracks.
 - **DTS-HD**: `--reduce-to-core` keeps its DTS core (ffmpeg's `dca_core` bitstream filter does the same).
