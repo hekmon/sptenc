@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"al.essio.dev/pkg/shellescape"
@@ -270,18 +271,34 @@ var concatCommand = &cli.Command{
 //
 // # WHY THE CONCAT COMMAND DOES NOT ALWAYS SNAP
 //
-// The snap moves every video frame onto one frame grid starting at 0. The encode pipeline
-// knows its segments are on one: cut from the same master, at the same frame rate, video only.
-// The concat command is given any files, and for two kinds of them the snap corrupts the
-// output instead of fixing it (both measured):
+// The snap moves every video frame onto one frame grid, counted from the first video
+// timestamp of the output. The encode pipeline knows its segments are on one: cut from the same
+// master, at the same frame rate, video only. The concat command is given any files, and for
+// two kinds of them the snap corrupts the output instead of fixing it (both measured):
 //   - Files at different frame rates have no grid in common: a 23.976 fps file followed by a
 //     25 fps one got frames sharing the same timestamp.
-//   - A file whose video starts after its other streams is placed by its first stream: its
-//     frames are off the grid by the gap, and the snap moved them by up to half a frame
-//     against the audio (20 ms for a video starting 22 ms after its audio).
+//   - Files whose videos do not start as long after their file are placed by their first
+//     stream, each video off the grid of the first by the difference: a video starting 22 ms
+//     after its audio, between two files starting with their video, got a timestamp shared by
+//     two frames, and frames of 0 to 83 ms.
 //
 // Such files are merged as the demuxer places them, as before the snap existed: frames up to
-// 1 ms off.
+// 1 ms off, and where the gaps differ, the frames at the joins lasting what the gaps make them
+// (21 to 63 ms in that example).
+//
+// # WHY THE SAME GAP, NOT NO GAP
+//
+// Files were refused the snap as soon as the video of one started after its file: the grid was
+// counted from 0, and a video starting 22 ms after its audio was moved by up to half a frame
+// against it. It is counted from the first video timestamp now (see ffmpeg's frameGridSnap),
+// which only needs every video to start as long after its file: three segments whose video
+// starts 22 ms after their audio came out with frames of 41 to 42 ms, their video still 22 ms
+// after the audio, where the merge without the snap left frames of 41 to 43 ms.
+//
+// The gap is the one ffprobe tells, the start of the video less the start of the file: it is
+// what the demuxer places a file with. The first packet of an audio stream sitting before 0, by
+// the delay of its encoder (AAC, AC-3), is not part of it and needs no check: segments with AAC
+// and with FLAC audio mixed in one list came out on one grid.
 //
 // # EDGE CASES
 //
@@ -291,6 +308,10 @@ var concatCommand = &cli.Command{
 //     number of frames and its declared frame rate.
 func concatSnapFrameRate(paths []string, stats []ffmpeg.FFProbeStats, originalFrameRate string) (frameRate, whyNot string) {
 	frameRate = originalFrameRate
+	var firstGap time.Duration
+	seconds := func(gap time.Duration) string {
+		return strconv.FormatFloat(gap.Seconds(), 'f', 6, 64)
+	}
 	for i := range stats {
 		name := shellescape.Quote(filepath.Base(paths[i]))
 		videoStream := stats[i].VideoTrack()
@@ -305,12 +326,20 @@ func concatSnapFrameRate(paths []string, stats []ffmpeg.FFProbeStats, originalFr
 					shellescape.Quote(filepath.Base(paths[0])), frameRate, name, videoStream.RFrameRate)
 			}
 		}
-		var fileStart string
-		if stats[i].Format != nil {
-			fileStart = stats[i].Format.StartTime
+		gap, known := stats[i].VideoStartInFile()
+		if !known {
+			var fileStart string
+			if stats[i].Format != nil {
+				fileStart = stats[i].Format.StartTime
+			}
+			return "", fmt.Sprintf("%s does not tell where its video starts in it (the video at %q, the file at %q)",
+				name, videoStream.StartTime, fileStart)
 		}
-		if videoStream.StartTime == "" || videoStream.StartTime == "N/A" || videoStream.StartTime != fileStart {
-			return "", fmt.Sprintf("the video of %s starts at %s s, the file at %s s", name, videoStream.StartTime, fileStart)
+		if i == 0 {
+			firstGap = gap
+		} else if gap != firstGap {
+			return "", fmt.Sprintf("the video of %s starts %s s after its file, the video of %s %s s after its own",
+				name, seconds(gap), shellescape.Quote(filepath.Base(paths[0])), seconds(firstGap))
 		}
 	}
 	return

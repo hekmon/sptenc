@@ -52,12 +52,47 @@ func TestConcatSnapFrameRate(t *testing.T) {
 			wantWhyNot: []string{"b.mkv", "24000/1001", "25/1"},
 		},
 		{
-			name: "video starting after the audio",
+			// one grid counted from the first video timestamp: the same gap in every file is enough
+			name: "video starting as long after the audio in every file",
+			stats: []ffmpeg.FFProbeStats{
+				concatTestStats("24000/1001", "0.022000", "0.000000"),
+				concatTestStats("24000/1001", "0.022000", "0.000000"),
+			},
+			wantFrameRate: "24000/1001",
+		},
+		{
+			name: "same gap, files not starting at the same time",
+			stats: []ffmpeg.FFProbeStats{
+				concatTestStats("24000/1001", "0.022000", "0.000000"),
+				concatTestStats("24000/1001", "0.522000", "0.500000"),
+				concatTestStats("24000/1001", "0.001000", "-0.021000"),
+			},
+			wantFrameRate: "24000/1001",
+		},
+		{
+			name: "video starting after the audio in one file only",
 			stats: []ffmpeg.FFProbeStats{
 				concatTestStats("24000/1001", "0.000000", "0.000000"),
 				concatTestStats("24000/1001", "0.022000", "0.000000"),
 			},
-			wantWhyNot: []string{"b.mkv", "0.022000", "0.000000"},
+			wantWhyNot: []string{"b.mkv", "0.022000", "a.mkv", "0.000000"},
+		},
+		{
+			name: "video starting after the audio in the first file only",
+			stats: []ffmpeg.FFProbeStats{
+				concatTestStats("24000/1001", "0.022000", "0.000000"),
+				concatTestStats("24000/1001", "0.000000", "0.000000"),
+			},
+			wantWhyNot: []string{"b.mkv", "0.000000", "a.mkv", "0.022000"},
+		},
+		{
+			name: "gaps a millisecond apart",
+			stats: []ffmpeg.FFProbeStats{
+				concatTestStats("24000/1001", "0.022000", "0.000000"),
+				concatTestStats("24000/1001", "0.022000", "0.000000"),
+				concatTestStats("24000/1001", "0.023000", "0.000000"),
+			},
+			wantWhyNot: []string{"c.mkv", "0.023000", "a.mkv", "0.022000"},
 		},
 		{
 			name: "start times unknown",
@@ -95,13 +130,22 @@ func TestConcatSnapFrameRate(t *testing.T) {
 			wantFrameRate: "60000/1001",
 		},
 		{
-			name: "original file, video starting after the audio",
+			name: "original file, video starting after the audio in one file only",
 			stats: []ffmpeg.FFProbeStats{
 				concatTestStats("19001/317", "0.000000", "0.000000"),
 				concatTestStats("19001/317", "0.022000", "0.000000"),
 			},
 			original:   "60000/1001",
 			wantWhyNot: []string{"b.mkv", "0.022000"},
+		},
+		{
+			name: "original file, video starting as long after the audio in every file",
+			stats: []ffmpeg.FFProbeStats{
+				concatTestStats("19001/317", "0.022000", "0.000000"),
+				concatTestStats("19001/317", "0.022000", "0.000000"),
+			},
+			original:      "60000/1001",
+			wantFrameRate: "60000/1001",
 		},
 		{
 			name: "no video stream",
@@ -114,7 +158,7 @@ func TestConcatSnapFrameRate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			paths := []string{"/segments/a.mkv", "/segments/b.mkv"}[:len(tt.stats)]
+			paths := []string{"/segments/a.mkv", "/segments/b.mkv", "/segments/c.mkv"}[:len(tt.stats)]
 			frameRate, whyNot := concatSnapFrameRate(paths, tt.stats, tt.original)
 			if frameRate != tt.wantFrameRate {
 				t.Errorf("frame rate %q, want %q (reason: %q)", frameRate, tt.wantFrameRate, whyNot)

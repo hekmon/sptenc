@@ -91,6 +91,30 @@ func (stats *FFProbeStats) AudioTrack() (audioStream *FFProbeBinaryStream) {
 	return
 }
 
+// VideoStartInFile returns how long after the start of its file the video of a probed file
+// starts, to the microsecond ffprobe prints both with, and whether the probe tells: it does not
+// without a video stream, or when one of the two start times is missing (N/A). It is the gap
+// ffmpeg keeps when it brings a file to 0 by its earliest stream (see RemuxVideoOffset), and the
+// one the concat demuxer places a file with (see frameGridSnap).
+func (stats *FFProbeStats) VideoStartInFile() (gap time.Duration, known bool) {
+	video := stats.VideoTrack()
+	if video == nil || stats.Format == nil {
+		return 0, false
+	}
+	videoStart, err := strconv.ParseFloat(video.StartTime, float64Precision)
+	if err != nil {
+		return 0, false
+	}
+	fileStart, err := strconv.ParseFloat(stats.Format.StartTime, float64Precision)
+	if err != nil {
+		return 0, false
+	}
+	microseconds := func(seconds float64) time.Duration {
+		return time.Duration(math.Round(seconds*1e6)) * time.Microsecond
+	}
+	return microseconds(videoStart) - microseconds(fileStart), true
+}
+
 // FFProbeFormat holds the container-level metadata for a probed file.
 type FFProbeFormat struct {
 	Filename       string            `json:"filename"`

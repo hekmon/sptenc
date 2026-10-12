@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -252,37 +251,15 @@ func RemuxSwapVideo(ctx context.Context, config RemuxSwapVideoConfig) (err error
 //     in an MP4 file) has its frames within 1 ms of the output's instead of half of one (0.58 ms
 //     at most on 288 frames, 24 of them beyond half a millisecond).
 func RemuxVideoOffset(original, newVideo FFProbeStats) time.Duration {
-	originalGap, known := videoStartInFile(original)
+	originalGap, known := original.VideoStartInFile()
 	if !known {
 		return 0
 	}
-	newGap, known := videoStartInFile(newVideo)
+	newGap, known := newVideo.VideoStartInFile()
 	if !known {
 		return 0
 	}
 	return originalGap - newGap
-}
-
-// videoStartInFile returns how long after the start of its file the video of a probed file
-// starts, to the microsecond ffprobe prints both with, and whether the probe tells: it does not
-// without a video stream, or when one of the two start times is missing (N/A).
-func videoStartInFile(stats FFProbeStats) (gap time.Duration, known bool) {
-	video := stats.VideoTrack()
-	if video == nil || stats.Format == nil {
-		return 0, false
-	}
-	videoStart, err := strconv.ParseFloat(video.StartTime, float64Precision)
-	if err != nil {
-		return 0, false
-	}
-	fileStart, err := strconv.ParseFloat(stats.Format.StartTime, float64Precision)
-	if err != nil {
-		return 0, false
-	}
-	microseconds := func(seconds float64) time.Duration {
-		return time.Duration(math.Round(seconds*1e6)) * time.Microsecond
-	}
-	return microseconds(videoStart) - microseconds(fileStart), true
 }
 
 // RemuxColorRange returns the color range RemuxSwapVideo declares for the video it takes from the

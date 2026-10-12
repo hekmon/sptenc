@@ -113,8 +113,9 @@ type ConcatConfig struct {
 	ConcatUnsafe   bool
 	OutputPath     string
 	// FrameRate of the video, as ffprobe writes r_frame_rate ("24000/1001", "25"): the video
-	// timestamps are snapped to its frame grid, see Concat (and frameGridSnap for which rate).
-	// Empty, they are copied as the demuxer computes them.
+	// timestamps are snapped to its frame grid, see Concat (and frameGridSnap for which rate, and
+	// for what the files must have in common). Empty, they are copied as the demuxer computes
+	// them.
 	FrameRate string
 	// Reporting
 	Debug             func(msg string)
@@ -145,7 +146,8 @@ type ConcatConfig struct {
 // are hit the same way, 25 and 50 fps never are, their frames lasting whole milliseconds.
 //
 // Snapping moves every timestamp to the exact time of its frame rounded once, where the
-// master has it. The duration lines are needed all the same: the snap only finds the right
+// master has it, counted from the first video timestamp of the output (see frameGridSnap for
+// why not from 0). The duration lines are needed all the same: the snap only finds the right
 // frame for a timestamp less than half a frame away from it, and without them the offsets
 // drift at every boundary (about 0.3 ms at 23.976 fps, 46 ms over 163 segments).
 //
@@ -244,23 +246,63 @@ func Concat(ctx context.Context, config ConcatConfig) (err error) {
 
 // frameGridSnap returns the setts bitstream filter snapping the pts and dts of a video stream
 // numbered at frameRate (as ffprobe writes r_frame_rate: "24000/1001", "25") to its frame
-// grid: each timestamp becomes the index of the nearest frame, then the exact time of that
-// frame rounded to the stream time base (TB), halves away from zero as ffmpeg's rescaling
-// does, the one that wrote the master's timestamps. setts has no frame rate variable: the
-// rate is written into the expression.
+// grid, counted from the first video timestamp of the output (STARTPTS): each timestamp
+// becomes the index of the nearest frame from there, then the exact time of that frame rounded
+// to the stream time base (TB), halves away from zero as ffmpeg's rescaling does, the one that
+// wrote the master's timestamps. setts has no frame rate variable: the rate is written into the
+// expression.
+//
+// # WHY THE GRID IS COUNTED FROM THE FIRST VIDEO TIMESTAMP, NOT FROM 0
+//
+// The grid was counted from 0, where the video of sptenc's own segments starts: they hold
+// nothing else. The video of other files does not always land there, and a grid from 0 then
+// moves it by up to half a frame, alone. Two cases were measured, on three segments of 26, 51
+// and 30 frames at 23.976 fps:
+//   - Segments with AAC audio. An audio encoder's delay puts the first audio packet before 0
+//     (21 ms for AAC, 5 ms for AC-3). The concat demuxer starts its output there, and ffmpeg
+//     brings an input to 0: every stream comes 21 ms later, the video first frame at 21 ms,
+//     half a frame from the grid. Some frames went down and some up: in Matroska, 21 of the 107
+//     timestamps were shared by two frames, frames lasting from 0 to 84 ms; in MP4, whose time
+//     base holds the timestamps exact, the whole video moved to the next frame, 20 ms late
+//     against its audio. The encode command did the same with a pre-split directory of such
+//     segments and completed, the frame counter alone printing that timestamps did not
+//     increase.
+//   - Segments whose video starts after their audio (22 ms): the concat command did not snap
+//     them, the grid from 0 moving their frames by 20 ms against the audio, and left frames of
+//     41 to 43 ms (see Concat).
+//
+// Counted from the first video timestamp, the grid is the video's own wherever it lands. Those
+// outputs have no shared timestamp, frames of 41 to 42 ms, and the video where the segments
+// have it against their audio (0 and 22 ms). Where the video starts at 0 nothing changes, the
+// expression computing the same values: every pts and dts of the segments of a split and of
+// segments with FLAC audio came out as before.
+//
+// # WHAT THE FILES MUST HAVE IN COMMON
+//
+// One grid needs the video of every file to start as long after its file (see
+// FFProbeStats.VideoStartInFile): the demuxer places a file by its start, its earliest
+// stream's, so a video starting 22 ms after its file between two starting with theirs is 22 ms
+// off their grid. Snapped all the same, that output got a timestamp shared by two frames and
+// frames of 0 to 83 ms, where the demuxer alone leaves frames of 21 to 63 ms, what the files
+// hold. A first audio packet before 0 is not such a gap: it is the same shift for every file
+// of the output. Segments with AAC and with FLAC audio mixed in one list, in both orders, came
+// out on one grid. The concat command, given any files, checks them (concatSnapFrameRate in
+// cmd/sptenc).
 //
 // # EDGE CASES
 //
-//   - The grid starts at 0, where the first frame of the first segment is: segments are cut
-//     with their timestamps reset and encoded from 0.
-//   - Decode timestamps (starting before 0 with B-frames) are snapped by the same function,
-//     which never swaps two timestamps: they stay increasing and never after their
-//     presentation timestamp.
+//   - STARTPTS is the presentation timestamp of the first video packet that has one
+//     (libavcodec/bsf/setts.c). A file whose packets have none can not be written to Matroska
+//     at all, with or without the snap (measured with AVI segments holding B-frames).
+//   - Decode timestamps (starting before the first presentation timestamp with B-frames) are
+//     snapped by the same function, counted from the same timestamp, which never swaps two
+//     timestamps: they stay increasing and never after their presentation timestamp.
 //   - setts evaluates every packet, the ones without a timestamp too: a missing timestamp
 //     (NOPTS, the lowest int64, not a time) is kept missing instead of being computed with.
 //     This takes commas, which separate the filters of a bitstream filter list: each
 //     expression is quoted.
-//   - A timestamp already exact (25 fps, or a file snapped before) comes out unchanged.
+//   - A timestamp already exact (25 fps, a file snapped before, or segments whose time base
+//     holds their frames exactly, as MP4's does) comes out unchanged.
 //   - The computation is done in double precision, the order of the operations keeps it
 //     exact however far into the file, halves included (see TestFrameGridSnap_Exact).
 //   - The frame rate must be the exact one of the frames, the master's, which is not always
@@ -278,8 +320,9 @@ func frameGridSnap(frameRate string) (bsf string, err error) {
 		return "", fmt.Errorf("invalid frame rate %q: %w", frameRate, err)
 	}
 	snap := func(timestamp string) string {
-		// index of the nearest frame, then the time of that frame in TB units
-		return fmt.Sprintf("'if(eq(%[1]s,NOPTS),NOPTS,round(round(%[1]s*TB*%[2]d/%[3]d)*%[3]d/TB/%[2]d))'",
+		// index of the nearest frame from the first video timestamp, then the time of that
+		// frame in TB units
+		return fmt.Sprintf("'if(eq(%[1]s,NOPTS),NOPTS,STARTPTS+round(round((%[1]s-STARTPTS)*TB*%[2]d/%[3]d)*%[3]d/TB/%[2]d))'",
 			timestamp, num, den)
 	}
 	return "setts=pts=" + snap("PTS") + ":dts=" + snap("DTS"), nil
