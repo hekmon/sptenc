@@ -171,6 +171,7 @@ func (e *EncoderAdapter) ComputeVMAF(ctx context.Context, reference, distorted s
 		ReferencePath:     reference,
 		DistortedPath:     distorted,
 		InputFrameRate:    stream.RFrameRate,
+		NbFrames:          stream.NbReadFrames,
 		ReportPath:        reportPath,
 		Model:             e.VMAFModel,
 		ModelCAMBI:        e.VMAFModelCAMBI,

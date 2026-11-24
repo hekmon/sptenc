@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func TestEncoderAdapter_ComputeVMAF(t *testing.T) {
 	}
 	gradient := clip("gradient.mkv", "64+floor(X/12)")
 	steps := clip("seg_000000_qp020.mkv", "64+4*floor(X/48)")
-	stream := core.VideoStream{RFrameRate: "24"}
+	stream := core.VideoStream{RFrameRate: "24", NbReadFrames: 12}
 	round := func(v float64) float64 { return math.Round(v*100) / 100 }
 	banding := core.BandingStats{AddedMean: 15.83, AddedMax: 15.83, SourceMean: 6.65, EncodeMean: 22.48}
 	for _, tc := range []struct {
@@ -82,6 +83,13 @@ func TestEncoderAdapter_ComputeVMAF(t *testing.T) {
 	if _, _, err := (&EncoderAdapter{VMAFModel: ffmpeg.VMAFModelFHD}).ComputeVMAF(ctx, gradient, steps, stream,
 		core.VMAFMeasures{Score: true}, nil, nil, nil); err == nil {
 		t.Error("an adapter without a score to gate should refuse a score pass")
+	}
+	// the report must hold the frames the search counted in the segment
+	adapter := &EncoderAdapter{Encoder: ffmpeg.HEVCEncoderLibx265, VMAFModel: ffmpeg.VMAFModelFHD, VMAFModelCAMBI: true,
+		VMAFScore: ffmpeg.VMAFScoreFidelity}
+	if _, _, err := adapter.ComputeVMAF(ctx, gradient, steps, core.VideoStream{RFrameRate: "24", NbReadFrames: 13},
+		core.VMAFMeasures{Score: true}, nil, nil, nil); err == nil || !strings.Contains(err.Error(), "holds 12 frames instead of 13") {
+		t.Errorf("a segment counted with 13 frames should fail on a report of 12, got %v", err)
 	}
 }
 

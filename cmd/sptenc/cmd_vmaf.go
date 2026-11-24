@@ -252,6 +252,7 @@ var vmafCommand = &cli.Command{
 			DistortedPath:        distortedPath,
 			DistortedRGBToYUV:    colors.distortedRGBToYUV,
 			InputFrameRate:       videoStream.RFrameRate,
+			NbFrames:             totalFrames,
 			ReportPath:           filepath.Join(workingDir, "vmaf.json"),
 			Model:                setup.model,
 			ModelCAMBI:           setup.modelCAMBI,

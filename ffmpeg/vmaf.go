@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -543,6 +544,9 @@ type VMAFComputeConfig struct {
 	ReferencePath  string // Path to the reference (original) video.
 	DistortedPath  string // Path to the distorted (encoded) video.
 	InputFrameRate string // Frame rate of the input videos (e.g. "24" or "24000/1001").
+	// NbFrames is the number of frames of each input, counted by the caller: the report must hold
+	// as many (see WHY THE NUMBER OF FRAMES IS CHECKED in VMAFCompute). Required.
+	NbFrames int
 	// ReferenceRGBToYUV and DistortedRGBToYUV are the matrices an RGB input is converted with (see
 	// YUVMatrix), empty for a YUV one: the encodes of an RGB source are scored against the very
 	// pictures of its master. Left to ffmpeg, an RGB input was converted with the matrix the other
@@ -571,6 +575,86 @@ type VMAFComputeConfig struct {
 // VMAFCompute runs FFmpeg with libvmaf to compare a distorted video against its
 // reference and returns the parsed VMAF report. The context can be used to cancel
 // the long-running ffmpeg process.
+//
+// # WHY ONE FILTER GRAPH FOR EVERY FRAME
+//
+// When the properties of the decoded frames of an input change mid-stream (a colour description
+// appearing after the first frames, as on DVDs), ffmpeg rebuilds the filter graph by default. The
+// rebuilt graph starts over: libvmaf restarts and overwrites its report, setpts takes a new
+// STARTPTS, and nothing fails. Measured with ffmpeg 9.0.1 on an H.264 source of 38 frames whose
+// colour description (BT.709, limited range) appears at frame 14, against an x264 encode (QP 30) of
+// its master: the report held 24 frames, fidelity 99.007 where its master as the reference scores
+// 99.367 over the 38; decoded by VideoToolbox, 24 frames and 17.753. The final VMAF of encode and
+// batchsearch, and the vmaf command, scored such a source that way.
+//
+// -reinit_filter 0 keeps the graph the first frame built for every frame: decoded in software, the
+// 38 frames score as against the master, frame by frame. One graph has a cost of its own: a
+// conversion in it is set up for the properties of the first frame, and converts every frame
+// declaring others into them. Decoded by VideoToolbox, the repack of its pictures (see
+// softwarePixelFormat) converted the frames after the change from BT.709 into the unspecified matrix
+// of the first ones (BT.601's coefficients): they scored 64.9 to 79.9 instead of 97.6 to 100. So the
+// matrix of every frame is relabelled first (vmafSameMatrix), before any conversion, as it is at the
+// end anyway: the scores and the banding are then those of the master as the reference, frame by
+// frame, with software and VideoToolbox decoding, and those of the same source without the change
+// on the distorted side. A colour description changing its primaries or transfer alone is scored
+// so too (no conversion of the graph reads them). Without a change, the scores and the banding are
+// those of the graph without -reinit_filter 0 and the relabelling, frame by frame, decoded in
+// software and with -hwaccel videotoolbox: MPEG-2 and H.264 BT.709, H.264 full range, HEVC 10 bits
+// BT.2020, H.264 full range 4:4:4 and HEVC 4:4:4 10 bits against 4:2:0 encodes (each of them as the
+// reference and as the distorted video), RGB FFV1 and PNG references.
+//
+// # WHY A CHANGE OF SIZE, PIXEL FORMAT, RANGE OR MATRIX IS AN ERROR
+//
+// The master converts such a change into the properties of its first frame (its graph is rebuilt,
+// its encoder is not: ffmpeg converts the output of the rebuilt graph into the matrix and range of
+// the encoder, 8-bit and 10-bit sources alike), which the single graph of the pass does only when a
+// conversion happens to be in it, for its own reasons. Measured on the same kind of H.264 sources,
+// scored against an encode of their master, both made as encode makes them (master decoded as the
+// pass decodes the source):
+//   - a matrix changing from BT.601 to BT.709: the master holds the frames after the change
+//     converted into BT.601 (up to 109 10-bit codes from the decoded pictures), the pass compares
+//     them with the decoded pictures: 92.058 instead of 99.981, the 24 frames up to 12.3 off
+//     (VideoToolbox: 92.058 instead of 99.471; not relabelled, the repack converts them another
+//     way, up to 0.84 off). From BT.709 to none: 86.486 instead of 100;
+//   - a range changing to full: right in software on an 8-bit source, whose conversion to the 10
+//     bits of the encode brings the frames to the first one's range, up to 0.73 off with
+//     VideoToolbox; on a 10-bit source, nothing converts them: 74.753 instead of 99.896;
+//   - a picture size changing from 320x240 to 352x288: right in software on an 8-bit source, up to
+//     0.017 off with VideoToolbox; on a 10-bit source, libvmaf fails reading the pictures;
+//   - a pixel format changing: 4:2:0 to 4:2:2 was right, 8 to 10 bits up to 0.004 off with
+//     VideoToolbox, and 10 to 8 bits lost the CAMBI of the source from the change on, libvmaf
+//     refusing its values.
+//
+// So a frame of another picture size, pixel format or range than the first one (a missing range
+// read as limited), or of another matrix where the first one declares one, fails the pass, on
+// either input (see vmafFrameChange). BT.601's two labels are the exception: smpte170m and bt470bg
+// name the same coefficients, and MPEG-2, 8-bit and 10-bit H.264 sources switching from one to the
+// other at frame 14 of 38 gave a master holding the pictures of each part decoded on its own, on
+// every frame (MPEG-2 from smpte170m to bt470bg, H.264 either way), and with the refusal bypassed,
+// the same scores as their master as the reference, and as the source without the switch as the
+// distorted video, frame by frame (either way), in software and with VideoToolbox (8-bit H.264): a
+// switch between them is accepted.
+//
+// ffmpeg logs such a frame at the warning level when it reaches the graph, the first frame of each
+// change, but the pass runs at the error level: libvmaf takes ffmpeg's level for its own messages,
+// written to the standard error without a level prefix, and at the warning level it printed about
+// 3,900 lines over the 28 passes on the sources without a change. The warnings are written to a
+// report file of their own instead (FFREPORT), read once ffmpeg is done: the standard error output
+// is unchanged.
+//
+// # WHY THE NUMBER OF FRAMES IS CHECKED
+//
+// A score proves a quality floor only if the report holds every frame compared, and neither ffmpeg's
+// success nor libvmaf's says so: a rebuilt filter graph left a report of 24 frames out of 38, scored
+// as if complete (see WHY ONE FILTER GRAPH FOR EVERY FRAME). Inputs of different lengths lengthen it
+// instead: measured with ffmpeg 9.0.1 on FFV1 clips of 38 and 30 frames (testsrc2, 320x240, 24 fps),
+// the report held 38 frames, either clip being the reference, the 8 frames after the end of the
+// shorter one scoring 0 to 40.8 where the 30 before score 100. So the report must hold exactly the
+// number of frames the caller counted in each input (NbFrames), which no default can stand for: a
+// report of another length is an error, and no score is returned with it. The pass scores every
+// frame it is fed (no n_subsample), so that number is the frame count. Inputs of different lengths
+// pass the check when NbFrames is the count of the longer one: callers compare the counts of both
+// inputs first.
 func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFReport, err error) {
 	// Validate inputs
 	if config.ReferencePath == "" {
@@ -587,6 +671,10 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	}
 	if config.InputFrameRate == "" {
 		err = errors.New("input frame rate must be set")
+		return
+	}
+	if config.NbFrames <= 0 {
+		err = fmt.Errorf("the number of frames the VMAF report must hold must be set (got %d)", config.NbFrames)
 		return
 	}
 	pass := vmafPass{model: config.Model, modelCAMBI: config.ModelCAMBI, measures: config.Measures}
@@ -646,18 +734,21 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	//// distorted file first
 	args = appendHWAccelArgs(args, distortedHW)
 	args = append(args,
+		"-reinit_filter", "0", // libvmaf must not restart: see WHY ONE FILTER GRAPH FOR EVERY FRAME
 		"-r", config.InputFrameRate,
 		"-i", config.DistortedPath,
 	)
 	//// ref file
 	args = appendHWAccelArgs(args, referenceHW)
 	args = append(args,
+		"-reinit_filter", "0", // libvmaf must not restart: see WHY ONE FILTER GRAPH FOR EVERY FRAME
 		"-r", config.InputFrameRate,
 		"-i", config.ReferencePath,
 	)
 	//// vmaf filter
 	inputFilters := func(repack string, rgbToYUV YUVMatrix, colorFilter, chromaFilter string) string {
-		filters := "setpts=PTS-STARTPTS"
+		// relabelled before any conversion: see WHY ONE FILTER GRAPH FOR EVERY FRAME
+		filters := "setpts=PTS-STARTPTS," + vmafSameMatrix
 		if repack != "" {
 			filters += "," + repack
 		}
@@ -691,6 +782,17 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 		config.Debug(fmt.Sprintf("Compute VMAF with: %s", getPrintableCMDLine(FFMPEGBinary, args)))
 	}
 	cmd := exec.CommandContext(ctx, FFMPEGBinary, args...)
+	//// ffmpeg's log of the frames whose properties are not the graph's, written to a file of its
+	// own: see WHY A CHANGE OF SIZE, PIXEL FORMAT, RANGE OR MATRIX IS AN ERROR
+	framesLog, err := os.CreateTemp(filepath.Dir(config.ReportPath), vmafFramesLogFileMask)
+	if err != nil {
+		err = fmt.Errorf("failed to create the frames log file: %w", err)
+		return
+	}
+	framesLogPath := framesLog.Name()
+	framesLog.Close()
+	defer os.Remove(framesLogPath)
+	cmd.Env = append(os.Environ(), "FFREPORT=file="+ffreportPathEscaper.Replace(framesLogPath)+":level="+strconv.Itoa(ffreportLevelWarning))
 	//// Prepare output handling
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -723,12 +825,30 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 	}
 	<-progressDone
 	<-stderrDone
-	if err = cmd.Wait(); err != nil {
-		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, err, getPrintableCMDLine(FFMPEGBinary, args))
+	runErr := cmd.Wait()
+	changeErr := vmafFramesChanges(framesLogPath)
+	if runErr != nil {
+		err = fmt.Errorf("error during %s execution: %w\n%s", FFMPEGBinary, runErr, getPrintableCMDLine(FFMPEGBinary, args))
+		if changeErr != nil { // the cause: libvmaf can fail on such frames
+			err = fmt.Errorf("%w (%w)", changeErr, err)
+		}
+		return
+	}
+	if changeErr != nil {
+		err = changeErr
 		return
 	}
 	// Parse report
-	return readVMAFReport(config.ReportPath, pass)
+	if stats, err = readVMAFReport(config.ReportPath, pass); err != nil {
+		return
+	}
+	// see WHY THE NUMBER OF FRAMES IS CHECKED
+	if len(stats.Frames) != config.NbFrames {
+		err = fmt.Errorf("the VMAF report holds %d frames instead of %d", len(stats.Frames), config.NbFrames)
+		stats = VMAFReport{}
+		return
+	}
+	return
 }
 
 // vmafSameMatrix gives both inputs of libvmaf the same matrix, an unspecified one, for ffmpeg not
@@ -760,6 +880,111 @@ func VMAFCompute(ctx context.Context, config VMAFComputeConfig) (stats VMAFRepor
 //     picture needs a matrix to become YUV, and relabelled, the matrix ffmpeg would pick is the
 //     unspecified one, BT.601's coefficients.
 const vmafSameMatrix = "setparams=colorspace=unknown"
+
+const (
+	// what ffmpeg logs when a frame does not have the properties the graph was built with
+	// (-reinit_filter 0), the graph's first then the frame's, at the warning level for the first
+	// frame of each change:
+	//	[graph 0 input from stream 1:0 @ 0x78db02bcc0] filter context - w: 320 h: 240 fmt: 0 csp: unknown range: unknown alpha: unspecified, incoming frame - w: 352 h: 288 fmt: 0 csp: unknown range: unknown alpha: unspecified pts_time: 0.583333
+	vmafGraphPropertiesMarker = "filter context - "
+	vmafFramePropertiesMarker = "incoming frame - "
+	vmafInputMarker           = "input from stream "
+	// ffmpeg's report (FFREPORT) of a VMAF pass, written at the warning level (AV_LOG_WARNING)
+	vmafFramesLogFileMask = "sptenc-vmaf-frames-*.log"
+	ffreportLevelWarning  = 24
+)
+
+// ffreportPathEscaper escapes a file path for the file of FFREPORT: the value is read as an option
+// value (\ ' and : are special), then % starts a template sequence (%% is a %).
+var ffreportPathEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	`'`, `\'`,
+	`:`, `\:`,
+	`%`, `%%`,
+)
+
+// vmafFramesChanges reads ffmpeg's report of a VMAF pass, written at the warning level, and returns
+// the first change of the frames properties VMAF can not score (see vmafFrameChange). A report that
+// can not be read is an error: a change could not be ruled out.
+func vmafFramesChanges(path string) error {
+	report, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read the frames log of the VMAF pass: %w", err)
+	}
+	for _, line := range strings.Split(string(report), "\n") {
+		if strings.Contains(line, vmafGraphPropertiesMarker) && strings.Contains(line, vmafFramePropertiesMarker) {
+			if err = vmafFrameChange(line); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// vmafFrameChange returns an error when a line of ffmpeg reporting a frame whose properties are not
+// the graph's (see vmafGraphPropertiesMarker) gives it another picture size, pixel format or range,
+// or a matrix where the graph's first frame declared another one, or when it can not be read: see
+// WHY A CHANGE OF SIZE, PIXEL FORMAT, RANGE OR MATRIX IS AN ERROR in VMAFCompute. A matrix appearing
+// where the first frame declared none is not one, nor a change between BT.601's two labels.
+func vmafFrameChange(line string) error {
+	input := "an input"
+	if _, after, found := strings.Cut(line, vmafInputMarker); found {
+		switch index, _, _ := strings.Cut(after, ":"); index {
+		case "0":
+			input = "the distorted video"
+		case "1":
+			input = "the reference"
+		}
+	}
+	_, after, _ := strings.Cut(line, vmafGraphPropertiesMarker)
+	graphProperties, frameProperties, _ := strings.Cut(after, vmafFramePropertiesMarker)
+	type properties struct{ size, format, matrix, colorRange string }
+	read := func(text string) (p properties, ok bool) {
+		var w, h string
+		fields := strings.Fields(text)
+		for i := 0; i+1 < len(fields); i++ {
+			value := strings.TrimSuffix(fields[i+1], ",")
+			switch fields[i] {
+			case "w:":
+				w = value
+			case "h:":
+				h = value
+			case "fmt:":
+				p.format = value
+			case "csp:":
+				p.matrix = value
+			case "range:":
+				p.colorRange = value
+			}
+		}
+		p.size = w + "x" + h
+		// ffmpeg reads a missing range as limited (see declaredRange)
+		if p.colorRange == "unknown" {
+			p.colorRange = "tv"
+		}
+		return p, w != "" && h != "" && p.format != "" && p.matrix != "" && p.colorRange != ""
+	}
+	graph, graphOK := read(graphProperties)
+	frame, frameOK := read(frameProperties)
+	if !graphOK || !frameOK {
+		return fmt.Errorf("can not tell what changes mid-stream in %s, which VMAF may not score rightly: %s", input, line)
+	}
+	var change string
+	switch {
+	case graph.size != frame.size:
+		change = "picture size (" + graph.size + " to " + frame.size + ")"
+	case graph.format != frame.format:
+		change = "pixel format (" + graph.format + " to " + frame.format + " in ffmpeg's numbering)"
+	case graph.colorRange != frame.colorRange:
+		change = "range (" + graph.colorRange + " to " + frame.colorRange + ")"
+	case graph.matrix != "unknown" && graph.matrix != frame.matrix &&
+		!((graph.matrix == "smpte170m" || graph.matrix == "bt470bg") && (frame.matrix == "smpte170m" || frame.matrix == "bt470bg")):
+		change = "matrix (" + graph.matrix + " to " + frame.matrix + ")"
+	default:
+		return nil
+	}
+	return fmt.Errorf("%s changes its %s mid-stream, which VMAF can not score rightly: %s", input, change, line)
+}
 
 // softwarePixelFormat returns, for an input of a VMAF pass decoded by hardware, dec as it is and the
 // filter handing its pictures back in the pixel format of a software decode (video, see

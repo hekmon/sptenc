@@ -3,11 +3,13 @@ package ffmpeg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -734,6 +736,7 @@ func TestVMAFCompute(t *testing.T) {
 			ReferencePath:  gradient,
 			DistortedPath:  steps,
 			InputFrameRate: "24",
+			NbFrames:       12,
 			ReportPath:     filepath.Join(dir, "report.json"),
 			Model:          model,
 			ModelCAMBI:     modelCAMBI,
@@ -810,6 +813,7 @@ func TestVMAFComputeHardwareDecoded(t *testing.T) {
 			ReferencePath:   reference,
 			DistortedPath:   encode,
 			InputFrameRate:  "24",
+			NbFrames:        12,
 			ReportPath:      filepath.Join(dir, "report.json"),
 			Model:           VMAFModelFHD,
 			ModelCAMBI:      true,
@@ -862,6 +866,7 @@ func TestVMAFComputeNoAudio(t *testing.T) {
 		ReferencePath:  reference,
 		DistortedPath:  video,
 		InputFrameRate: "24",
+		NbFrames:       12,
 		ReportPath:     filepath.Join(dir, "report.json"),
 		Model:          VMAFModelFHD,
 		ModelCAMBI:     true,
@@ -880,5 +885,356 @@ func TestVMAFComputeNoAudio(t *testing.T) {
 		if frame.Fidelity != 100 {
 			t.Errorf("frame %d scores %v against itself, want 100", i, frame.Fidelity)
 		}
+	}
+}
+
+// TestVMAFComputeNbFrames scores for real clips of 38 and 30 frames: the report must hold the number
+// of frames it is told (see WHY THE NUMBER OF FRAMES IS CHECKED in VMAFCompute). Inputs of different
+// lengths give a report of the longer one's, which fails against the count of the shorter one. A
+// missing count is refused before ffmpeg runs.
+func TestVMAFComputeNbFrames(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	clip := func(frames int) string {
+		path := filepath.Join(dir, fmt.Sprintf("clip_%d.mkv", frames))
+		if output, err := exec.CommandContext(ctx, FFMPEGBinary, "-loglevel", "error", "-nostdin", "-y", "-f", "lavfi", "-i",
+			"testsrc2=size=320x240:rate=24", "-frames:v", strconv.Itoa(frames), "-pix_fmt", "yuv420p", "-c:v", "ffv1", path).CombinedOutput(); err != nil {
+			t.Fatalf("failed to generate %d frames: %s\n%s", frames, err, output)
+		}
+		return path
+	}
+	long, short := clip(38), clip(30)
+	reportPath := filepath.Join(dir, "report.json")
+	compute := func(reference, distorted string, nbFrames int) (VMAFReport, error) {
+		report, err := VMAFCompute(ctx, VMAFComputeConfig{
+			ReferencePath:  reference,
+			DistortedPath:  distorted,
+			InputFrameRate: "24",
+			NbFrames:       nbFrames,
+			ReportPath:     reportPath,
+			Model:          VMAFModelFHD,
+			ModelCAMBI:     true,
+			Measures:       VMAFMeasures{Fidelity: true},
+		})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+		}
+		return report, err
+	}
+	// the right count
+	if report, err := compute(long, long, 38); err != nil {
+		t.Fatalf("38 frames against themselves: %s", err)
+	} else if len(report.Frames) != 38 || report.Pooled.Fidelity.Min != 100 {
+		t.Errorf("38 frames against themselves: want 100 on 38 frames, got %+v on %d frames", report.Pooled.Fidelity, len(report.Frames))
+	}
+	// a wrong count, and inputs of different lengths, either being the reference
+	for _, tc := range []struct {
+		name                 string
+		reference, distorted string
+		nbFrames             int
+		want                 string
+	}{
+		{"38 frames told 37", long, long, 37, "the VMAF report holds 38 frames instead of 37"},
+		{"38 frames told 39", long, long, 39, "the VMAF report holds 38 frames instead of 39"},
+		{"38 frames against 30", long, short, 30, "the VMAF report holds 38 frames instead of 30"},
+		{"30 frames against 38", short, long, 30, "the VMAF report holds 38 frames instead of 30"},
+	} {
+		if report, err := compute(tc.reference, tc.distorted, tc.nbFrames); err == nil {
+			t.Errorf("%s: expected an error, got %d frames", tc.name, len(report.Frames))
+		} else if err.Error() != tc.want {
+			t.Errorf("%s: expected %q, got %q", tc.name, tc.want, err)
+		} else if report.Frames != nil || report.Pooled != (VMAFPooledMetrics{}) {
+			t.Errorf("%s: scores returned with the error: %+v", tc.name, report.Pooled)
+		}
+	}
+	// no count: refused before ffmpeg runs, no report written
+	if err := os.Remove(reportPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, nbFrames := range []int{0, -1} {
+		want := fmt.Sprintf("the number of frames the VMAF report must hold must be set (got %d)", nbFrames)
+		if _, err := compute(long, long, nbFrames); err == nil || err.Error() != want {
+			t.Errorf("%d frames: expected %q, got %v", nbFrames, want, err)
+		}
+		if _, err := os.Stat(reportPath); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%d frames: ffmpeg ran, a report was written (%v)", nbFrames, err)
+		}
+	}
+}
+
+// A frame of another picture size, pixel format, range or matrix than the first one fails the pass,
+// a matrix appearing where the first frame declares none does not, nor a switch between BT.601's
+// two labels (see vmafFrameChange). Lines of ffmpeg n9.0.1's report, and an unreadable one, not
+// captured from a real ffmpeg.
+func TestVMAFFrameChange(t *testing.T) {
+	for name, tc := range map[string]struct {
+		line, want string
+	}{
+		"matrix appearing":     {"[graph 0 input from stream 1:0 @ 0x7c0901bb40] filter context - w: 320 h: 240 fmt: 0 csp: unknown range: unknown alpha: unspecified, incoming frame - w: 320 h: 240 fmt: 0 csp: bt709 range: tv alpha: unspecified pts_time: 0.583333", ""},
+		"matrix changing":      {"[graph 0 input from stream 1:0 @ 0x789d02fb40] filter context - w: 320 h: 240 fmt: 0 csp: smpte170m range: tv alpha: unspecified, incoming frame - w: 320 h: 240 fmt: 0 csp: bt709 range: tv alpha: unspecified pts_time: 0.583333", "the reference changes its matrix (smpte170m to bt709)"},
+		"BT.601's two labels":  {"[graph 0 input from stream 1:0 @ 0x76015cc000] filter context - w: 320 h: 240 fmt: 0 csp: smpte170m range: tv alpha: unspecified, incoming frame - w: 320 h: 240 fmt: 0 csp: bt470bg range: tv alpha: unspecified pts_time: 0.583333", ""},
+		"matrix disappearing":  {"[graph 0 input from stream 1:0 @ 0x78e31e8180] filter context - w: 320 h: 240 fmt: 0 csp: bt709 range: tv alpha: unspecified, incoming frame - w: 320 h: 240 fmt: 0 csp: unknown range: tv alpha: unspecified pts_time: 0.583333", "the reference changes its matrix (bt709 to unknown)"},
+		"range":                {"[graph 0 input from stream 1:0 @ 0x7c2d023b40] filter context - w: 320 h: 240 fmt: 0 csp: unknown range: unknown alpha: unspecified, incoming frame - w: 320 h: 240 fmt: 0 csp: unknown range: pc alpha: unspecified pts_time: 0.583333", "the reference changes its range (tv to pc)"},
+		"pixel format":         {"[graph 0 input from stream 1:0 @ 0x769501bb40] filter context - w: 320 h: 240 fmt: 0 csp: unknown range: unknown alpha: unspecified, incoming frame - w: 320 h: 240 fmt: 62 csp: unknown range: unknown alpha: unspecified pts_time: 0.583333", "the reference changes its pixel format (0 to 62"},
+		"size, distorted side": {"[graph 0 input from stream 0:0 @ 0x767d023cc0] filter context - w: 320 h: 240 fmt: 0 csp: unknown range: unknown alpha: unspecified, incoming frame - w: 352 h: 288 fmt: 0 csp: unknown range: unknown alpha: unspecified pts_time: 0.583333", "the distorted video changes its picture size (320x240 to 352x288)"},
+		"unreadable":           {"[graph 0 input from stream 1:0 @ 0x1] filter context - 320x240, incoming frame - 352x288", "can not tell what changes mid-stream in the reference"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := vmafFrameChange(tc.line)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("expected no error, got %s", err)
+			case tc.want != "" && err == nil:
+				t.Errorf("expected an error with %q", tc.want)
+			case tc.want != "" && !strings.Contains(err.Error(), tc.want):
+				t.Errorf("expected an error with %q, got %s", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestVMAFComputePropertiesChange scores for real an MPEG-2 source whose second part declares a
+// colour description the first one does not, which made ffmpeg rebuild the filter graph (see WHY ONE
+// FILTER GRAPH FOR EVERY FRAME in VMAFCompute): the report holds every frame, scored as its master
+// scores, and as the source without the change scores as the distorted video. 24 of its 38 frames
+// were scored before. A change of matrix, picture size or pixel format fails the pass, on either
+// side. With libx264: a change of range fails it too, and with VideoToolbox, an H.264 source whose
+// colour description appears is scored as its master scores.
+func TestVMAFComputePropertiesChange(t *testing.T) {
+	for _, bin := range []string{FFMPEGBinary, FFProbeBinary} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not found: %s", bin, err)
+		}
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(args ...string) error {
+		output, err := exec.CommandContext(ctx, FFMPEGBinary, append([]string{"-loglevel", "error", "-nostdin", "-y"}, args...)...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("ffmpeg %v: %s\n%s", args, err, output)
+		}
+		return nil
+	}
+	// A source in two parts, frames 0 to 13 and 14 to 37, encoded from the same pictures whatever
+	// their properties: a colour description is written into the bitstream alone (a metadata
+	// bitstream filter), and the pictures are YUV before any of them (testsrc is RGB, converted
+	// with the matrix the output declares).
+	twoParts := func(name string, codec []string, secondFilter, firstBSF, secondBSF string) (string, error) {
+		path := filepath.Join(dir, name+".ts")
+		var parts []string
+		for i, part := range []struct{ source, filter, bsf string }{
+			{"testsrc2=size=320x240:rate=24", "format=yuv420p", firstBSF},
+			{"testsrc=size=320x240:rate=24", "format=yuv420p," + secondFilter, secondBSF},
+		} {
+			parts = append(parts, filepath.Join(dir, fmt.Sprintf("%s_%d.ts", name, i)))
+			args := append([]string{"-f", "lavfi", "-i", part.source, "-frames:v", strconv.Itoa(14 + 10*i), "-vf", part.filter + ",setsar=1"}, codec...)
+			if part.bsf != "" {
+				args = append(args, "-bsf:v", part.bsf)
+			}
+			if err := run(append(args, parts[i])...); err != nil {
+				return "", err
+			}
+		}
+		return path, run("-i", "concat:"+strings.Join(parts, "|"), "-map", "0:v:0", "-c", "copy", path)
+	}
+	compute := func(reference, distorted string, dec HWDecoderConfig) (VMAFReport, error) {
+		report, err := VMAFCompute(ctx, VMAFComputeConfig{
+			ReferencePath:   reference,
+			DistortedPath:   distorted,
+			InputFrameRate:  "24",
+			NbFrames:        38,
+			ReportPath:      filepath.Join(dir, "report.json"),
+			Model:           VMAFModelFHD,
+			ModelCAMBI:      true,
+			Measures:        VMAFMeasures{Fidelity: true, Banding: true},
+			HWDecoderConfig: dec,
+		})
+		if errors.Is(err, ErrVMAFModelUnavailable) {
+			t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+		}
+		return report, err
+	}
+	mustCompute := func(what, reference, distorted string, dec HWDecoderConfig) []VMAFFrameMetrics {
+		t.Helper()
+		report, err := compute(reference, distorted, dec)
+		if err != nil {
+			t.Fatalf("%s: %s", what, err)
+		}
+		if len(report.Frames) != 38 {
+			t.Fatalf("%s: expected 38 frames, got %d", what, len(report.Frames))
+		}
+		return report.Frames
+	}
+	// The source against an encode of its master, as the final VMAF of encode and batchsearch
+	// scores it, and as the distorted video against the same encode, as the vmaf command can.
+	accepted := func(name, source, plain string, codec []string, dec HWDecoderConfig) {
+		t.Helper()
+		master := filepath.Join(dir, name+"_master.mkv")
+		if err := FFV1VideoMaster(ctx, FFV1VideoMasterConfig{InputFilePath: source, OutputFilePath: master}); err != nil {
+			t.Fatalf("%s: master: %s", name, err)
+		}
+		encode := filepath.Join(dir, name+"_encode.mkv")
+		if err := run(append(append([]string{"-i", master}, codec...), "-pix_fmt", "yuv420p", encode)...); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := mustCompute(name+", the source as the reference", source, encode, dec),
+			mustCompute(name+", the master as the reference", master, encode, HWDecoderConfig{}); !slices.Equal(got, want) {
+			t.Errorf("%s: against the source, the encode scores\n%+v\nagainst its master\n%+v", name, got, want)
+		}
+		if got, want := mustCompute(name+", the source as the distorted video", encode, source, dec),
+			mustCompute(name+", the source without the change as the distorted video", encode, plain, dec); !slices.Equal(got, want) {
+			t.Errorf("%s: as the distorted video, the source scores\n%+v\nwithout the change\n%+v", name, got, want)
+		}
+	}
+	refused := func(name, source, plain, want string) {
+		t.Helper()
+		for _, side := range []struct{ name, reference, distorted, input string }{
+			{"reference", source, plain, "the reference"},
+			{"distorted video", plain, source, "the distorted video"},
+		} {
+			if report, err := compute(side.reference, side.distorted, HWDecoderConfig{}); err == nil {
+				t.Errorf("%s change in the %s: expected an error, got %d frames", name, side.name, len(report.Frames))
+			} else if !strings.Contains(err.Error(), side.input+" changes its "+want) {
+				t.Errorf("%s change in the %s: expected %q in the error, got %s", name, side.name, side.input+" changes its "+want, err)
+			}
+		}
+	}
+	mpeg2 := []string{"-c:v", "mpeg2video", "-q:v", "2", "-g", "12", "-bf", "0"}
+	const (
+		mpeg2BT709 = "mpeg2_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1"
+		mpeg2BT601 = "mpeg2_metadata=colour_primaries=6:transfer_characteristics=6:matrix_coefficients=6"
+	)
+	plain, err := twoParts("plain", mpeg2, "null", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appear, err := twoParts("appear", mpeg2, "null", "", mpeg2BT709)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted("colour description appearing", appear, plain, mpeg2, HWDecoderConfig{})
+	for name, tc := range map[string]struct{ secondFilter, firstBSF, secondBSF, want string }{
+		"matrix":       {"null", mpeg2BT601, mpeg2BT709, "matrix (smpte170m to bt709) mid-stream"},
+		"picture size": {"scale=352:288", "", "", "picture size (320x240 to 352x288) mid-stream"},
+		"pixel format": {"format=yuv422p", "", "", "pixel format"},
+	} {
+		source, err := twoParts(strings.ReplaceAll(name, " ", "_"), mpeg2, tc.secondFilter, tc.firstBSF, tc.secondBSF)
+		if err != nil {
+			t.Fatal(err)
+		}
+		refused(name, source, plain, tc.want)
+	}
+	// H.264: MPEG-2 has no range to declare, and VideoToolbox does not decode it
+	x264 := []string{"-c:v", "libx264", "-qp", "10", "-g", "12", "-bf", "0"}
+	h264Plain, err := twoParts("h264_plain", x264, "null", "", "")
+	if err != nil {
+		t.Skipf("can not make the H.264 clips (libx264 needed): %s", err)
+	}
+	h264FullRange, err := twoParts("h264_full_range", x264, "null", "", "h264_metadata=video_full_range_flag=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused("range", h264FullRange, h264Plain, "range (tv to pc) mid-stream")
+	h264Appear, err := twoParts("h264_appear", x264, "null", "",
+		"h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = run("-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld", "-i", h264Appear, "-f", "null", "-"); err != nil {
+		t.Skipf("VideoToolbox does not decode the H.264 clip here: %s", err)
+	}
+	// VideoToolbox's pictures are repacked (see softwarePixelFormat), which converted those after
+	// the change when they were not relabelled first
+	accepted("colour description appearing, H.264 decoded by VideoToolbox", h264Appear, h264Plain, x264, HWDecoderConfig{VideoToolboxDec: true})
+}
+
+// TestVMAFComputeReportPathEscaping scores for real, in a directory whose name holds every character
+// FFREPORT's file value treats specially (: \ ' %, % template sequences) and a space, a source whose
+// picture size changes mid-stream: the refusal can only come from ffmpeg's report, written where
+// VMAFCompute reads it. Wrongly escaped, ffmpeg writes it under another name or not at all, the
+// file read stays empty and the change goes through. On Windows every path holds : and \.
+func TestVMAFComputeReportPathEscaping(t *testing.T) {
+	if _, err := exec.LookPath(FFMPEGBinary); err != nil {
+		t.Skipf("%s not found: %s", FFMPEGBinary, err)
+	}
+	ctx := context.Background()
+	clips := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		if output, err := exec.CommandContext(ctx, FFMPEGBinary, append([]string{"-loglevel", "error", "-nostdin", "-y"}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg %v: %s\n%s", args, err, output)
+		}
+	}
+	// frames 0 to 13 at 320x240, 14 to 37 at 352x288 (see TestVMAFComputePropertiesChange)
+	twoParts := func(name, secondFilter string) string {
+		var parts []string
+		for i, part := range []struct{ source, filter string }{
+			{"testsrc2=size=320x240:rate=24", "format=yuv420p"},
+			{"testsrc=size=320x240:rate=24", "format=yuv420p," + secondFilter},
+		} {
+			parts = append(parts, filepath.Join(clips, fmt.Sprintf("%s_%d.ts", name, i)))
+			run("-f", "lavfi", "-i", part.source, "-frames:v", strconv.Itoa(14+10*i), "-vf", part.filter+",setsar=1",
+				"-c:v", "mpeg2video", "-q:v", "2", "-g", "12", "-bf", "0", parts[i])
+		}
+		path := filepath.Join(clips, name+".ts")
+		run("-i", "concat:"+strings.Join(parts, "|"), "-map", "0:v:0", "-c", "copy", path)
+		return path
+	}
+	plain := twoParts("plain", "null")
+	resized := twoParts("resized", "scale=352:288")
+	parent := t.TempDir()
+	dir := filepath.Join(parent, `a:b\c'd%e f%p%t%%g`)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := func(path string) []string {
+		t.Helper()
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names := make([]string, len(entries))
+		for i, entry := range entries {
+			names[i] = entry.Name()
+		}
+		return names
+	}
+	parentBefore, workDirBefore := list(parent), list(workDir)
+	report, err := VMAFCompute(ctx, VMAFComputeConfig{
+		ReferencePath:  resized,
+		DistortedPath:  plain,
+		InputFrameRate: "24",
+		NbFrames:       38,
+		ReportPath:     filepath.Join(dir, "report.json"),
+		Model:          VMAFModelFHD,
+		ModelCAMBI:     true,
+		Measures:       VMAFMeasures{Fidelity: true},
+	})
+	if errors.Is(err, ErrVMAFModelUnavailable) {
+		t.Skipf("the libvmaf of %s does not know %s: %s", FFMPEGBinary, VMAFModelFHD, err)
+	}
+	const want = "the reference changes its picture size (320x240 to 352x288) mid-stream"
+	if err == nil {
+		t.Errorf("expected an error, got %d frames: ffmpeg's report was not read from %q", len(report.Frames), dir)
+	} else if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected %q in the error, got %s", want, err)
+	}
+	for _, name := range list(dir) {
+		if matched, _ := filepath.Match(vmafFramesLogFileMask, name); matched {
+			t.Errorf("frames log left behind: %s", name)
+		}
+	}
+	if after := list(parent); !slices.Equal(after, parentBefore) {
+		t.Errorf("the parent directory held %q before the pass, %q after", parentBefore, after)
+	}
+	if after := list(workDir); !slices.Equal(after, workDirBefore) {
+		t.Errorf("the working directory held %q before the pass, %q after", workDirBefore, after)
 	}
 }

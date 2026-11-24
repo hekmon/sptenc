@@ -59,6 +59,7 @@ func TestVMAFComputeReferenceColorFilter(t *testing.T) {
 			ReferenceColorFilter: colorFilter,
 			DistortedPath:        masters[YUVMatrixBT601],
 			InputFrameRate:       "24",
+			NbFrames:             12,
 			ReportPath:           filepath.Join(dir, "report.json"),
 			Model:                VMAFModelFHD,
 			ModelCAMBI:           true,

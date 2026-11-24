@@ -948,6 +948,7 @@ func liveFinalVMAF(ctx context.Context, source, distorted string, videoStream *f
 		ReferenceRGBToYUV: sourceRGBToYUV,
 		DistortedPath:     distorted,
 		InputFrameRate:    videoStream.RFrameRate,
+		NbFrames:          totalFrames,
 		ReportPath:        distorted + "_vmaf.json",
 		Model:             setup.model,
 		ModelCAMBI:        setup.modelCAMBI,
