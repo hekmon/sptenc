@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+	"time"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/pipeline"
 )
 
 const (
@@ -15,6 +17,10 @@ const (
 	sptencEncoderTagKey       = "sptenc_encoder"
 	sptencEncoderPresetTagKey = "sptenc_encoder_preset"
 	sptencSegmentsCountTagKey = "sptenc_segments_count"
+	// Scene cuts
+	sptencSceneDetectorTagKey         = "sptenc_scene_detector"
+	sptencSceneThresholdTagKey        = "sptenc_scene_threshold"
+	sptencSceneMinSegmentLengthTagKey = "sptenc_scene_min_segment_length"
 	// Encoding QP stats
 	sptencStatsMinQP      = "sptenc_stats_min_qp"
 	sptencStatsMaxQP      = "sptenc_stats_max_qp"
@@ -58,17 +64,30 @@ const (
 	sptencCAMBIBestEffortTagKey       = "sptenc_cambi_best_effort_segments"
 )
 
+// SceneCuts tells how the segments of an encode were cut, when sptenc detected its scenes (encode
+// on a file, batchsearch): the detector, the threshold that reproduces the cuts with encode -T and
+// that detector (for batchsearch, the reusable threshold of the winner), and the minimum segment
+// length applied after it. Together they are enough to cut the source again the same way.
+type SceneCuts struct {
+	Detector         pipeline.SceneDetector
+	Threshold        float64
+	MinSegmentLength time.Duration
+}
+
 // GenerateTags builds the ffmpeg metadata flags documenting an encode. They are all set on the
 // video stream: container level metadata (the title in particular) belongs to the user and is
 // passed through from the source untouched.
 //
-// The VMAF results are the ones of the score the thresholds gated, named in sptenc_vmaf_score, and
-// the harmonic mean of the other one, when the model feeds on CAMBI: a model without it has a
-// single score, which names neither. The CAMBI tags are written when the CAMBI gate is on. A model
-// without CAMBI and the gate off gets the tags of sptenc v0.1.0 (see MANUAL.md, Metadata tags).
+// The scene tags are written when sptenc detected the scenes (cuts not nil): a pre-split directory
+// gets none, nothing was detected. The VMAF results are the ones of the score the thresholds gated,
+// named in sptenc_vmaf_score, and the harmonic mean of the other one, when the model feeds on
+// CAMBI: a model without it has a single score, which names neither. The CAMBI tags are written
+// when the CAMBI gate is on. A model without CAMBI and the gate off gets the tags of sptenc v0.1.0
+// plus the scene tags, and exactly those of v0.1.0 on a pre-split directory (see MANUAL.md,
+// Metadata tags).
 func GenerateTags(vc core.VMAFChecker, cambi core.CAMBIChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults,
-	vmaf ffmpeg.VMAFSummary, model ffmpeg.VMAFModel, segmentsCount int) (flags ffmpeg.FFMEGTags) {
-	flags = make(ffmpeg.FFMEGTags, 0, 76)
+	vmaf ffmpeg.VMAFSummary, model ffmpeg.VMAFModel, segmentsCount int, cuts *SceneCuts) (flags ffmpeg.FFMEGTags) {
+	flags = make(ffmpeg.FFMEGTags, 0, 82)
 	// Global
 	module, version := signature()
 	flags = append(flags,
@@ -78,6 +97,14 @@ func GenerateTags(vc core.VMAFChecker, cambi core.CAMBIChecker, encoder ffmpeg.E
 	)
 	// Encoding
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%d", sptencSegmentsCountTagKey, segmentsCount))
+	if cuts != nil {
+		flags = append(flags,
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencSceneDetectorTagKey, cuts.Detector),
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencSceneThresholdTagKey, cuts.Detector.FormatThreshold(cuts.Threshold)),
+			// as --min-segment-length takes it: 5s
+			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencSceneMinSegmentLengthTagKey, cuts.MinSegmentLength),
+		)
+	}
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderTagKey, encoder))
 	// Preset: must list every encoder the pipeline runs with a preset (see pipeline.EncoderAdapter),
 	// with the very value it uses. VAAPI, D3D12VA and VideoToolbox encoders have no preset.

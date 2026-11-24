@@ -22,7 +22,7 @@ const (
 	SceneThresholdMax = 100
 	// SceneScoreResolution is the resolution of the scores reported by the scdet filter: they are
 	// read from its log lines, where ffmpeg prints them rounded to 3 decimals. The filter itself
-	// compares its threshold with the real (unrounded) score, see pipeline.ReusableThreshold.
+	// compares its threshold with the real (unrounded) score, see pipeline.SceneDetector.ReusableThreshold.
 	SceneScoreResolution = 0.001
 )
 

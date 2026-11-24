@@ -40,7 +40,7 @@ Coming from Av1an or CRF with VMAF spot checks? See [how sptenc compares](MANUAL
 - ⚡ **CPU and GPU encoders** - HEVC and AV1 with `libx265`, `libsvtav1`, NVENC, VAAPI, D3D12VA and VideoToolbox, the floor proven the same way with each. Keep the GPU encode as the final file, or encode the final file on the CPU for a smaller one: the CPU saved 3% over NVENC, 17% over an Intel iGPU and 23% over an Apple M4 Max on the episode measured. The GPU is also the fast way to try a VMAF profile (see [Encoders](MANUAL.md#encoders))
 - 🚀 **Hardware acceleration wherever it helps** - GPU decoding even alongside a CPU encoder and several segments searched in parallel: same output, less time. VMAF itself runs on the CPU: the v1 models have no GPU implementation (see [why](MANUAL.md#vmaf-runs-on-the-cpu))
 - 🔬 **Automatic scene threshold search** - `batchsearch` tries several scene detection thresholds and keeps the one that produces the smallest passing file
-- 📋 **A file that remembers** - The output's tags record how it was made and what it scored: the whole-file VMAF and banding, the model and the thresholds, the encoder and its preset, the QP statistics and the number of best effort segments (see [Metadata tags](MANUAL.md#metadata-tags))
+- 📋 **A file that remembers** - The output's tags record how it was made and what it scored: the whole-file VMAF and banding, the model and the thresholds, the encoder and its preset, the QP statistics and the number of best effort segments, and how its segments were cut (scene detector, threshold, minimum segment length) (see [Metadata tags](MANUAL.md#metadata-tags))
 
 ## How It Works
 
@@ -145,7 +145,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 ./sptenc encode ./segments/ output.mkv --original-file video.mkv
 ```
 
-> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold` (0–100): higher values detect fewer scenes, lower values detect more. `split` and `encode` default to 10, ffmpeg's own; `thresholds` and `batchsearch` search upward from 8.
+> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold`, on the scale of the scene detector (`--detector`, `scdet`, the only one: 0–100): higher values detect fewer scenes, lower values detect more. `split` and `encode` default to 10, ffmpeg's own; `thresholds` and `batchsearch` search upward from 8.
 >
 > **Use everything you have.** A hardware encoder decodes with its own GPU: nothing to set. With a CPU encoder (the smallest files, out of the CPU alone), hand the decoding to whatever GPU is in the machine, integrated or Apple silicon included: `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec`. More CPU left for the encoder and the VMAF computations, and the same file out: a GPU is only handed the codecs it decodes to the pixels of a software decode (H.264, HEVC, VP8, VP9, AV1 and VC-1), MPEG-1, MPEG-2, MPEG-4 Part 2 and MJPEG sources stay on the CPU. The same flags serve `master`, `split`, `thresholds` and `vmaf`. A source codec the decoder does not support falls back to software with a warning, a flag contradicting the encoder is refused. The lossless FFV1 intermediate has no hardware decoder, and VMAF itself runs on the CPU. The details (AV1 film grain, profiles a GPU does not decode) are in [Hardware decoding](MANUAL.md#hardware-decoding).
 

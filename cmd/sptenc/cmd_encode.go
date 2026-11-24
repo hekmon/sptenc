@@ -123,17 +123,8 @@ var encodeCommand = &cli.Command{
 				Validator:        encoderValidator,
 				ValidateDefaults: true,
 			},
-			&cli.Float64Flag{
-				Name:    minThresholdFlagName,
-				Aliases: []string{"T"},
-				Usage: fmt.Sprintf("Scene detection threshold for splitting video (%d-%d)",
-					ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
-				),
-				Value:     sceneThresholdDefault,
-				OnlyOnce:  true,
-				Category:  "Single Video File",
-				Validator: validateSceneThreshold,
-			},
+			detectorFlag("Single Video File"),
+			singleThresholdFlag("Scene detection threshold for splitting video", "Single Video File"),
 			rgbMatrixFlag(""),
 			&cli.StringFlag{
 				Name:     originalFileFlagName,
@@ -169,6 +160,10 @@ var encodeCommand = &cli.Command{
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		// The threshold against the range of the detector (see validateSceneThresholds)
+		if err := validateSceneThresholds(cmd, minThresholdFlagName); err != nil {
+			return ctx, err
+		}
 		// Check required tools
 		if err := checkFFMPEG(ctx); err != nil {
 			return ctx, err
@@ -334,6 +329,7 @@ var encodeCommand = &cli.Command{
 			segmentsRGBToYUV  ffmpeg.YUVMatrix // the RGB segments of a directory, see writeSegmentsMasters
 			segmentsMasters   bool             // the segments of a directory get masters, see writeSegmentsMasters
 			setup             vmafSetup
+			sceneCuts         *metadata.SceneCuts // how a file was cut, for its tags: none for a directory, nothing was detected
 		)
 		if !inputInfos.IsDir() {
 			fmt.Fprintf(bypass, "\nStarting split encoding of %s (%s) with %s.\n",
@@ -368,14 +364,17 @@ var encodeCommand = &cli.Command{
 				return
 			}
 			// Detect scenes on the original file to take advantage of hw decoding
-			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
-				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			)
+			var detector pipeline.SceneDetector
+			if detector, err = sceneDetector(cmd); err != nil {
+				return
+			}
+			threshold := singleSceneThreshold(cmd, detector)
+			fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n", detector.FormatThreshold(threshold))
 			var scenes []ffmpeg.Scene
 			start := time.Now()
 			scenesConfig := decoderCfg.ToScenesDetectionConfig()
 			scenesConfig.RGBToYUV = sourceRGBToYUV
-			if scenes, err = liveDetectScenes(ctx, inputPath, cmd.Float64(minThresholdFlagName), totalDuration,
+			if scenes, err = liveDetectScenes(ctx, detector, inputPath, threshold, totalDuration,
 				cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
@@ -394,6 +393,8 @@ var encodeCommand = &cli.Command{
 				}
 				scenes = filtered
 			}
+			sceneCuts = &metadata.SceneCuts{Detector: detector, Threshold: threshold,
+				MinSegmentLength: cmd.Duration(minSegmentLengthFlagName)}
 			// The master, written cut into its segments: see createMasterSegments
 			if sourceTotalFrames, err = createMasterSegments(ctx, inputPath, workingDir, scenes,
 				cmd.Bool(debugFlagName), decoderCfg, sourceRGBToYUV); err != nil {
@@ -609,7 +610,7 @@ var encodeCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		tags := metadata.GenerateTags(vmafAuditor, setup.cambi, ffmpeg.Encoder(cmd.String(encoderFlagName)),
-			results, finalVMAFStats, setup.model, len(segmentsPaths))
+			results, finalVMAFStats, setup.model, len(segmentsPaths), sceneCuts)
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, originalFile, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {

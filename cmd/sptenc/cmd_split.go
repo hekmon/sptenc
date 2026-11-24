@@ -60,14 +60,8 @@ var splitCommand = &cli.Command{
 		"filling your disk with test splits.",
 	Flags: func() []cli.Flag {
 		flags := []cli.Flag{
-			&cli.Float64Flag{
-				Name:      minThresholdFlagName,
-				Aliases:   []string{"T"},
-				Usage:     fmt.Sprintf("Scene detection threshold (%d-%d)", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax),
-				Value:     sceneThresholdDefault,
-				OnlyOnce:  true,
-				Validator: validateSceneThreshold,
-			},
+			detectorFlag(""),
+			singleThresholdFlag("Scene detection threshold", ""),
 
 			&cli.BoolFlag{
 				Name:     masterFlagName,
@@ -100,6 +94,10 @@ var splitCommand = &cli.Command{
 		},
 	},
 	Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+		// The threshold against the range of the detector (see validateSceneThresholds)
+		if err := validateSceneThresholds(cmd, minThresholdFlagName); err != nil {
+			return ctx, err
+		}
 		// Check required tools
 		if err := checkFFMPEG(ctx); err != nil {
 			return ctx, err
@@ -187,6 +185,11 @@ var splitCommand = &cli.Command{
 			return
 		}
 		duration := stats.Format.Duration
+		detector, err := sceneDetector(cmd)
+		if err != nil {
+			return err
+		}
+		threshold := singleSceneThreshold(cmd, detector)
 		action := "Splitting"
 		if cmd.Bool(listScenesFlagName) {
 			action = "Listing"
@@ -195,7 +198,7 @@ var splitCommand = &cli.Command{
 			action,
 			shellescape.Quote(filepath.Base(inputFilePath)),
 			cunits.ImportInBytes(float64(fileInfos.Size())),
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
+			detector.FormatThreshold(threshold),
 		)
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "Min segment length: %s\n", minSegLen)
@@ -215,13 +218,11 @@ var splitCommand = &cli.Command{
 		// made first, would not always do: a full range source is converted to the limited range
 		// there, and its scene changes score lower (x0.856 on a test clip), so the same threshold
 		// could keep fewer boundaries than those commands and --list-scenes do.
-		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-		)
+		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n", detector.FormatThreshold(threshold))
 		start := time.Now()
 		scenesConfig := decoderCfg.ToScenesDetectionConfig()
 		scenesConfig.RGBToYUV = rgbToYUV
-		scenes, err := liveDetectScenes(ctx, inputFilePath, cmd.Float64(minThresholdFlagName), duration, cmd.Bool(debugFlagName),
+		scenes, err := liveDetectScenes(ctx, detector, inputFilePath, threshold, duration, cmd.Bool(debugFlagName),
 			scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
@@ -245,7 +246,7 @@ var splitCommand = &cli.Command{
 		}
 
 		if cmd.Bool(listScenesFlagName) {
-			printScenesList(bypass, scenes, duration)
+			printScenesList(bypass, detector, scenes, duration)
 			return
 		}
 
@@ -342,7 +343,7 @@ func printSceneStats(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time
 
 // printScenesList prints each scene with its start frame, time marker, duration,
 // and the score of the boundary that starts it (if any).
-func printScenesList(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time.Duration) {
+func printScenesList(bypass io.Writer, detector pipeline.SceneDetector, scenes []ffmpeg.Scene, totalDuration time.Duration) {
 	if len(scenes) == 0 {
 		fmt.Fprintln(bypass, "\nNo scene boundaries detected.")
 		fmt.Fprintf(bypass, "1 scene, duration %s\n", totalDuration.Round(time.Millisecond))
@@ -369,7 +370,7 @@ func printScenesList(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time
 		dur := s.Start - prevTime
 		score := "-"
 		if i > 0 {
-			score = strconv.FormatFloat(scenes[i-1].Score, 'f', 2, 64)
+			score = detector.FormatScore(scenes[i-1].Score)
 		}
 		table.Append([]string{
 			strconv.Itoa(i + 1),
@@ -388,7 +389,7 @@ func printScenesList(bypass io.Writer, scenes []ffmpeg.Scene, totalDuration time
 		strconv.Itoa(prevFrame),
 		prevTime.Round(time.Millisecond).String(),
 		lastDur.Round(time.Millisecond).String(),
-		strconv.FormatFloat(scenes[len(scenes)-1].Score, 'f', 2, 64),
+		detector.FormatScore(scenes[len(scenes)-1].Score),
 	})
 
 	table.Render()

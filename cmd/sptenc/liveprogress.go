@@ -14,6 +14,7 @@ import (
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -253,7 +254,12 @@ func liveSegmentsMasters(ctx context.Context, segments, masters []string, durati
 	return
 }
 
-func liveDetectScenes(ctx context.Context, path string, threshold float64, totalDuration time.Duration, debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
+// liveDetectScenes detects the scenes of a file with the detector given, at the threshold given (on
+// that detector's scale), with a progress bar. It is the single entry point of scene detection:
+// every command detecting scenes goes through it, and it dispatches to the detector. scenesConfig
+// carries the decoding of the source (hardware decoder, RGB conversion).
+func liveDetectScenes(ctx context.Context, detector pipeline.SceneDetector, path string, threshold float64, totalDuration time.Duration,
+	debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
 	// live progress
 	var currentStats ffmpeg.ProgressStats
 	bar := liveprogress.AddBar(
@@ -276,19 +282,26 @@ func liveDetectScenes(ctx context.Context, path string, threshold float64, total
 		currentStats = stats
 		bar.CurrentSet(uint64(stats.Time))
 	}
-	// Execute scene detection
-	scenesConfig.Path = path
-	scenesConfig.Threshold = threshold
-	scenesConfig.Debug = func(s string) {
+	debugLog := func(s string) {
 		if debug {
 			fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
 		}
 	}
-	scenesConfig.RuntimeError = func(err error) {
+	runtimeError := func(err error) {
 		fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
 	}
-	scenesConfig.FFMPEGStatsReport = progress
-	scenes, err = ffmpeg.ScenesDetection(ctx, scenesConfig)
+	// Execute scene detection
+	switch detector {
+	case pipeline.SceneDetectorScdet:
+		scenesConfig.Path = path
+		scenesConfig.Threshold = threshold
+		scenesConfig.Debug = debugLog
+		scenesConfig.RuntimeError = runtimeError
+		scenesConfig.FFMPEGStatsReport = progress
+		scenes, err = ffmpeg.ScenesDetection(ctx, scenesConfig)
+	default:
+		err = fmt.Errorf("unsupported scene detector %q", detector)
+	}
 	return
 }
 

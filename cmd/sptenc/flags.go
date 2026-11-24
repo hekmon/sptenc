@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/pipeline"
 
 	"github.com/urfave/cli/v3"
 )
@@ -157,39 +159,16 @@ func validateConcurrentSegments(v int) error {
 	return nil
 }
 
-// Scene threshold flag names and defaults.
+// Scene threshold flag names, and the defaults of the search that do not depend on the detector.
 //
-// The scdet score is the mean absolute difference between two consecutive frames, as a
-// percentage of the pixel range, or its change from the previous frame if smaller (so a
-// sustained pan scores low, a cut scores high). ffmpeg documents "good values" in [8, 14]
-// with 10 as the filter default, without any justification: no published study measures
-// scdet against a ground truth, and none could answer the question asked here anyway, which
-// is not "is this a cut" but "does splitting here give a smaller file".
-//
-// The single-threshold default (encode, split) is ffmpeg's own 10, the middle of that range:
-// a blind guess should not sit at an edge of it.
-//
-// The search floor is the bottom of that range. It used to be 14 because a low threshold
-// turned every pan and flash into segments of a few frames, and the floor was doubling as
-// the quality guardrail. Since the minimum segment length (see minSegmentLengthDefault)
-// took that role, a low threshold only adds cuts that survive as segments of 5 s or more,
-// which is exactly what makes the file smaller: the search only walks upward and stops on
-// strikes, and with the floor at 14 too many searches were won by their first candidate,
-// which means a clipped range, not an optimum. Not lower than 8: below the documented
-// range scdet flags motion onsets, every unique score is a raw candidate (each one costing a
-// merge pass on the full markers list) and the candidates budget gets spread thinner.
-//
-// The ceiling has no rationale at all (it came in with the 14, before the segment filter,
-// and was 40 before that): the scores of real hard cuts stay far below it, and the search
-// stops long before on strikes. Its only real effect is on the candidates budget, which the
-// auto-tuned scene drop spreads over the whole range: a lower ceiling samples the low end,
-// where the winners are, more finely. To be revisited with a body of real search results.
+// The defaults, ranges and scales of the thresholds belong to the detector (see
+// pipeline.SceneDetector, where the rationale of scdet's values lives): a static Value in the
+// flag definition can not follow --detector, so the threshold flags have none and are resolved
+// at run time (see singleSceneThreshold and searchSceneThresholds).
 const (
+	detectorFlagName      = "detector"
 	minThresholdFlagName  = "min-threshold"
-	sceneThresholdDefault = 10.0 // single-threshold commands: encode, split
-	minThresholdDefault   = 8.0  // search floor: batchsearch, thresholds
 	maxThresholdFlagName  = "max-threshold"
-	maxThresholdDefault   = 40.0
 	maxCandidatesFlagName = "max-candidates"
 	maxCandidatesDefault  = 20
 	minDropFlagName       = "min-drop"
@@ -265,24 +244,22 @@ func thresholdSearchFlags() []cli.Flag {
 		&cli.Float64Flag{
 			Name:    minThresholdFlagName,
 			Aliases: []string{"T"},
-			Usage: fmt.Sprintf("Scene detection threshold (%d-%d)",
-				ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
-			),
-			Value:     minThresholdDefault,
-			OnlyOnce:  true,
-			Category:  thresholdCategoryName,
-			Validator: validateSceneThreshold,
+			Usage: thresholdUsage("Scene detection threshold",
+				func(d pipeline.SceneDetector) float64 { min, _ := d.DefaultSearchRange(); return min }),
+			// no Value: the default is the detector's, see searchSceneThresholds; the usage states it
+			HideDefault: true,
+			OnlyOnce:    true,
+			Category:    thresholdCategoryName,
 		},
 		&cli.Float64Flag{
 			Name:    maxThresholdFlagName,
 			Aliases: []string{"M"},
-			Usage: fmt.Sprintf("Maximum scene detection threshold (%d-%d)",
-				ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax,
-			),
-			Value:     maxThresholdDefault,
-			OnlyOnce:  true,
-			Category:  thresholdCategoryName,
-			Validator: validateSceneThreshold,
+			Usage: thresholdUsage("Maximum scene detection threshold",
+				func(d pipeline.SceneDetector) float64 { _, max := d.DefaultSearchRange(); return max }),
+			// no Value: the default is the detector's, see searchSceneThresholds; the usage states it
+			HideDefault: true,
+			OnlyOnce:    true,
+			Category:    thresholdCategoryName,
 		},
 		&cli.IntFlag{
 			Name:     maxCandidatesFlagName,
@@ -317,11 +294,132 @@ func thresholdSearchFlags() []cli.Flag {
 	}
 }
 
-func validateSceneThreshold(v float64) error {
-	if v < ffmpeg.SceneThresholdMin || v > ffmpeg.SceneThresholdMax {
-		return fmt.Errorf("must be between %d and %d", ffmpeg.SceneThresholdMin, ffmpeg.SceneThresholdMax)
+// detectorFlag returns the flag selecting the scene detector. The commands detecting scenes
+// include it: encode, split, thresholds, batchsearch. If category is non-empty, the flag is grouped
+// under that category in help output. No alias: none of the free letters reads as "detector"
+// (-d is --debug, -D --min-drop).
+func detectorFlag(category string) cli.Flag {
+	return &cli.StringFlag{
+		Name: detectorFlagName,
+		Usage: fmt.Sprintf("Scene detector, whose scale the thresholds are on. Valid values: %s",
+			strings.Join(pipeline.SceneDetectorNames(), ", ")),
+		Value:    string(pipeline.SceneDetectors[0]),
+		OnlyOnce: true,
+		Category: category,
+		Validator: func(v string) error {
+			_, err := pipeline.ParseSceneDetector(v)
+			return err
+		},
+		ValidateDefaults: true,
+	}
+}
+
+// singleThresholdFlag returns the threshold flag of the commands detecting scenes once: encode and
+// split. If category is non-empty, the flag is grouped under that category in help output.
+func singleThresholdFlag(intro, category string) cli.Flag {
+	return &cli.Float64Flag{
+		Name:    minThresholdFlagName,
+		Aliases: []string{"T"},
+		Usage:   thresholdUsage(intro, pipeline.SceneDetector.DefaultThreshold),
+		// no Value: the default is the detector's, see singleSceneThreshold; the usage states it
+		HideDefault: true,
+		OnlyOnce:    true,
+		Category:    category,
+	}
+}
+
+// thresholdUsage returns the help of a threshold flag: its range and its default, for each
+// detector, since a threshold is on the scale of the detector selected.
+func thresholdUsage(intro string, defaultOf func(pipeline.SceneDetector) float64) string {
+	perDetector := make([]string, len(pipeline.SceneDetectors))
+	for i, d := range pipeline.SceneDetectors {
+		min, max := d.ThresholdRange()
+		perDetector[i] = fmt.Sprintf("%s: %s-%s, default %s", d,
+			d.FormatThreshold(min), d.FormatThreshold(max), d.FormatThreshold(defaultOf(d)))
+	}
+	return fmt.Sprintf("%s, on the scale of --%s (%s)", intro, detectorFlagName, strings.Join(perDetector, "; "))
+}
+
+// sceneDetector returns the detector of the command. Its flag validates it already: an error here
+// means a command without the flag.
+func sceneDetector(cmd *cli.Command) (pipeline.SceneDetector, error) {
+	return pipeline.ParseSceneDetector(cmd.String(detectorFlagName))
+}
+
+// validateSceneThresholds checks the threshold flags given against the range of the detector
+// selected: a flag validator only sees its own value, so it is done once every flag is parsed (in
+// the Before of the command). The flags not given take the detector's defaults, valid by
+// construction.
+func validateSceneThresholds(cmd *cli.Command, flagNames ...string) error {
+	d, err := sceneDetector(cmd)
+	if err != nil {
+		return err
+	}
+	for _, name := range flagNames {
+		if !cmd.IsSet(name) {
+			continue
+		}
+		if err := d.ValidateThreshold(cmd.Float64(name)); err != nil {
+			return fmt.Errorf("--%s %s: %w", name, d.FormatThreshold(cmd.Float64(name)), err)
+		}
 	}
 	return nil
+}
+
+// singleSceneThreshold returns the threshold of a single detection (encode, split): the one given,
+// else the default of the detector (see sceneDetector).
+func singleSceneThreshold(cmd *cli.Command, d pipeline.SceneDetector) float64 {
+	if cmd.IsSet(minThresholdFlagName) {
+		return cmd.Float64(minThresholdFlagName)
+	}
+	return d.DefaultThreshold()
+}
+
+// searchSceneThresholds returns the range of a threshold search (batchsearch, thresholds): each
+// bound given, else the default of the detector (see sceneDetector).
+func searchSceneThresholds(cmd *cli.Command, d pipeline.SceneDetector) (min, max float64) {
+	min, max = d.DefaultSearchRange()
+	if cmd.IsSet(minThresholdFlagName) {
+		min = cmd.Float64(minThresholdFlagName)
+	}
+	if cmd.IsSet(maxThresholdFlagName) {
+		max = cmd.Float64(maxThresholdFlagName)
+	}
+	return
+}
+
+// validateSearchSceneThresholds checks the range of a threshold search: both bounds in the range
+// of the detector, the lowest strictly below the highest.
+func validateSearchSceneThresholds(cmd *cli.Command) error {
+	if err := validateSceneThresholds(cmd, minThresholdFlagName, maxThresholdFlagName); err != nil {
+		return err
+	}
+	d, err := sceneDetector(cmd)
+	if err != nil {
+		return err
+	}
+	if min, max := searchSceneThresholds(cmd, d); min >= max {
+		return fmt.Errorf("--%s must be strictly less than --%s", minThresholdFlagName, maxThresholdFlagName)
+	}
+	return nil
+}
+
+// defaultSearchRanges returns the default range of a threshold search of each detector, for help
+// texts: "scdet 8–40".
+func defaultSearchRanges() string {
+	ranges := make([]string, len(pipeline.SceneDetectors))
+	for i, d := range pipeline.SceneDetectors {
+		min, max := d.DefaultSearchRange()
+		ranges[i] = fmt.Sprintf("%s %s–%s", d, d.FormatThreshold(min), d.FormatThreshold(max))
+	}
+	return strings.Join(ranges, ", ")
+}
+
+// reuseThresholdFlags returns the flags reproducing the scenes of a threshold with encode or split
+// (see pipeline.SceneDetector.ReusableThreshold), detector included: a threshold is on the scale of
+// its detector, and means nothing on another's.
+func reuseThresholdFlags(d pipeline.SceneDetector, threshold float64) string {
+	return fmt.Sprintf("--%s %s --%s %s", detectorFlagName, d, minThresholdFlagName, d.FormatThreshold(threshold))
 }
 
 const (

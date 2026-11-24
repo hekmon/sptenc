@@ -112,8 +112,8 @@ var batchsearchCommand = &cli.Command{
 		"You control the cost with three levers: which boundaries are eligible, how many candidates\n" +
 		"are generated from them, and when to give up.\n\n" +
 		"THRESHOLD RANGE (--" + minThresholdFlagName + ", --" + maxThresholdFlagName + ")\n" +
-		"These define the window of scene scores that can become candidates (defaults: " +
-		strconv.FormatFloat(minThresholdDefault, 'f', -1, 64) + "–" + strconv.FormatFloat(maxThresholdDefault, 'f', -1, 64) + ").\n" +
+		"These define the window of scene scores that can become candidates, on the scale of\n" +
+		"--" + detectorFlagName + " (defaults: " + defaultSearchRanges() + ").\n" +
 		"A narrow range produces fewer candidates naturally; a wide range gives more opportunity but may\n" +
 		"waste encodes on thresholds that merge too many scenes to be useful.\n\n" +
 		"CANDIDATE DENSITY (--" + maxCandidatesFlagName + ", --" + minDropFlagName + ")\n" +
@@ -225,6 +225,7 @@ var batchsearchCommand = &cli.Command{
 				Category: "Cache isolation",
 			},
 		}
+		flags = append(flags, detectorFlag(thresholdCategoryName))
 		flags = append(flags, thresholdSearchFlags()...)
 		flags = append(flags, segmentFilterFlag(thresholdCategoryName), rgbMatrixFlag(""))
 		flags = append(flags,
@@ -324,9 +325,9 @@ var batchsearchCommand = &cli.Command{
 		if err = os.MkdirAll(cmd.String(statsCacheDirFlagName), 0755); err != nil {
 			return ctx, fmt.Errorf("failed to create cache directory: %w", err)
 		}
-		// Check threshold range consistency
-		if cmd.Float64(minThresholdFlagName) >= cmd.Float64(maxThresholdFlagName) {
-			return ctx, fmt.Errorf("--%s must be strictly less than --%s", minThresholdFlagName, maxThresholdFlagName)
+		// Check threshold range consistency, and against the detector's (see validateSearchSceneThresholds)
+		if err = validateSearchSceneThresholds(cmd); err != nil {
+			return ctx, err
 		}
 		return ctx, nil
 	},
@@ -392,7 +393,12 @@ var batchsearchCommand = &cli.Command{
 		}
 
 		// Validate threshold range
-		if cmd.Float64(maxThresholdFlagName) <= cmd.Float64(minThresholdFlagName) {
+		detector, err := sceneDetector(cmd)
+		if err != nil {
+			return err
+		}
+		minThreshold, maxThreshold := searchSceneThresholds(cmd, detector)
+		if maxThreshold <= minThreshold {
 			return fmt.Errorf("%s must be greater than %s", maxThresholdFlagName, minThresholdFlagName)
 		}
 
@@ -421,8 +427,7 @@ var batchsearchCommand = &cli.Command{
 			cmd.String(encoderFlagName),
 		)
 		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+			detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold),
 		)
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
@@ -487,13 +492,11 @@ var batchsearchCommand = &cli.Command{
 		runCache := core.NewEphemeralStatsCache(statsCache, qpMin, qpMax)
 
 		// Step 1 - Detect scenes on the source to get candidate thresholds immediately
-		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-		)
+		fmt.Fprintf(bypass, "Detecting scenes with threshold at %s...\n", detector.FormatThreshold(minThreshold))
 		start := time.Now()
 		scenesConfig := decoderCfg.ToScenesDetectionConfig()
 		scenesConfig.RGBToYUV = sourceRGBToYUV
-		scenes, err := liveDetectScenes(ctx, inputPath, cmd.Float64(minThresholdFlagName), totalDuration, cmd.Bool(debugFlagName),
+		scenes, err := liveDetectScenes(ctx, detector, inputPath, minThreshold, totalDuration, cmd.Bool(debugFlagName),
 			scenesConfig,
 		)
 		if err != nil {
@@ -509,8 +512,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		if len(candidates) == 0 {
 			return fmt.Errorf("no candidates found in the %s–%s range",
-				strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-				strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+				detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold),
 			)
 		}
 		if cmd.Bool(debugFlagName) {
@@ -526,6 +528,7 @@ var batchsearchCommand = &cli.Command{
 
 		// Step 3 - start the search
 		batch := batchStatus{
+			detector:   detector,
 			candidates: candidates,
 		}
 		batch.Start()
@@ -538,7 +541,7 @@ var batchsearchCommand = &cli.Command{
 			}
 
 			// Start testing candidate
-			candidateStr := strconv.FormatFloat(batch.candidates[batch.currentCandidateIndex], 'f', -1, 64)
+			candidateStr := detector.FormatThreshold(batch.candidates[batch.currentCandidateIndex])
 			fmt.Fprintf(bypass, "\n\nTesting threshold candidate %s (%d/%d)\n",
 				candidateStr, batch.currentCandidateIndex+1, len(batch.candidates),
 			)
@@ -630,7 +633,7 @@ var batchsearchCommand = &cli.Command{
 
 		// Step 4 - final encode ? (CPU)
 		bestIndex := batch.bestCandidateIndex
-		bestCandidateStr := strconv.FormatFloat(batch.candidates[bestIndex], 'f', -1, 64)
+		bestCandidateStr := detector.FormatThreshold(batch.candidates[bestIndex])
 		encodedSegmentsMerged := batch.encoded[bestIndex]
 		results := batch.results[bestIndex]
 		// Feed the stats cache of the search encoder with the winning candidate, and only with it.
@@ -642,7 +645,8 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "ERROR: failed to save stats: %s\n", err.Error())
 		}
 		if finalEncoder != "" {
-			fmt.Fprintf(bypass, "\n\nBest candidate is %s, running final encode with %s...\n", bestCandidateStr, finalEncoder)
+			fmt.Fprintf(bypass, "\n\nBest candidate is %s (reuse with encode: %s), running final encode with %s...\n",
+				bestCandidateStr, reuseThresholdFlags(detector, batch.candidates[bestIndex]), finalEncoder)
 			// The file of the best candidate is about to be replaced by the final encode: its QPs
 			// and its size are all that is needed from now on. It is not a fallback either, a
 			// final encode failing fails the run. Make room before the final encode starts.
@@ -711,7 +715,8 @@ var batchsearchCommand = &cli.Command{
 				}
 			}
 		} else {
-			fmt.Fprintf(bypass, "\n\nBest candidate is %s\n", bestCandidateStr)
+			fmt.Fprintf(bypass, "\n\nBest candidate is %s (reuse with encode: %s)\n",
+				bestCandidateStr, reuseThresholdFlags(detector, batch.candidates[bestIndex]))
 		}
 
 		// Step 5 - compute final VMAF
@@ -769,8 +774,11 @@ var batchsearchCommand = &cli.Command{
 			fmt.Fprintf(bypass, "\tAll audio tracks are PCM, encoding to FLAC during video remuxing.\n")
 		}
 		videoStream = sourceStats.VideoTrack()
+		// the cuts of the winner: its reusable threshold, the one --min-threshold reproduces them with
+		sceneCuts := &metadata.SceneCuts{Detector: detector, Threshold: batch.candidates[bestIndex],
+			MinSegmentLength: cmd.Duration(minSegmentLengthFlagName)}
 		tags := metadata.GenerateTags(vmafAuditor, setup.cambi, usedEncoder,
-			results, finalVMAFStats, setup.model, len(results.EncodedSegmentsPaths))
+			results, finalVMAFStats, setup.model, len(results.EncodedSegmentsPaths), sceneCuts)
 		start = time.Now()
 		if err = liveRemuxSwapVideo(ctx, inputPath, encodedSegmentsMerged, outputPath, encodeToFlac, tags,
 			totalDuration, cmd.Bool(debugFlagName)); err != nil {
@@ -819,7 +827,7 @@ var batchsearchCommand = &cli.Command{
 			if batch.sizes[i] == 0 {
 				continue // not tested (early stop)
 			}
-			thresholdStr := strconv.FormatFloat(candidate, 'f', -1, 64)
+			thresholdStr := detector.FormatThreshold(candidate)
 			sizeStr := fmt.Sprint(cunits.ImportInBytes(float64(batch.sizes[i])))
 			relativeStr := formatPercent(float64(batch.sizes[i]) / float64(bestSize) * 100)
 			if i == bestIndex {
@@ -896,6 +904,7 @@ func removeMergedEncode(out io.Writer, path string) {
 }
 
 type batchStatus struct {
+	detector              pipeline.SceneDetector // the scale of the candidates
 	candidates            []float64
 	currentCandidateIndex int // read by liveprogress render goroutine, written by main loop: see comment below
 	bestCandidateIndex    int // read by liveprogress render goroutine, written by main loop: see comment below
@@ -998,7 +1007,7 @@ func (bs *batchStatus) render(nonImproving, improving, best, future func(string)
 	candidates := make([]string, len(bs.candidates))
 	var smallest int64 // the smallest file of the candidates before i
 	for i, candidate := range bs.candidates {
-		text := strconv.FormatFloat(candidate, 'f', -1, 64)
+		text := bs.detector.FormatThreshold(candidate)
 		switch {
 		case i == bs.currentCandidateIndex:
 			// being tested: plain

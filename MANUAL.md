@@ -81,7 +81,7 @@ The model is **selected from the height of the input**: a 3840×1600 cropped fil
 
 #### The v0 models
 
-sptenc v0.1.0 scored with the previous generation, the v0.6.1 models. libvmaf still builds them in and `--vmaf-model` still takes them, but sptenc never selects them: **they measure luma only, and do not see banding** (their NEG variants barely do). [What VMAF sees](#what-vmaf-sees-and-what-it-does-not) measures each of these defects with both generations. A run forcing one warns about it. With no banding feature, their score has nothing to take out: it is their fidelity score, `--vmaf-original` changes nothing, and the [CAMBI gate](#fidelity-and-banding) is off unless a CAMBI threshold asks for it. Without it, the run scores, prints, tags and caches as sptenc v0.1.0 did.
+sptenc v0.1.0 scored with the previous generation, the v0.6.1 models. libvmaf still builds them in and `--vmaf-model` still takes them, but sptenc never selects them: **they measure luma only, and do not see banding** (their NEG variants barely do). [What VMAF sees](#what-vmaf-sees-and-what-it-does-not) measures each of these defects with both generations. A run forcing one warns about it. With no banding feature, their score has nothing to take out: it is their fidelity score, `--vmaf-original` changes nothing, and the [CAMBI gate](#fidelity-and-banding) is off unless a CAMBI threshold asks for it. Without it, the run scores, prints and caches as sptenc v0.1.0 did, and tags as it did plus the [scene tags](#metadata-tags) when sptenc detected the scenes.
 
 | Model | Viewing condition |
 |---|---|
@@ -324,7 +324,7 @@ If you care more about tight quality control than file size, skip `batchsearch`.
 
 `split --master` detects the scenes on the master it is given. They are the source's when the master holds the source's luma without loss, the only plane scene detection reads: a limited range source of 8 or 10 bits. A full range source's luma is converted to the limited range (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)): on a test clip, its scene changes scored 14% lower on the master than on the source, and a threshold of 17 lost one of the four cuts `encode` kept. Split the source itself to cut where the other commands do.
 
-This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--min-segment-length`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season.
+This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--detector` and `--min-segment-length`. A threshold is on the scale of its detector, so both commands print the flags to paste with the detector: `--detector scdet --min-threshold 24.2765`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season. The output of `encode` and `batchsearch` records the detector, the threshold and the minimum segment length in its [tags](#metadata-tags).
 
 Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scene scores rounded to 3 decimals but compares thresholds against the unrounded score, so sptenc reports half a step below the printed score to guarantee the boundary is kept. Use the value as printed.
 
@@ -387,6 +387,9 @@ The output file contains the following metadata tags on the video stream:
 - `sptenc_url` and `sptenc_version` — tool provenance
 - `sptenc_encoder` and `sptenc_encoder_preset` — encoder used
 - `sptenc_segments_count` — number of segments
+- `sptenc_scene_detector` — the scene detector the segments were cut with (`--detector`: `scdet`)
+- `sptenc_scene_threshold` — the threshold that reproduces the cuts with `encode -T` and that detector: the one given to `encode`, the best candidate's for `batchsearch`
+- `sptenc_scene_min_segment_length` — the minimum segment length applied after the threshold (`--min-segment-length`, as it takes it: `5s`)
 - `sptenc_stats_min_qp`, `sptenc_stats_max_qp`, `sptenc_stats_weighted_qp` — QP statistics
 - `sptenc_vmaf_model` — VMAF model used
 - `sptenc_vmaf_score` — the score the VMAF thresholds gated: `fidelity`, or `original` with `--vmaf-original` (omitted with a model without banding feature, whose score is both)
@@ -400,7 +403,7 @@ The output file contains the following metadata tags on the video stream:
 - `sptenc_cambi_lowered_segments` — number of segments whose QP the CAMBI gate lowered (omitted if zero)
 - `sptenc_cambi_best_effort_segments` — number of segments where no QP met the CAMBI thresholds (omitted if zero)
 
-The CAMBI tags are written when the gate is on.
+The scene tags are written when sptenc detected the scenes, on a file given to `encode` or `batchsearch`; a pre-split directory gets none, nothing was detected. The CAMBI tags are written when the gate is on.
 
 ## Base ffmpeg encode options
 

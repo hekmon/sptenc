@@ -5,9 +5,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/pipeline"
 )
 
 // tagsOf reads the tags out of the ffmpeg metadata flags.
@@ -100,7 +102,8 @@ func TestGenerateTags(t *testing.T) {
 			extra:   merge(map[string]string{"sptenc_cambi_conf_mean": "1"}, cambiResults),
 		},
 	} {
-		tags := tagsOf(t, GenerateTags(vmafChecker, tc.cambi, ffmpeg.HEVCEncoderNVEnc, results, tc.summary, tc.model, 2))
+		// no scene cuts: a pre-split directory, see TestGenerateTagsSceneCuts
+		tags := tagsOf(t, GenerateTags(vmafChecker, tc.cambi, ffmpeg.HEVCEncoderNVEnc, results, tc.summary, tc.model, 2, nil))
 		want := append(slices.Clone(v010), slices.Collect(maps.Keys(tc.extra))...)
 		slices.Sort(want)
 		if got := slices.Sorted(maps.Keys(tags)); !slices.Equal(got, want) {
@@ -118,10 +121,68 @@ func TestGenerateTags(t *testing.T) {
 	// counts of zero are left out
 	results.NbBestEfforts, results.NbCAMBIBestEfforts, results.VMAFSearchQPs = 0, 0, results.QPs
 	tags := tagsOf(t, GenerateTags(vmafChecker, meanGate, ffmpeg.HEVCEncoderNVEnc, results,
-		ffmpeg.VMAFSummary{Score: ffmpeg.VMAFScoreFidelity, Stats: stats, HasBanding: true, Banding: banding}, ffmpeg.VMAFModelFHD, 2))
+		ffmpeg.VMAFSummary{Score: ffmpeg.VMAFScoreFidelity, Stats: stats, HasBanding: true, Banding: banding}, ffmpeg.VMAFModelFHD, 2, nil))
 	for _, key := range []string{"sptenc_best_effort_segments", "sptenc_cambi_lowered_segments", "sptenc_cambi_best_effort_segments"} {
 		if _, found := tags[key]; found {
 			t.Errorf("%s should be left out at zero", key)
+		}
+	}
+}
+
+// TestGenerateTagsSceneCuts checks the scene tags: written with the cuts of a detection (encode on
+// a file, batchsearch), none for a pre-split directory, the other tags the same either way.
+func TestGenerateTagsSceneCuts(t *testing.T) {
+	vmafChecker, err := core.NewVMAFChecker(core.VMAFOffValue, core.VMAFOffValue, core.VMAFOffValue, core.VMAFOffValue,
+		core.VMAFOffValue, core.VMAFOffValue, 93, core.VMAFOffValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cambi, _ := core.NewCAMBIChecker(1, core.CAMBIOffValue)
+	results := core.QPSearchResults{QPs: []int{20, 22}, VMAFSearchQPs: []int{20, 22}, GlobalWeightedQP: 21}
+	summary := ffmpeg.VMAFSummary{Score: ffmpeg.VMAFScoreFidelity, Stats: ffmpeg.VMAFStats{HarmonicMean: 93.5}}
+	sceneKeys := []string{"sptenc_scene_detector", "sptenc_scene_threshold", "sptenc_scene_min_segment_length"}
+	preSplit := tagsOf(t, GenerateTags(vmafChecker, cambi, ffmpeg.HEVCEncoderLibx265, results, summary, ffmpeg.VMAFModelFHD, 2, nil))
+	for _, key := range sceneKeys {
+		if _, found := preSplit[key]; found {
+			t.Errorf("pre-split directory: %s should be left out", key)
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		cuts     SceneCuts
+		expected map[string]string
+	}{
+		{
+			name: "encode, default threshold",
+			cuts: SceneCuts{Detector: pipeline.SceneDetectorScdet, Threshold: 10, MinSegmentLength: 5 * time.Second},
+			expected: map[string]string{"sptenc_scene_detector": "scdet", "sptenc_scene_threshold": "10",
+				"sptenc_scene_min_segment_length": "5s"},
+		},
+		{
+			name: "batchsearch winner, its reusable threshold",
+			cuts: SceneCuts{Detector: pipeline.SceneDetectorScdet, Threshold: 24.2765, MinSegmentLength: 2500 * time.Millisecond},
+			expected: map[string]string{"sptenc_scene_detector": "scdet", "sptenc_scene_threshold": "24.2765",
+				"sptenc_scene_min_segment_length": "2.5s"},
+		},
+		{
+			name: "no minimum segment length",
+			cuts: SceneCuts{Detector: pipeline.SceneDetectorScdet, Threshold: 12.5},
+			expected: map[string]string{"sptenc_scene_detector": "scdet", "sptenc_scene_threshold": "12.5",
+				"sptenc_scene_min_segment_length": "0s"},
+		},
+	} {
+		tags := tagsOf(t, GenerateTags(vmafChecker, cambi, ffmpeg.HEVCEncoderLibx265, results, summary, ffmpeg.VMAFModelFHD, 2, &tc.cuts))
+		for key, value := range tc.expected {
+			if tags[key] != value {
+				t.Errorf("%s: %s: want %q, got %q", tc.name, key, value, tags[key])
+			}
+		}
+		// the scene tags on top of the others, nothing else changed
+		for _, key := range sceneKeys {
+			delete(tags, key)
+		}
+		if !maps.Equal(tags, preSplit) {
+			t.Errorf("%s: the other tags differ from a pre-split directory's:\n%v\n%v", tc.name, tags, preSplit)
 		}
 	}
 }

@@ -72,7 +72,7 @@ var thresholdsCommand = &cli.Command{
 		"'split --" + listScenesFlagName + "' to see the actual per-scene cuts (frame, time, duration, score)\n" +
 		"it will produce before committing to an encode or batchsearch run.",
 	Flags: func() []cli.Flag {
-		flags := []cli.Flag{}
+		flags := []cli.Flag{detectorFlag(thresholdCategoryName)}
 		flags = append(flags, thresholdSearchFlags()...)
 		flags = append(flags, segmentFilterFlag(thresholdCategoryName), rgbMatrixFlag(""))
 		flags = append(flags, hardwareAccelFlags(hwAccelScopeDecode)...)
@@ -104,8 +104,9 @@ var thresholdsCommand = &cli.Command{
 		if _, err = hwDecodeFlags(cmd); err != nil {
 			return ctx, err
 		}
-		if cmd.Float64(minThresholdFlagName) >= cmd.Float64(maxThresholdFlagName) {
-			return ctx, fmt.Errorf("--%s must be strictly less than --%s", minThresholdFlagName, maxThresholdFlagName)
+		// The range against the detector's (see validateSearchSceneThresholds)
+		if err = validateSearchSceneThresholds(cmd); err != nil {
+			return ctx, err
 		}
 		return ctx, nil
 	},
@@ -131,9 +132,13 @@ var thresholdsCommand = &cli.Command{
 			shellescape.Quote(filepath.Base(cmd.StringArg("inputfile"))),
 			cunits.ImportInBytes(float64(fileInfos.Size())),
 		)
+		detector, err := sceneDetector(cmd)
+		if err != nil {
+			return err
+		}
+		minThreshold, maxThreshold := searchSceneThresholds(cmd, detector)
 		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
-			strconv.FormatFloat(cmd.Float64(minThresholdFlagName), 'f', -1, 64),
-			strconv.FormatFloat(cmd.Float64(maxThresholdFlagName), 'f', -1, 64),
+			detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold),
 		)
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
@@ -168,7 +173,7 @@ var thresholdsCommand = &cli.Command{
 		start := time.Now()
 		scenesConfig := requestedDecoder.ToScenesDetectionConfig()
 		scenesConfig.RGBToYUV = rgbToYUV
-		scenes, err := liveDetectScenes(ctx, cmd.StringArg("inputfile"), cmd.Float64(minThresholdFlagName),
+		scenes, err := liveDetectScenes(ctx, detector, cmd.StringArg("inputfile"), minThreshold,
 			stats.Format.Duration, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
@@ -221,7 +226,7 @@ var thresholdsCommand = &cli.Command{
 			row := computeCandidateStats(segmentations[i], stats.Format.Duration, filterActive)
 			if filterActive {
 				table.Append([]string{
-					strconv.FormatFloat(candidate, 'f', -1, 64),
+					detector.FormatThreshold(candidate),
 					strconv.Itoa(row.scenes),
 					row.shortest.Round(time.Millisecond).String(),
 					row.p1.Round(time.Millisecond).String(),
@@ -235,7 +240,7 @@ var thresholdsCommand = &cli.Command{
 				})
 			} else {
 				table.Append([]string{
-					strconv.FormatFloat(candidate, 'f', -1, 64),
+					detector.FormatThreshold(candidate),
 					strconv.Itoa(row.scenes),
 					row.shortest.Round(time.Millisecond).String(),
 					row.p1.Round(time.Millisecond).String(),
@@ -254,6 +259,9 @@ var thresholdsCommand = &cli.Command{
 		}
 		table.Render()
 		fmt.Fprint(bypass, buff.String())
+		// A threshold is on the scale of its detector: the flags to paste name both
+		fmt.Fprintf(bypass, "Reuse a row with encode or split, with the same --%s: %s for the first one\n",
+			minSegmentLengthFlagName, reuseThresholdFlags(detector, candidates[0]))
 		return
 	},
 }
