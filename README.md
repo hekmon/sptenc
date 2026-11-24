@@ -44,7 +44,7 @@ Coming from Av1an or CRF with VMAF spot checks? See [how sptenc compares](MANUAL
 
 ## How It Works
 
-1. **Scene detection** - FFmpeg `scdet` measures how much each frame differs from the previous one to find the scene cuts, and the video is split on them. For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so a cut can fall on any frame without losing any. It also shields against open GOPs, where a cut can leave frames referencing others in the neighboring segment: they can not be decoded anymore and are dropped, a drift (against the audio for instance) that accumulates with every cut.
+1. **Scene detection** - FFmpeg `scdet` measures how much each frame differs from the previous one to find the scene cuts, and the video is split on them (`--detector transnetv2` uses TransNetV2, a neural network, instead: it needs an optional helper, see [Scene detectors](MANUAL.md#scene-detectors)). For precise frame-accurate cuts, a lossless FFV1 master is used: every frame is self-contained, so a cut can fall on any frame without losing any. It also shields against open GOPs, where a cut can leave frames referencing others in the neighboring segment: they can not be decoded anymore and are dropped, a drift (against the audio for instance) that accumulates with every cut.
 2. **Per-segment encoding** - Each segment is encoded independently with the chosen encoder (e.g. `libx265`, `hevc_nvenc`, `libsvtav1`).
 3. **VMAF validation (post-encode)** - After encoding, each segment's VMAF scores are computed and checked against all configured thresholds. Any failure triggers a re-encode at a lower QP.
 4. **Adaptive QP search** - Each segment starts from a smart QP estimate, brackets the valid range with stepped probes, then uses interpolation to converge on the highest valid QP (smallest file) in just a few attempts. Persistent stats from previous runs further accelerate this (see [Adaptive QP Search](MANUAL.md#adaptive-qp-search)).
@@ -59,7 +59,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 | Command | Alias | Category | Purpose |
 |---|---|---|---|
 | `encode` | `e` | Main | Full pipeline: split (if needed), encode segments, validate VMAF, remux, and tag |
-| `check` | `k` | Main | Check that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders |
+| `check` | `k` | Main | Check that ffmpeg, ffprobe, and mkvpropedit are present and list available encoders, and report the optional TransNetV2 helper |
 | `master` | `m` | Tooling | Create a lossless FFV1 intermediate from a source file for frame-accurate splitting |
 | `split` | `s` | Tooling | Detect scene changes and split a video into separate segment files |
 | `concat` | `c` | Tooling | Concatenate video files from a directory into a single file without re-encoding |
@@ -145,7 +145,7 @@ sptenc is organized into subcommands. Run `sptenc <command> --help` for detailed
 ./sptenc encode ./segments/ output.mkv --original-file video.mkv
 ```
 
-> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold`, on the scale of the scene detector (`--detector`, `scdet`, the only one: 0–100): higher values detect fewer scenes, lower values detect more. `split` and `encode` default to 10, ffmpeg's own; `thresholds` and `batchsearch` search upward from 8.
+> Use the `thresholds` command to preview candidate thresholds and their scene distributions without encoding. Experiment with `--min-threshold`, on the scale of the scene detector (`--detector`): higher values detect fewer scenes, lower values detect more. With `scdet`, the default (0–100), `split` and `encode` default to 10, ffmpeg's own; `thresholds` and `batchsearch` search upward from 8. With `transnetv2` (0.3–1, a probability; it needs its helper, not distributed yet), they default to 0.5 and search from 0.3 to 0.9, provisional defaults (see [Scene detectors](MANUAL.md#scene-detectors)).
 >
 > **Use everything you have.** A hardware encoder decodes with its own GPU: nothing to set. With a CPU encoder (the smallest files, out of the CPU alone), hand the decoding to whatever GPU is in the machine, integrated or Apple silicon included: `--nvdec`, `--vaapi-dec`, `--d3d12va-dec` or `--videotoolbox-dec`. More CPU left for the encoder and the VMAF computations, and the same file out: a GPU is only handed the codecs it decodes to the pixels of a software decode (H.264, HEVC, VP8, VP9, AV1 and VC-1), MPEG-1, MPEG-2, MPEG-4 Part 2 and MJPEG sources stay on the CPU. The same flags serve `master`, `split`, `thresholds` and `vmaf`. A source codec the decoder does not support falls back to software with a warning, a flag contradicting the encoder is refused. The lossless FFV1 intermediate has no hardware decoder, and VMAF itself runs on the CPU. The details (AV1 film grain, profiles a GPU does not decode) are in [Hardware decoding](MANUAL.md#hardware-decoding).
 
@@ -160,6 +160,7 @@ Standalone binaries for most platforms are available on the [releases page](http
   - If yours lacks one, the [build guide](https://gist.github.com/hekmon/b273e55139183370c5000f766fccc128) compiles a static ffmpeg with both, libvmaf included from its current sources. It is written for Ubuntu 24.04 under WSL on Windows.
 - `ffprobe` - bundled with ffmpeg
 - `mkvpropedit` - from [MKVToolNix](https://mkvtoolnix.download/)
+- Optional: `sptenc-detector-transnetv2`, the helper running the TransNetV2 model for `--detector transnetv2`, looked for in the `PATH` or given with `--transnetv2-path`. It is not distributed yet; without it, everything else works as before (see [Scene detectors](MANUAL.md#scene-detectors)).
 
 Run `sptenc check` to verify everything is found and usable: it loads both VMAF models for real and prints the libvmaf version. On Windows, `ffmpeg.exe` and `ffprobe.exe` are looked for in the current directory, not in `PATH`: see [where the binaries are looked for](MANUAL.md#installation-details).
 

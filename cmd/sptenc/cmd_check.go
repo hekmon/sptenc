@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
+	"github.com/hekmon/sptenc/pipeline"
+	"github.com/hekmon/sptenc/transnetv2"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
@@ -24,7 +27,10 @@ var checkCommand = &cli.Command{
 		"  * ffmpeg (with at least one encoder and libvmaf 3.2.0 or newer: the VMAF v1 models\n" +
 		"    are loaded for real, on two frames ffmpeg generates by itself)\n" +
 		"  * ffprobe\n" +
-		"  * mkvpropedit",
+		"  * mkvpropedit\n\n" +
+		"And the optional ones, which the status does not depend on:\n" +
+		"  * sptenc-detector-transnetv2, the helper of --detector transnetv2 (in the PATH, or given\n" +
+		"    with --" + transnetv2PathFlagName + "): its version, model and protocol",
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
 		fmt.Println()
 		fmt.Println("Third-Party Tools Check")
@@ -113,11 +119,14 @@ var checkCommand = &cli.Command{
 			ffmpegOK = true
 		}
 		ffmpegRows := buildTableRows(ffmpegVersion.Version, ffmpegErr, ffmpegDetails)
+		// Check the optional tools: the helper of a scene detector, needed by that detector alone
+		transnetv2Rows := transnetv2CheckRows(transnetv2.GetVersion(ctx))
 		// Compute common label width across all tables
-		maxLabelWidth := maxLabelLen(ffprobeRows, mkvpropeditRows, ffmpegRows)
+		maxLabelWidth := maxLabelLen(ffprobeRows, mkvpropeditRows, ffmpegRows, transnetv2Rows)
 		renderCheckTable("🔍  ffprobe", ffprobeRows, maxLabelWidth)
 		renderCheckTable("🎬  ffmpeg", ffmpegRows, maxLabelWidth)
 		renderCheckTable("📦  mkvpropedit", mkvpropeditRows, maxLabelWidth)
+		renderCheckTable("🧠  sptenc-detector-transnetv2 (optional)", transnetv2Rows, maxLabelWidth)
 		// Print encoder availability tables
 		if ffmpegOK {
 			fmt.Println()
@@ -134,6 +143,25 @@ var checkCommand = &cli.Command{
 		}
 		return nil
 	},
+}
+
+// transnetv2CheckRows returns the rows of the TransNetV2 helper, from its version line or the
+// reason it can not be used. It is optional: only --detector transnetv2 needs it, and the commands
+// selecting it check it themselves (see checkSceneDetector), so its absence is no failure here.
+func transnetv2CheckRows(info transnetv2.VersionInfo, checkErr error) [][2]string {
+	if checkErr != nil {
+		return [][2]string{
+			{"Present", "❌ (needed by --" + detectorFlagName + " " + string(pipeline.SceneDetectorTransNetV2) + " only)"},
+			{"Error", checkErr.Error()},
+		}
+	}
+	return [][2]string{
+		{"Present", "✅"},
+		{"Version", info.Version},
+		{"Model", info.Model},
+		{"Model SHA-256", info.ModelSHA256},
+		{"Protocol", strconv.Itoa(info.Protocol)},
+	}
 }
 
 func computeStatus(ffprobeOK, ffmpegOK, mkvpropeditOK, hasLibvmaf, hasAnyEncoder bool) (status, emoji string) {

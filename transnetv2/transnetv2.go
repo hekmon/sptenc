@@ -1,7 +1,7 @@
 // Package transnetv2 is the Go side of sptenc-detector-transnetv2, the helper executable running
 // TransNetV2, a neural network finding shot boundaries: it locates the helper (Helper), checks its
 // version (GetVersion), runs a detection on frames fed by the caller (Detect) and turns the
-// probabilities it returns into cuts (Cuts). It has no caller yet.
+// probabilities it returns into cuts (Cuts). pipeline.DetectScenesTransNetV2 is its caller.
 //
 // # THE PROTOCOL (version 1)
 //

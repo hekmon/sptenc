@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/transnetv2"
 )
 
 // SceneDetector names a scene detector: what finds the scene boundaries the video is cut at,
@@ -27,10 +28,13 @@ type SceneDetector string
 const (
 	// SceneDetectorScdet is ffmpeg's scdet filter (see ffmpeg.ScenesDetection), the default.
 	SceneDetectorScdet SceneDetector = "scdet"
+	// SceneDetectorTransNetV2 is TransNetV2, a neural network finding shot boundaries, run by its
+	// helper executable (see the transnetv2 package and DetectScenesTransNetV2).
+	SceneDetectorTransNetV2 SceneDetector = "transnetv2"
 )
 
 // SceneDetectors lists the detectors, the default first: for flag validation and help.
-var SceneDetectors = []SceneDetector{SceneDetectorScdet}
+var SceneDetectors = []SceneDetector{SceneDetectorScdet, SceneDetectorTransNetV2}
 
 // SceneDetectorNames returns the names of the detectors, the default first.
 func SceneDetectorNames() []string {
@@ -66,6 +70,13 @@ type detectorProperties struct {
 	defaultSearchMax                 float64 // search ceiling: batchsearch, thresholds
 	scoreResolution                  float64 // step of the scores as the detector reports them, see ReusableThreshold
 	scoreDecimals, thresholdDecimals int     // decimals printed, -1 for every decimal the value has
+	// thresholdOnReportedScore tells that the threshold is compared with the score as reported,
+	// rounded, and not with an unrounded one the detector keeps to itself: see ReusableThreshold
+	thresholdOnReportedScore bool
+	// helper tells that the detector runs in a helper executable of its own, which reads frames of
+	// frameWidth x frameHeight decoded and scaled by sptenc (see HelperFrameSize)
+	helper                  bool
+	frameWidth, frameHeight int
 }
 
 // detectorPropertiesOf returns the properties of the detector, the zero value for an unknown one.
@@ -88,6 +99,28 @@ func detectorPropertiesOf(d SceneDetector) detectorProperties {
 			// every decimal it has (a reusable threshold has one more than the scores)
 			scoreDecimals:     2,
 			thresholdDecimals: -1,
+		}
+	case SceneDetectorTransNetV2:
+		return detectorProperties{
+			known: true,
+			// a probability; nothing exists under the floor, where the runs of frames giving the
+			// cuts are cut (see transnetv2.Cuts, WHY THE FLOOR)
+			thresholdMin:     transnetv2.ProbabilityFloor,
+			thresholdMax:     1,
+			defaultThreshold: transnetv2ThresholdDefault,
+			defaultSearchMin: transnetv2MinThresholdDefault,
+			defaultSearchMax: transnetv2MaxThresholdDefault,
+			// scores rounded by sptenc itself (transnetv2.Cuts, WHY THE SCORE IS ROUNDED), and the
+			// threshold compared with that very rounded score (DetectScenesTransNetV2)
+			scoreResolution:          math.Pow10(-transnetv2.ScoreDecimals),
+			thresholdOnReportedScore: true,
+			// every decimal a score has, which a threshold pasted back has too
+			scoreDecimals:     transnetv2.ScoreDecimals,
+			thresholdDecimals: -1,
+			// the frames the helper reads (see the protocol in the transnetv2 package)
+			helper:      true,
+			frameWidth:  transnetv2.FrameWidth,
+			frameHeight: transnetv2.FrameHeight,
 		}
 	default:
 		return detectorProperties{}
@@ -148,6 +181,36 @@ const (
 	scdetMaxThresholdDefault = 40.0 // search ceiling: batchsearch, thresholds
 )
 
+// TransNetV2 defaults. PROVISIONAL: they are not measured for sptenc, they wait for a comparison
+// of the file sizes real encodes give, as scdet's wait for a body of real search results.
+//
+// The score is the probability the model gives the last frame of the outgoing shot (see
+// transnetv2.Cuts). Their basis is the study of the seedvr2x project, as the comments of
+// transnetv2/cuts.go and its decision brief (seedvr2x/research/docs/scene-detection.md) report it:
+// two rounds of labelled candidates (130 rows, 84 animated, 46 live action) over 11 sources. That
+// study asked "is this a cut" for an upscaler, where a false cut costs nothing; here the question
+// is whether splitting gives a smaller file, which no study has measured for either detector.
+//
+// The single-threshold default (encode, split) is 0.5, the study's working threshold: recall 0.80
+// and precision 0.88 on animation, 0.95 and 0.86 on live action (scdet at 10: 0.84 and 0.69, 0.24
+// and 0.86), with hardly any burst (5 per hour of animation against scdet's 351). seedvr2x itself
+// detects at 0.3, for 7 more real cuts and 3 more false ones on the labelled round; a false cut
+// costs more in an encoder than a missed one (transnetv2.Cuts, WHY THE FLOOR), so a single guess
+// stays at 0.5.
+//
+// The search floor is the floor of the detector, 0.3 (transnetv2.ProbabilityFloor): a threshold
+// under it can not exist, and the search walks upward from it, so that the cuts 0.5 would miss
+// (7 of the 11 the study's 0.5 missed score 0.35 to 0.49) are candidates.
+//
+// The ceiling, 0.9, is the highest threshold the study counted (617 detections per hour of
+// animation, 431 of live action, no burst): beyond it nothing is measured. As with scdet, its main
+// effect is on the candidates budget, spread over the whole range.
+const (
+	transnetv2ThresholdDefault    = 0.5                         // single-threshold commands: encode, split
+	transnetv2MinThresholdDefault = transnetv2.ProbabilityFloor // search floor: batchsearch, thresholds
+	transnetv2MaxThresholdDefault = 0.9                         // search ceiling: batchsearch, thresholds
+)
+
 // DefaultThreshold returns the threshold of a single detection (encode, split) when none is given.
 func (d SceneDetector) DefaultThreshold() float64 {
 	return detectorPropertiesOf(d).defaultThreshold
@@ -164,6 +227,13 @@ func (d SceneDetector) DefaultSearchRange() (min, max float64) {
 // detection (encode -T) with the same detector, keeps that scene and gives the very same scenes
 // as here. minThreshold is the threshold the scenes were detected with. An unknown detector has no
 // resolution to build on: the score is returned as is (never below minThreshold).
+//
+// What follows is scdet's case, where the detector compares the threshold with a score it does
+// not report. A detector comparing the threshold with the very score it reports
+// (thresholdOnReportedScore: transnetv2, whose scores sptenc rounds itself and compares rounded,
+// see DetectScenesTransNetV2) has nothing to subtract: the score itself keeps that scene, and
+// any scene scoring less is reported less. Its reusable threshold is the score, never below
+// minThreshold.
 //
 // # WHY THE SCORE ITSELF CAN NOT BE USED
 //
@@ -193,9 +263,28 @@ func (d SceneDetector) ReusableThreshold(score, minThreshold float64) float64 {
 	if !p.known || p.scoreResolution <= 0 {
 		return math.Max(score, minThreshold)
 	}
+	if p.thresholdOnReportedScore {
+		return math.Max(score, minThreshold)
+	}
 	precision := 10 / p.scoreResolution // one more decimal than the scores
 	threshold := math.Round((score-p.scoreResolution/2)*precision) / precision
 	return math.Max(threshold, minThreshold)
+}
+
+// HasHelper tells whether the detector runs in a helper executable of its own, which reads frames
+// decoded and scaled by sptenc (see HelperFrameSize): scdet does not, it is a filter of ffmpeg. A
+// detector with a helper is checked at start-up, and the helper's version is recorded in the tags
+// of an encode (see metadata.SceneCuts).
+func (d SceneDetector) HasHelper() bool {
+	p := detectorPropertiesOf(d)
+	return p.known && p.helper
+}
+
+// HelperFrameSize returns the size of the frames the helper of the detector reads, 0 by 0 for a
+// detector without a helper.
+func (d SceneDetector) HelperFrameSize() (width, height int) {
+	p := detectorPropertiesOf(d)
+	return p.frameWidth, p.frameHeight
 }
 
 // FormatThreshold formats a threshold of the detector for display, and for the user to paste

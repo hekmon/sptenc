@@ -37,14 +37,16 @@ var splitCommand = &cli.Command{
 	Usage:    "Split a video file by scenes",
 	Description: "Detect scene changes in a video and split it into separate files at each transition.\n\n" +
 		"HOW IT WORKS\n" +
-		"The command analyzes the video with ffmpeg's scdet filter to find scene boundaries, as encode,\n" +
-		"batchsearch and thresholds do, then writes a lossless FFV1 master directly cut at them: every\n" +
-		"frame of such a master is self-contained, so every cut falls on the exact frame.\n\n" +
+		"The command finds the scene boundaries with the detector of --" + detectorFlagName + " (ffmpeg's scdet filter by\n" +
+		"default), as encode, batchsearch and thresholds do, then writes a lossless FFV1 master directly\n" +
+		"cut at them: every frame of such a master is self-contained, so every cut falls on the exact frame.\n\n" +
 		"If the input has already been converted with the master command, use --" + masterFlagName + ": it is cut as\n" +
 		"is, its scenes detected on it. They are the source's when the master holds the source's luma\n" +
 		"without loss, the only plane scdet reads: a limited range source of 8 or 10 bits. A full range\n" +
 		"source's luma is converted to the limited range, and scores its scene changes lower: split the\n" +
-		"source itself to cut where encode does.\n" +
+		"source itself to cut where encode does. transnetv2 reads the pictures converted to RGB: the\n" +
+		"master of a limited range source gave it the source's (8 bits, a test clip), the master of a full\n" +
+		"range one did not, and scored differently.\n" +
 		"Use --" + listScenesFlagName + " to detect and print the actual scene list (frame, time, duration,\n" +
 		"and score) for a given threshold without creating any files. It is the fastest way to preview\n" +
 		"exactly where the cuts will fall before committing to an encode or split.\n\n" +
@@ -103,6 +105,14 @@ var splitCommand = &cli.Command{
 			return ctx, err
 		}
 		if err := checkFFProbe(ctx); err != nil {
+			return ctx, err
+		}
+		// The helper of the detector, if it has one (see checkSceneDetector)
+		detector, err := sceneDetector(cmd)
+		if err != nil {
+			return ctx, err
+		}
+		if _, err = checkSceneDetector(ctx, detector); err != nil {
 			return ctx, err
 		}
 		// Check arguments
@@ -222,7 +232,7 @@ var splitCommand = &cli.Command{
 		start := time.Now()
 		scenesConfig := decoderCfg.ToScenesDetectionConfig()
 		scenesConfig.RGBToYUV = rgbToYUV
-		scenes, err := liveDetectScenes(ctx, detector, inputFilePath, threshold, duration, cmd.Bool(debugFlagName),
+		scenes, err := liveDetectScenes(ctx, detector, inputFilePath, threshold, duration, videoStream.RFrameRate, cmd.Bool(debugFlagName),
 			scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)

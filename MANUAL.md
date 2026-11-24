@@ -292,6 +292,25 @@ Decoding is hardware accelerated whenever sptenc knows it can be: a hardware enc
 
 Scene detection splits a video into independent segments, and each segment gets its own QP. The threshold controls how many boundaries are kept, which directly affects both quality visibility and file size. There is no single right threshold — the choice depends on which tradeoff you are willing to accept.
 
+### Scene detectors
+
+`encode`, `split`, `thresholds` and `batchsearch` take the detector with `--detector`:
+
+| Detector | What scores a boundary | Thresholds | Default (`encode`, `split`) | Default search (`thresholds`, `batchsearch`) |
+|---|---|---|---|---|
+| `scdet` (default) | ffmpeg's `scdet` filter: how much the luma of a frame differs from the previous one | 0 to 100 | 10 | 8 to 40 |
+| `transnetv2` | TransNetV2, a neural network trained to find shot boundaries: the probability that a frame is the last of its shot | 0.3 to 1 | 0.5 | 0.3 to 0.9 |
+
+A threshold is on the scale of its detector: `-T 10` means something to `scdet` and is refused with `transnetv2`, whose thresholds are probabilities.
+
+`transnetv2` needs its helper, `sptenc-detector-transnetv2`, a separate executable that runs the model, so that sptenc itself has no machine learning dependency. sptenc looks for it in the `PATH` (`.\sptenc-detector-transnetv2.exe`, the current directory, on Windows), or where `--transnetv2-path` says. **The helper is not distributed yet.** A command given `--detector transnetv2` checks the helper before doing anything and stops, with the reason, when it does not answer; without `--detector transnetv2` it is never run, and `sptenc check` lists it as optional, with its version, its model and its protocol.
+
+sptenc decodes the source (with the hardware decoder of the run, as `scdet` does), scales every frame to the 48×27 RGB pictures the model reads and pipes them to the helper, which returns one probability per frame. sptenc makes the cuts from them: a boundary on the frame after each run of frames at 0.3 or above, at its highest probability, scored with that probability rounded to 4 decimals. A threshold keeps the boundaries whose score reaches it, so a score shown by `split --list-scenes` or `thresholds` is a threshold that keeps it. Nothing exists under 0.3: the cuts are made there.
+
+The defaults of `transnetv2` are **provisional**. They come from a study of the detector done for another purpose (finding cuts for an upscaler, where a false cut costs nothing), not from sptenc's files: 0.5 is that study's working threshold, 0.9 the highest it measured. Whether they give smaller files than `scdet` has not been measured yet. An RGB source with unknown primaries still needs `--rgb-matrix`: the detection does not use it, but the master and the final VMAF do.
+
+The output of `encode` and `batchsearch` records the detector and, for `transnetv2`, the helper's version and the SHA-256 of its model (see [Metadata tags](#metadata-tags)).
+
 ### Too fine: many short segments
 
 A low threshold keeps almost every detected boundary. This gives hard passages their own QP and keeps VMAF metrics honest: in a short segment, bad frames have fewer good ones to hide among. A min or low percentile gate catches them; an average gate, harmonic mean included, only when they are many or very bad (see [sptenc thresholds](#sptenc-thresholds)).
@@ -322,11 +341,11 @@ If you care more about tight quality control than file size, skip `batchsearch`.
 
 `encode`, `split`, `thresholds`, and `batchsearch` all build scenes the same way, on the source file: the threshold picks the boundaries first, then `--min-segment-length` merges the short segments that remain. The scenes a threshold produces therefore depend only on that threshold and on `--min-segment-length` — not on the `--min-threshold`/`--max-threshold` range a search was run with.
 
-`split --master` detects the scenes on the master it is given. They are the source's when the master holds the source's luma without loss, the only plane scene detection reads: a limited range source of 8 or 10 bits. A full range source's luma is converted to the limited range (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)): on a test clip, its scene changes scored 14% lower on the master than on the source, and a threshold of 17 lost one of the four cuts `encode` kept. Split the source itself to cut where the other commands do.
+`split --master` detects the scenes on the master it is given. They are the source's when the master holds the source's luma without loss, the only plane scene detection reads: a limited range source of 8 or 10 bits. A full range source's luma is converted to the limited range (see [Base ffmpeg encode options](#base-ffmpeg-encode-options)): on a test clip, its scene changes scored 14% lower on the master than on the source, and a threshold of 17 lost one of the four cuts `encode` kept. Split the source itself to cut where the other commands do. With `transnetv2`, which reads the pictures converted to RGB, the master of a limited range 8-bit test clip gave it the very pictures of the source; the master of a full range one did not, and a flat white frame scored 0.9882 there against 1.0000 on the source.
 
 This makes thresholds portable: a row of the `thresholds` table, or the best candidate reported by `batchsearch`, gives exactly the same scenes when passed to `encode -T` with the same `--detector` and `--min-segment-length`. A threshold is on the scale of its detector, so both commands print the flags to paste with the detector: `--detector scdet --min-threshold 24.2765`. A typical use is to run `batchsearch` on one episode and `encode -T <best>` on the rest of the season. The output of `encode` and `batchsearch` records the detector, the threshold and the minimum segment length in its [tags](#metadata-tags).
 
-Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scene scores rounded to 3 decimals but compares thresholds against the unrounded score, so sptenc reports half a step below the printed score to guarantee the boundary is kept. Use the value as printed.
+Reported thresholds look like `24.2765` rather than `24.277`: ffmpeg prints scene scores rounded to 3 decimals but compares thresholds against the unrounded score, so sptenc reports half a step below the printed score to guarantee the boundary is kept. Use the value as printed. With `transnetv2` the reported threshold is the score itself (`0.6123`): sptenc rounds the scores and compares the threshold with the rounded one.
 
 ## Adaptive QP Search
 
@@ -387,9 +406,10 @@ The output file contains the following metadata tags on the video stream:
 - `sptenc_url` and `sptenc_version` — tool provenance
 - `sptenc_encoder` and `sptenc_encoder_preset` — encoder used
 - `sptenc_segments_count` — number of segments
-- `sptenc_scene_detector` — the scene detector the segments were cut with (`--detector`: `scdet`)
+- `sptenc_scene_detector` — the scene detector the segments were cut with (`--detector`: `scdet` or `transnetv2`)
 - `sptenc_scene_threshold` — the threshold that reproduces the cuts with `encode -T` and that detector: the one given to `encode`, the best candidate's for `batchsearch`
 - `sptenc_scene_min_segment_length` — the minimum segment length applied after the threshold (`--min-segment-length`, as it takes it: `5s`)
+- `sptenc_scene_detector_version`, `sptenc_scene_detector_model_sha256` — with `transnetv2` only: the version of the helper that detected the scenes and the SHA-256 of its model
 - `sptenc_stats_min_qp`, `sptenc_stats_max_qp`, `sptenc_stats_weighted_qp` — QP statistics
 - `sptenc_vmaf_model` — VMAF model used
 - `sptenc_vmaf_score` — the score the VMAF thresholds gated: `fidelity`, or `original` with `--vmaf-original` (omitted with a model without banding feature, whose score is both)
@@ -472,6 +492,7 @@ Where the binaries are looked for:
 | `ffmpeg` | `PATH` | `.\ffmpeg.exe` (current directory, not `PATH`) | `--ffmpeg-path` |
 | `ffprobe` | `PATH` | `.\ffprobe.exe` (current directory, not `PATH`) | `--ffprobe-path` |
 | `mkvpropedit` | `PATH` | `C:\Program Files\MKVToolNix\mkvpropedit.exe` | `--mkvpropedit-path` |
+| `sptenc-detector-transnetv2` (optional, `--detector transnetv2` only, see [Scene detectors](#scene-detectors)) | `PATH` | `.\sptenc-detector-transnetv2.exe` (current directory, not `PATH`) | `--transnetv2-path` |
 
 Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc check` to verify everything is found and usable.
 
@@ -491,7 +512,7 @@ Example: `sptenc --ffmpeg-path /opt/ffmpeg/bin/ffmpeg encode [...]`. Run `sptenc
 | Dial | The encoder's own quality setting: CRF (x264, x265, SVT-AV1), CQ level (aomenc, vpxenc), quantizer (rav1e) | Constant QP (see [why](#why-qp-instead-of-crf)) |
 | Encoders | aomenc, SVT-AV1, rav1e, vpxenc, x264, x265 (their command line tools), with your own parameters | libx265, SVT-AV1 and hardware encoders (NVENC, VAAPI, D3D12VA, VideoToolbox) through ffmpeg, with fixed opinionated parameters |
 | GPU | Decoding (DGDecNV), SSIMULACRA2 and Butteraugli (Vapoursynth-HIP) | Encoding (as the final encoder, or to search fast before a final CPU encode with `batchsearch --final-encode`) and decoding |
-| Scene cuts | av-scenechange, cuts 24 frames apart at least, scenes longer than 10 s split further (defaults). Frame exact chunks piped from a VapourSynth source plugin, no intermediate file; without one, keyframe cuts into intermediate files (`hybrid`, can lose frames with open GOPs) or `select`, exact but decoding the whole source for every chunk | ffmpeg `scdet`, scenes shorter than 5 s (by default) merged into their shorter neighbor, no maximum length; frame exact cuts of a lossless intermediate (large: see [disk space](#disk-space)); a search of the scene threshold itself (`batchsearch`) |
+| Scene cuts | av-scenechange, cuts 24 frames apart at least, scenes longer than 10 s split further (defaults). Frame exact chunks piped from a VapourSynth source plugin, no intermediate file; without one, keyframe cuts into intermediate files (`hybrid`, can lose frames with open GOPs) or `select`, exact but decoding the whole source for every chunk | ffmpeg `scdet`, or TransNetV2 through its optional helper (`--detector transnetv2`), scenes shorter than 5 s (by default) merged into their shorter neighbor, no maximum length; frame exact cuts of a lossless intermediate (large: see [disk space](#disk-space)); a search of the scene threshold itself (`batchsearch`) |
 | Verification | Frame count of every chunk; optional VMAF plot of the result | Frame counts of every encode, before it is measured, and of the final file, final VMAF of the whole file embedded in its tags |
 | Learning | None: every chunk starts its search from the middle of the quantizer range | QP statistics of the previous segments and encodes, to start the next searches closer |
 | Interrupted run | Can be resumed | Starts over |

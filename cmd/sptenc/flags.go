@@ -300,9 +300,8 @@ func thresholdSearchFlags() []cli.Flag {
 // (-d is --debug, -D --min-drop).
 func detectorFlag(category string) cli.Flag {
 	return &cli.StringFlag{
-		Name: detectorFlagName,
-		Usage: fmt.Sprintf("Scene detector, whose scale the thresholds are on. Valid values: %s",
-			strings.Join(pipeline.SceneDetectorNames(), ", ")),
+		Name:     detectorFlagName,
+		Usage:    detectorUsage(),
 		Value:    string(pipeline.SceneDetectors[0]),
 		OnlyOnce: true,
 		Category: category,
@@ -312,6 +311,29 @@ func detectorFlag(category string) cli.Flag {
 		},
 		ValidateDefaults: true,
 	}
+}
+
+// detectorUsage returns the help of the detector flag: each detector, what it is, the range of its
+// thresholds and its defaults (single detection, then search), since a threshold is on the scale
+// of the detector selected.
+func detectorUsage() string {
+	perDetector := make([]string, len(pipeline.SceneDetectors))
+	for i, d := range pipeline.SceneDetectors {
+		min, max := d.ThresholdRange()
+		searchMin, searchMax := d.DefaultSearchRange()
+		var what, note string
+		switch d {
+		case pipeline.SceneDetectorScdet:
+			what = "ffmpeg's scdet filter"
+		case pipeline.SceneDetectorTransNetV2:
+			what = "the TransNetV2 neural network, run by its helper sptenc-detector-transnetv2 (see --" + transnetv2PathFlagName + ")"
+			note = ", provisional defaults"
+		}
+		perDetector[i] = fmt.Sprintf("%s: %s, thresholds %s-%s, default %s, search %s-%s%s", d, what,
+			d.FormatThreshold(min), d.FormatThreshold(max), d.FormatThreshold(d.DefaultThreshold()),
+			d.FormatThreshold(searchMin), d.FormatThreshold(searchMax), note)
+	}
+	return fmt.Sprintf("Scene detector, whose scale the thresholds are on. %s", strings.Join(perDetector, "; "))
 }
 
 // singleThresholdFlag returns the threshold flag of the commands detecting scenes once: encode and

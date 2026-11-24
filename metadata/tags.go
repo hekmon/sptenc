@@ -21,6 +21,9 @@ const (
 	sptencSceneDetectorTagKey         = "sptenc_scene_detector"
 	sptencSceneThresholdTagKey        = "sptenc_scene_threshold"
 	sptencSceneMinSegmentLengthTagKey = "sptenc_scene_min_segment_length"
+	// the helper of a detector that runs in one (see pipeline.SceneDetector.HasHelper)
+	sptencSceneDetectorVersionTagKey     = "sptenc_scene_detector_version"
+	sptencSceneDetectorModelSHA256TagKey = "sptenc_scene_detector_model_sha256"
 	// Encoding QP stats
 	sptencStatsMinQP      = "sptenc_stats_min_qp"
 	sptencStatsMaxQP      = "sptenc_stats_max_qp"
@@ -68,10 +71,19 @@ const (
 // on a file, batchsearch): the detector, the threshold that reproduces the cuts with encode -T and
 // that detector (for batchsearch, the reusable threshold of the winner), and the minimum segment
 // length applied after it. Together they are enough to cut the source again the same way.
+//
+// A detector that runs in a helper (see pipeline.SceneDetector.HasHelper) scores with the helper's
+// model: another version or another model can score the same frames otherwise, and the threshold
+// would not reproduce the cuts. So the version of the helper that detected the scenes and the
+// SHA-256 of its model are recorded too: the caller fills them from the helper's version line
+// (transnetv2.VersionInfo). They are ignored for a detector without a helper.
 type SceneCuts struct {
 	Detector         pipeline.SceneDetector
 	Threshold        float64
 	MinSegmentLength time.Duration
+	// The helper's, for a detector that runs in one
+	DetectorVersion     string // the helper's own version
+	DetectorModelSHA256 string // the SHA-256 of the model the helper runs, in hexadecimal
 }
 
 // GenerateTags builds the ffmpeg metadata flags documenting an encode. They are all set on the
@@ -85,6 +97,10 @@ type SceneCuts struct {
 // when the CAMBI gate is on. A model without CAMBI and the gate off gets the tags of sptenc v0.1.0
 // plus the scene tags, and exactly those of v0.1.0 on a pre-split directory (see MANUAL.md,
 // Metadata tags).
+//
+// A detector with a helper adds the helper's version and the SHA-256 of its model to the scene
+// tags (see SceneCuts). scdet does not: its scene tags are the detector, the threshold and the
+// minimum segment length.
 func GenerateTags(vc core.VMAFChecker, cambi core.CAMBIChecker, encoder ffmpeg.Encoder, statsQP core.QPSearchResults,
 	vmaf ffmpeg.VMAFSummary, model ffmpeg.VMAFModel, segmentsCount int, cuts *SceneCuts) (flags ffmpeg.FFMEGTags) {
 	flags = make(ffmpeg.FFMEGTags, 0, 82)
@@ -104,6 +120,12 @@ func GenerateTags(vc core.VMAFChecker, cambi core.CAMBIChecker, encoder ffmpeg.E
 			// as --min-segment-length takes it: 5s
 			"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencSceneMinSegmentLengthTagKey, cuts.MinSegmentLength),
 		)
+		if cuts.Detector.HasHelper() {
+			flags = append(flags,
+				"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencSceneDetectorVersionTagKey, cuts.DetectorVersion),
+				"-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencSceneDetectorModelSHA256TagKey, cuts.DetectorModelSHA256),
+			)
+		}
 	}
 	flags = append(flags, "-metadata:s:v:0", fmt.Sprintf("%s=%s", sptencEncoderTagKey, encoder))
 	// Preset: must list every encoder the pipeline runs with a preset (see pipeline.EncoderAdapter),

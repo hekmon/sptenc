@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hekmon/sptenc/core"
+	"github.com/hekmon/sptenc/transnetv2"
 )
 
 func TestParseSceneDetector(t *testing.T) {
@@ -17,16 +18,17 @@ func TestParseSceneDetector(t *testing.T) {
 		valid    bool
 	}{
 		{"scdet", SceneDetectorScdet, true},
+		{"transnetv2", SceneDetectorTransNetV2, true},
 		{"", "", false},
 		{"SCDET", "", false},
-		{"transnetv2", "", false}, // not a detector yet
+		{"TransNetV2", "", false},
 	} {
 		got, err := ParseSceneDetector(tc.name)
 		if (err == nil) != tc.valid || got != tc.expected {
 			t.Errorf("%q: expected %q (valid %t), got %q (error %v)", tc.name, tc.expected, tc.valid, got, err)
 		}
 	}
-	if names := SceneDetectorNames(); !slices.Equal(names, []string{"scdet"}) {
+	if names := SceneDetectorNames(); !slices.Equal(names, []string{"scdet", "transnetv2"}) {
 		t.Errorf("unexpected detectors %v", names)
 	}
 	if SceneDetectors[0] != SceneDetectorScdet {
@@ -53,6 +55,8 @@ func TestSceneDetectorProperties(t *testing.T) {
 		reusable, reusableAtSearch float64
 	}{
 		{SceneDetectorScdet, 0, 100, 10, 8, 40, "24.2765", "24.28", 24.2765, 8},
+		// scores rounded and compared rounded by sptenc: the score is its own reusable threshold
+		{SceneDetectorTransNetV2, 0.3, 1, 0.5, 0.3, 0.9, "24.2765", "24.2770", 24.277, 0.3},
 	} {
 		d := tc.detector
 		tested[d] = true
@@ -133,6 +137,62 @@ func TestSceneDetectorEntriesComplete(t *testing.T) {
 		}
 		if p.scoreDecimals < 0 || p.thresholdDecimals < -1 {
 			t.Errorf("%s: invalid decimals %+v", d, p)
+		}
+	}
+}
+
+// The helper and the frames it reads are properties of the detector: TransNetV2's are the
+// protocol's, scdet has none, nor has an unknown detector.
+func TestSceneDetectorHelper(t *testing.T) {
+	for _, tc := range []struct {
+		detector      SceneDetector
+		helper        bool
+		width, height int
+	}{
+		{SceneDetectorScdet, false, 0, 0},
+		{SceneDetectorTransNetV2, true, transnetv2.FrameWidth, transnetv2.FrameHeight},
+		{"", false, 0, 0},
+		{"unknown", false, 0, 0},
+	} {
+		w, h := tc.detector.HelperFrameSize()
+		if got := tc.detector.HasHelper(); got != tc.helper || w != tc.width || h != tc.height {
+			t.Errorf("%q: expected helper %t reading %dx%d, got %t reading %dx%d", tc.detector, tc.helper, tc.width, tc.height, got, w, h)
+		}
+	}
+	if transnetv2.FrameWidth != 48 || transnetv2.FrameHeight != 27 {
+		t.Errorf("the protocol's frames are 48x27, got %dx%d", transnetv2.FrameWidth, transnetv2.FrameHeight)
+	}
+}
+
+// TransNetV2's reusable threshold is the score itself, never below the detection threshold, with
+// no floating point noise: the scores have 4 decimals and are printed with all of them.
+func TestReusableThreshold_TransNetV2(t *testing.T) {
+	for _, tc := range []struct {
+		score, minThreshold, expected float64
+	}{
+		{0.7, 0.3, 0.7},
+		{0.3, 0.3, 0.3},
+		{0.3001, 0.3, 0.3001},
+		{0.4999, 0.5, 0.5}, // never below the detection threshold
+		{1, 0.3, 1},
+	} {
+		if got := SceneDetectorTransNetV2.ReusableThreshold(tc.score, tc.minThreshold); got != tc.expected {
+			t.Errorf("score %v (min %v): expected %v, got %v", tc.score, tc.minThreshold, tc.expected, got)
+		}
+	}
+	for _, tc := range []struct {
+		value            float64
+		threshold, score string
+	}{
+		{0.7, "0.7", "0.7000"},
+		{0.3001, "0.3001", "0.3001"},
+		{1, "1", "1.0000"},
+	} {
+		if got := SceneDetectorTransNetV2.FormatThreshold(tc.value); got != tc.threshold {
+			t.Errorf("threshold %v: expected %q, got %q", tc.value, tc.threshold, got)
+		}
+		if got := SceneDetectorTransNetV2.FormatScore(tc.value); got != tc.score {
+			t.Errorf("score %v: expected %q, got %q", tc.value, tc.score, got)
 		}
 	}
 }

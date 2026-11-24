@@ -16,8 +16,10 @@ import (
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/sptenc/core"
 	"github.com/hekmon/sptenc/ffmpeg"
+	"github.com/hekmon/sptenc/metadata"
 	"github.com/hekmon/sptenc/mkvtoolnix"
 	"github.com/hekmon/sptenc/pipeline"
+	"github.com/hekmon/sptenc/transnetv2"
 
 	"github.com/hekmon/liveprogress/v2"
 	"github.com/urfave/cli/v3"
@@ -42,6 +44,43 @@ func checkMKVPropEdit(ctx context.Context) error {
 		return fmt.Errorf("mkvpropedit check failed: %w", err)
 	}
 	return nil
+}
+
+// checkSceneDetector checks the helper of a detector that runs in one (see
+// pipeline.SceneDetector.HasHelper) and returns its version line: it must answer its version
+// command in the protocol this sptenc speaks, or the command fails at start-up, before anything
+// is probed or written, as an encoder missing from ffmpeg does. A detector without a helper
+// (scdet) runs nothing and returns nil: a user without the helper sees no difference.
+//
+// The commands detecting scenes call it in their Before (split, thresholds, encode on a file,
+// batchsearch), and encode and batchsearch again right before the detection, for the version they
+// record in the tags of the output (see metadata.SceneCuts): the helper that detected the scenes.
+func checkSceneDetector(ctx context.Context, d pipeline.SceneDetector) (helper *transnetv2.VersionInfo, err error) {
+	switch d {
+	case pipeline.SceneDetectorScdet:
+		return nil, nil
+	case pipeline.SceneDetectorTransNetV2:
+		info, versionErr := transnetv2.GetVersion(ctx)
+		if versionErr != nil {
+			return nil, fmt.Errorf("the %s scene detector needs its helper, %s, which can not be used (give its path with --%s; run 'sptenc check' for details): %w",
+				d, shellescape.Quote(transnetv2.Helper), transnetv2PathFlagName, versionErr)
+		}
+		return &info, nil
+	default:
+		return nil, fmt.Errorf("unsupported scene detector %q", d)
+	}
+}
+
+// newSceneCuts returns how the segments of an encode were cut, for its tags (see
+// metadata.SceneCuts), with the version line of the detector's helper when it has one.
+func newSceneCuts(d pipeline.SceneDetector, threshold float64, minSegmentLength time.Duration,
+	helper *transnetv2.VersionInfo) *metadata.SceneCuts {
+	cuts := &metadata.SceneCuts{Detector: d, Threshold: threshold, MinSegmentLength: minSegmentLength}
+	if helper != nil {
+		cuts.DetectorVersion = helper.Version
+		cuts.DetectorModelSHA256 = helper.ModelSHA256
+	}
+	return cuts
 }
 
 // checkSourceVideo returns the video stream sptenc is going to work on, or the reason why it

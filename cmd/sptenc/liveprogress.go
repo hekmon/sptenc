@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -257,8 +258,24 @@ func liveSegmentsMasters(ctx context.Context, segments, masters []string, durati
 // liveDetectScenes detects the scenes of a file with the detector given, at the threshold given (on
 // that detector's scale), with a progress bar. It is the single entry point of scene detection:
 // every command detecting scenes goes through it, and it dispatches to the detector. scenesConfig
-// carries the decoding of the source (hardware decoder, RGB conversion).
+// carries the decoding of the source (hardware decoder, RGB conversion), frameRate the frame rate
+// of its video stream (r_frame_rate), which a detector counting frames needs for the time of a
+// scene and its progress (transnetv2).
 func liveDetectScenes(ctx context.Context, detector pipeline.SceneDetector, path string, threshold float64, totalDuration time.Duration,
+	frameRate string, debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
+	switch detector {
+	case pipeline.SceneDetectorScdet:
+		return liveDetectScenesScdet(ctx, path, threshold, totalDuration, debug, scenesConfig)
+	case pipeline.SceneDetectorTransNetV2:
+		return liveDetectScenesTransNetV2(ctx, path, threshold, totalDuration, frameRate, debug, scenesConfig)
+	default:
+		return nil, fmt.Errorf("unsupported scene detector %q", detector)
+	}
+}
+
+// liveDetectScenesScdet is liveDetectScenes with scdet (see ffmpeg.ScenesDetection), its progress
+// the time of the source decoded.
+func liveDetectScenesScdet(ctx context.Context, path string, threshold float64, totalDuration time.Duration,
 	debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
 	// live progress
 	var currentStats ffmpeg.ProgressStats
@@ -291,18 +308,78 @@ func liveDetectScenes(ctx context.Context, detector pipeline.SceneDetector, path
 		fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
 	}
 	// Execute scene detection
-	switch detector {
-	case pipeline.SceneDetectorScdet:
-		scenesConfig.Path = path
-		scenesConfig.Threshold = threshold
-		scenesConfig.Debug = debugLog
-		scenesConfig.RuntimeError = runtimeError
-		scenesConfig.FFMPEGStatsReport = progress
-		scenes, err = ffmpeg.ScenesDetection(ctx, scenesConfig)
-	default:
-		err = fmt.Errorf("unsupported scene detector %q", detector)
+	scenesConfig.Path = path
+	scenesConfig.Threshold = threshold
+	scenesConfig.Debug = debugLog
+	scenesConfig.RuntimeError = runtimeError
+	scenesConfig.FFMPEGStatsReport = progress
+	return ffmpeg.ScenesDetection(ctx, scenesConfig)
+}
+
+// liveDetectScenesTransNetV2 is liveDetectScenes with TransNetV2 (see
+// pipeline.DetectScenesTransNetV2). scenesConfig.RGBToYUV is not used: the frames are converted
+// to RGB as each declares, an RGB source not converted at all, where scdet needs the luma of YUV.
+//
+// # WHAT THE BAR SHOWS
+//
+// The work is done when the helper has returned a probability for every frame, so the bar follows
+// the probabilities received, against the frames the source is expected to hold (its duration at
+// its frame rate: the exact count is only known once decoded). The frames fed are shown next to
+// them: the helper answers late by design (the model works on windows of frames, and its output
+// may be buffered: a fake helper answering 100 frames late, through a buffered output, was seen
+// 1,500 frames behind), so the two differ during the run and meet at its end.
+func liveDetectScenesTransNetV2(ctx context.Context, path string, threshold float64, totalDuration time.Duration,
+	frameRate string, debug bool, scenesConfig ffmpeg.ScenesDetectionConfig) (scenes []ffmpeg.Scene, err error) {
+	// the frames expected, the total of the bar
+	var expected uint64 = 1
+	if rate, rateErr := parseFrameRateLocal(frameRate); rateErr == nil && rate > 0 {
+		expected = max(1, uint64(math.Round(totalDuration.Seconds()*rate)))
 	}
-	return
+	// live progress: the reports come from other goroutines than the bar's rendering
+	var fed, scored atomic.Int64
+	bar := liveprogress.AddBar(
+		liveprogress.WithTotal(expected),
+		liveprogress.WithRunes(fileProgressRunes),
+		liveprogress.WithSameAutoSizeInternalPadding(true, false),
+		liveprogress.WithPrependDecorator(func(bar *liveprogress.Bar) string {
+			return "  Detecting | "
+		}),
+		liveprogress.WithPrependTimeElapsed(liveprogress.BaseStyle()),
+		liveprogress.WithAppendPercent(liveprogress.BaseStyle()),
+		liveprogress.WithAppendTimeRemaining(liveprogress.BaseStyle()),
+		liveprogress.WithAppendDecorator(func(bar *liveprogress.Bar) string {
+			return fmt.Sprintf(" left | %d frames fed | %d scored", fed.Load(), scored.Load())
+		}),
+	)
+	defer liveprogress.RemoveBar(bar)
+	// Execute scene detection
+	return pipeline.DetectScenesTransNetV2(ctx, pipeline.TransNetV2ScenesConfig{
+		Path:      path,
+		Threshold: threshold,
+		FrameRate: frameRate,
+		HWDecoder: ffmpeg.HWDecoderConfig{
+			NVDec:           scenesConfig.NVDec,
+			NVDevice:        scenesConfig.NVDevice,
+			VAAPIDec:        scenesConfig.VAAPIDec,
+			VAAPIDevice:     scenesConfig.VAAPIDevice,
+			D3D12Dec:        scenesConfig.D3D12Dec,
+			D3D12Device:     scenesConfig.D3D12Device,
+			VideoToolboxDec: scenesConfig.VideoToolboxDec,
+		},
+		Debug: func(s string) {
+			if debug {
+				fmt.Fprintf(liveprogress.Bypass(), "DEBUG: %s\n", s)
+			}
+		},
+		RuntimeError: func(err error) {
+			fmt.Fprintf(liveprogress.Bypass(), "ERROR: %s\n", err)
+		},
+		FramesFedReport: func(frames int) { fed.Store(int64(frames)) },
+		ProbabilitiesReport: func(probabilities int) {
+			scored.Store(int64(probabilities))
+			bar.CurrentSet(min(uint64(probabilities), expected)) // the duration only gives an estimate
+		},
+	})
 }
 
 // scenesFrames returns the frames to cut at (frames, not times: see ffmpeg.Scene).

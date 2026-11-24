@@ -12,6 +12,7 @@ import (
 
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/mkvtoolnix"
+	"github.com/hekmon/sptenc/transnetv2"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/liveterm/v2"
@@ -24,6 +25,7 @@ const (
 	ffmpegPathFlagName      = "ffmpeg-path"
 	ffprobePathFlagName     = "ffprobe-path"
 	mkvpropeditPathFlagName = "mkvpropedit-path"
+	transnetv2PathFlagName  = "transnetv2-path"
 )
 
 const (
@@ -98,6 +100,12 @@ func main() {
 				Value:    mkvtoolnix.MKVPropEdit,
 				OnlyOnce: true,
 			},
+			&cli.StringFlag{
+				Name:     transnetv2PathFlagName,
+				Usage:    "sptenc-detector-transnetv2 binary path, the helper of --detector transnetv2 (optional, see MANUAL.md, Scene detectors)",
+				Value:    transnetv2.Helper,
+				OnlyOnce: true,
+			},
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			if cmd.String(ffmpegPathFlagName) != ffmpeg.FFMPEGBinary {
@@ -116,6 +124,12 @@ func main() {
 				mkvtoolnix.MKVPropEdit = cmd.String(mkvpropeditPathFlagName)
 				if cmd.Bool(debugFlagName) {
 					fmt.Printf("DEBUG: using %s as custom mkvpropedit path\n", shellescape.Quote(mkvtoolnix.MKVPropEdit))
+				}
+			}
+			if cmd.String(transnetv2PathFlagName) != transnetv2.Helper {
+				transnetv2.Helper = cmd.String(transnetv2PathFlagName)
+				if cmd.Bool(debugFlagName) {
+					fmt.Printf("DEBUG: using %s as custom sptenc-detector-transnetv2 path\n", shellescape.Quote(transnetv2.Helper))
 				}
 			}
 			return ctx, nil

@@ -329,6 +329,14 @@ var batchsearchCommand = &cli.Command{
 		if err = validateSearchSceneThresholds(cmd); err != nil {
 			return ctx, err
 		}
+		// The helper of the detector, if it has one (see checkSceneDetector)
+		detector, err := sceneDetector(cmd)
+		if err != nil {
+			return ctx, err
+		}
+		if _, err = checkSceneDetector(ctx, detector); err != nil {
+			return ctx, err
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -426,8 +434,8 @@ var batchsearchCommand = &cli.Command{
 			cunits.ImportInBytes(float64(inputInfos.Size())),
 			cmd.String(encoderFlagName),
 		)
-		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
-			detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold),
+		fmt.Fprintf(bypass, "\t• search range: %s to %s (%s)\n",
+			detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold), detector,
 		)
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
@@ -496,8 +504,13 @@ var batchsearchCommand = &cli.Command{
 		start := time.Now()
 		scenesConfig := decoderCfg.ToScenesDetectionConfig()
 		scenesConfig.RGBToYUV = sourceRGBToYUV
-		scenes, err := liveDetectScenes(ctx, detector, inputPath, minThreshold, totalDuration, cmd.Bool(debugFlagName),
-			scenesConfig,
+		// the helper that detects them, for the tags (checked in Before already)
+		helper, err := checkSceneDetector(ctx, detector)
+		if err != nil {
+			return err
+		}
+		scenes, err := liveDetectScenes(ctx, detector, inputPath, minThreshold, totalDuration, videoStream.RFrameRate,
+			cmd.Bool(debugFlagName), scenesConfig,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
@@ -775,8 +788,7 @@ var batchsearchCommand = &cli.Command{
 		}
 		videoStream = sourceStats.VideoTrack()
 		// the cuts of the winner: its reusable threshold, the one --min-threshold reproduces them with
-		sceneCuts := &metadata.SceneCuts{Detector: detector, Threshold: batch.candidates[bestIndex],
-			MinSegmentLength: cmd.Duration(minSegmentLengthFlagName)}
+		sceneCuts := newSceneCuts(detector, batch.candidates[bestIndex], cmd.Duration(minSegmentLengthFlagName), helper)
 		tags := metadata.GenerateTags(vmafAuditor, setup.cambi, usedEncoder,
 			results, finalVMAFStats, setup.model, len(results.EncodedSegmentsPaths), sceneCuts)
 		start = time.Now()

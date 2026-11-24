@@ -108,6 +108,14 @@ var thresholdsCommand = &cli.Command{
 		if err = validateSearchSceneThresholds(cmd); err != nil {
 			return ctx, err
 		}
+		// The helper of the detector, if it has one (see checkSceneDetector)
+		detector, err := sceneDetector(cmd)
+		if err != nil {
+			return ctx, err
+		}
+		if _, err = checkSceneDetector(ctx, detector); err != nil {
+			return ctx, err
+		}
 		return ctx, nil
 	},
 	Action: func(ctx context.Context, cmd *cli.Command) (err error) {
@@ -137,8 +145,8 @@ var thresholdsCommand = &cli.Command{
 			return err
 		}
 		minThreshold, maxThreshold := searchSceneThresholds(cmd, detector)
-		fmt.Fprintf(bypass, "\t• search range: %s to %s\n",
-			detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold),
+		fmt.Fprintf(bypass, "\t• search range: %s to %s (%s)\n",
+			detector.FormatThreshold(minThreshold), detector.FormatThreshold(maxThreshold), detector,
 		)
 		if minSegLen := cmd.Duration(minSegmentLengthFlagName); minSegLen > 0 {
 			fmt.Fprintf(bypass, "\t• minimum segment length: %s\n", minSegLen)
@@ -174,7 +182,7 @@ var thresholdsCommand = &cli.Command{
 		scenesConfig := requestedDecoder.ToScenesDetectionConfig()
 		scenesConfig.RGBToYUV = rgbToYUV
 		scenes, err := liveDetectScenes(ctx, detector, cmd.StringArg("inputfile"), minThreshold,
-			stats.Format.Duration, cmd.Bool(debugFlagName), scenesConfig)
+			stats.Format.Duration, videoStream.RFrameRate, cmd.Bool(debugFlagName), scenesConfig)
 		if err != nil {
 			return fmt.Errorf("failed to detect scenes: %w", err)
 		}

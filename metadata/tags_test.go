@@ -130,7 +130,9 @@ func TestGenerateTags(t *testing.T) {
 }
 
 // TestGenerateTagsSceneCuts checks the scene tags: written with the cuts of a detection (encode on
-// a file, batchsearch), none for a pre-split directory, the other tags the same either way.
+// a file, batchsearch), none for a pre-split directory, the other tags the same either way. The
+// helper's version and model are written for a detector with a helper alone (transnetv2), never
+// for scdet, even when the fields are set.
 func TestGenerateTagsSceneCuts(t *testing.T) {
 	vmafChecker, err := core.NewVMAFChecker(core.VMAFOffValue, core.VMAFOffValue, core.VMAFOffValue, core.VMAFOffValue,
 		core.VMAFOffValue, core.VMAFOffValue, 93, core.VMAFOffValue)
@@ -140,7 +142,9 @@ func TestGenerateTagsSceneCuts(t *testing.T) {
 	cambi, _ := core.NewCAMBIChecker(1, core.CAMBIOffValue)
 	results := core.QPSearchResults{QPs: []int{20, 22}, VMAFSearchQPs: []int{20, 22}, GlobalWeightedQP: 21}
 	summary := ffmpeg.VMAFSummary{Score: ffmpeg.VMAFScoreFidelity, Stats: ffmpeg.VMAFStats{HarmonicMean: 93.5}}
-	sceneKeys := []string{"sptenc_scene_detector", "sptenc_scene_threshold", "sptenc_scene_min_segment_length"}
+	sceneKeys := []string{"sptenc_scene_detector", "sptenc_scene_threshold", "sptenc_scene_min_segment_length",
+		"sptenc_scene_detector_version", "sptenc_scene_detector_model_sha256"}
+	const sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	preSplit := tagsOf(t, GenerateTags(vmafChecker, cambi, ffmpeg.HEVCEncoderLibx265, results, summary, ffmpeg.VMAFModelFHD, 2, nil))
 	for _, key := range sceneKeys {
 		if _, found := preSplit[key]; found {
@@ -170,11 +174,41 @@ func TestGenerateTagsSceneCuts(t *testing.T) {
 			expected: map[string]string{"sptenc_scene_detector": "scdet", "sptenc_scene_threshold": "12.5",
 				"sptenc_scene_min_segment_length": "0s"},
 		},
+		{
+			name: "scdet has no helper: its fields are ignored",
+			cuts: SceneCuts{Detector: pipeline.SceneDetectorScdet, Threshold: 10, MinSegmentLength: 5 * time.Second,
+				DetectorVersion: "0.1.0", DetectorModelSHA256: sha256},
+			expected: map[string]string{"sptenc_scene_detector": "scdet", "sptenc_scene_threshold": "10",
+				"sptenc_scene_min_segment_length": "5s"},
+		},
+		{
+			name: "transnetv2, its helper recorded",
+			cuts: SceneCuts{Detector: pipeline.SceneDetectorTransNetV2, Threshold: 0.5, MinSegmentLength: 5 * time.Second,
+				DetectorVersion: "0.1.0", DetectorModelSHA256: sha256},
+			expected: map[string]string{"sptenc_scene_detector": "transnetv2", "sptenc_scene_threshold": "0.5",
+				"sptenc_scene_min_segment_length": "5s", "sptenc_scene_detector_version": "0.1.0",
+				"sptenc_scene_detector_model_sha256": sha256},
+		},
+		{
+			name: "transnetv2 batchsearch winner, a score of 4 decimals",
+			cuts: SceneCuts{Detector: pipeline.SceneDetectorTransNetV2, Threshold: 0.6123, MinSegmentLength: 5 * time.Second,
+				DetectorVersion: "0.2.0", DetectorModelSHA256: sha256},
+			expected: map[string]string{"sptenc_scene_detector": "transnetv2", "sptenc_scene_threshold": "0.6123",
+				"sptenc_scene_min_segment_length": "5s", "sptenc_scene_detector_version": "0.2.0",
+				"sptenc_scene_detector_model_sha256": sha256},
+		},
 	} {
 		tags := tagsOf(t, GenerateTags(vmafChecker, cambi, ffmpeg.HEVCEncoderLibx265, results, summary, ffmpeg.VMAFModelFHD, 2, &tc.cuts))
 		for key, value := range tc.expected {
 			if tags[key] != value {
 				t.Errorf("%s: %s: want %q, got %q", tc.name, key, value, tags[key])
+			}
+		}
+		for _, key := range sceneKeys {
+			if _, expected := tc.expected[key]; !expected {
+				if value, found := tags[key]; found {
+					t.Errorf("%s: %s should be left out, got %q", tc.name, key, value)
+				}
 			}
 		}
 		// the scene tags on top of the others, nothing else changed

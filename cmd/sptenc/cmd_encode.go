@@ -14,6 +14,7 @@ import (
 	"github.com/hekmon/sptenc/ffmpeg"
 	"github.com/hekmon/sptenc/metadata"
 	"github.com/hekmon/sptenc/pipeline"
+	"github.com/hekmon/sptenc/transnetv2"
 
 	"al.essio.dev/pkg/shellescape"
 	"github.com/hekmon/cunits/v3"
@@ -210,6 +211,15 @@ var encodeCommand = &cli.Command{
 			if cmd.String(originalFileFlagName) != "" {
 				return ctx, errors.New("--original-file can not be used when input path is a single file")
 			}
+			// The helper of the detector, if it has one: a file is the only input whose scenes are
+			// detected (see checkSceneDetector)
+			detector, err := sceneDetector(cmd)
+			if err != nil {
+				return ctx, err
+			}
+			if _, err = checkSceneDetector(ctx, detector); err != nil {
+				return ctx, err
+			}
 		} else {
 			// Directory input: need original file for remuxing audio/subs
 			if cmd.String(originalFileFlagName) == "" {
@@ -374,8 +384,13 @@ var encodeCommand = &cli.Command{
 			start := time.Now()
 			scenesConfig := decoderCfg.ToScenesDetectionConfig()
 			scenesConfig.RGBToYUV = sourceRGBToYUV
+			// the helper that detects them, for the tags (checked in Before already)
+			var helper *transnetv2.VersionInfo
+			if helper, err = checkSceneDetector(ctx, detector); err != nil {
+				return
+			}
 			if scenes, err = liveDetectScenes(ctx, detector, inputPath, threshold, totalDuration,
-				cmd.Bool(debugFlagName), scenesConfig); err != nil {
+				videoStream.RFrameRate, cmd.Bool(debugFlagName), scenesConfig); err != nil {
 				return fmt.Errorf("failed to detect scenes: %w", err)
 			}
 			fmt.Fprintf(bypass, "\tDetected %d scenes in %s\n",
@@ -393,8 +408,7 @@ var encodeCommand = &cli.Command{
 				}
 				scenes = filtered
 			}
-			sceneCuts = &metadata.SceneCuts{Detector: detector, Threshold: threshold,
-				MinSegmentLength: cmd.Duration(minSegmentLengthFlagName)}
+			sceneCuts = newSceneCuts(detector, threshold, cmd.Duration(minSegmentLengthFlagName), helper)
 			// The master, written cut into its segments: see createMasterSegments
 			if sourceTotalFrames, err = createMasterSegments(ctx, inputPath, workingDir, scenes,
 				cmd.Bool(debugFlagName), decoderCfg, sourceRGBToYUV); err != nil {
