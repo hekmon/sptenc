@@ -15,6 +15,8 @@ Start with the [README](README.md). This is the "tell me everything" page. The m
 
 ## Input Requirements
 
+**A source whose range or matrix changes mid-stream is not supported.** Scene detection rejects it, before anything is encoded: the master converts the frames after the change, and the final VMAF would refuse the source once every segment is encoded. A colour description appearing after the first frames, as on DVDs, is accepted, and so is a switch between BT.601's two labels (`smpte170m` and `bt470bg`, the same coefficients).
+
 ### Constant Frame Rate (CFR)
 **Variable frame rate (VFR) content is not supported.** sptenc works on a constant frame grid: segments are cut, counted and put back together by frame index, and the merged video is timestamped at the frame rate of the source. A VFR source would come out retimed: a file mixing 24 and 30 fps parts came out with its 30 fps parts slowed down to 24 fps, its video no longer lasting what its audio does. VMAF does not see it (it pairs the frames of both videos by their index), so sptenc rejects VFR sources before encoding anything: at startup when the frame rates the file declares disagree, then from the measured duration of every frame once they are counted, before the master is written (a VFR Matroska file declares the same rates as a constant one). With a pre-split directory, only the frame rates the segments declare are checked.
 
